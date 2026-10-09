@@ -40,7 +40,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -82,7 +82,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -124,7 +124,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -166,7 +166,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -208,7 +208,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -250,7 +250,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -292,7 +292,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -334,7 +334,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -376,7 +376,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -418,7 +418,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -460,7 +460,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -502,7 +502,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -539,8 +539,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -586,8 +586,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -633,8 +633,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -680,8 +680,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -718,8 +718,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -761,8 +761,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -799,8 +799,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -837,8 +837,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -875,8 +875,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -913,8 +913,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -956,8 +956,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -999,8 +999,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1037,8 +1037,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1075,8 +1075,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1156,8 +1156,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1194,8 +1194,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1232,8 +1232,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1270,8 +1270,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1312,8 +1312,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1350,8 +1350,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1389,7 +1389,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Code mod without Harmony."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1426,8 +1426,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1464,8 +1464,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1502,8 +1502,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1540,8 +1540,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1583,8 +1583,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1626,8 +1626,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1664,8 +1664,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1702,8 +1702,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1740,8 +1740,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1778,8 +1778,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1816,8 +1816,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1854,8 +1854,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "works",
+     "note": "Timer shows in levels and stops on game over (Harmony postfix), tested 2026-10-09."
     }
    ]
   },
@@ -1897,8 +1897,8 @@
      ],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1939,8 +1939,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -1977,8 +1977,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2019,8 +2019,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2061,8 +2061,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2094,8 +2094,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2127,8 +2127,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2161,7 +2161,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Code mod without Harmony."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2193,8 +2193,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2231,8 +2231,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2270,7 +2270,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2312,7 +2312,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2354,7 +2354,7 @@
      "harmony": false,
      "native": false,
      "status": "untested",
-     "note": "Content-only mod."
+     "note": "Not tested in the browser yet."
     }
    ]
   },
@@ -2395,8 +2395,8 @@
      "optionalDependencies": [],
      "harmony": true,
      "native": false,
-     "status": "needs-harmony",
-     "note": "Uses Harmony patches, which the browser doesn't support yet."
+     "status": "untested",
+     "note": "Not tested in the browser yet."
     }
    ]
   }

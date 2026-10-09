@@ -56,6 +56,14 @@
 			}
 			#error { color: #ff7b7b; white-space: pre-wrap; max-width: 90vw; }
 			#pick { max-width: 34em; }
+			#modsPanel { width: min(34em, 90vw); text-align: left; }
+			.modsHeader { margin-bottom: 6px; }
+			#modList { max-height: 38vh; overflow-y: auto; border: 1px solid #333; padding: 4px 8px; }
+			.mod { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
+			.mod .name { color: #eee; }
+			.mod .by { color: #888; font-size: 12px; flex: 1; }
+			.mod a { color: #999; font-size: 12px; }
+			#error a { color: #ffb3b3; }
 			#pick p { margin: 0 0 12px; }
 			.hint { color: #999; font-size: 12px; }
 			button.link {
@@ -115,7 +123,13 @@
 					(on Steam for Mac it's next to TowerFall.app), or <button id="dwchoose" class="link">choose it</button>.
 				</p>
 			</div>
-			<label id="options" class="hint" hidden><input type="checkbox" id="fortrise"> Load mods (FortRise)</label>
+			<div id="modsPanel" hidden>
+				<div class="modsHeader">Mods: <span id="modSummary"></span></div>
+				<div id="modList"></div>
+				<div id="modWarning" class="hint"></div>
+				<button id="addMod" class="link">Add a mod zip…</button>
+				<input id="modFile" type="file" accept=".zip,application/zip" multiple hidden>
+			</div>
 			<button id="play" hidden>Play</button>
 			<button id="change" class="link" hidden>Use different game files</button>
 		</div>

@@ -36,5 +36,7 @@ for dirpath, _, names in os.walk(root):
 files.sort(key=lambda f: f["path"])
 json.dump({"version": version, "files": files}, open(os.path.join(root, "manifest.json"), "w"))
 PY
+# The mod catalog (metadata only; mod files always come from GameBanana).
+mkdir -p $WWW/mods && cp mods/catalog.json $WWW/mods/catalog.json
 grep -q TRANSFERRED_CANVAS $FW/dotnet.native.*.js || { echo "canvas transfer patch did not apply" >&2; exit 1; }
 echo "Built: web/bin/Release/net10.0/publish/wwwroot"

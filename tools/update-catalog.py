@@ -133,13 +133,11 @@ def inspect_zip(data):
 
 
 def status_of(m):
+    """Default status before anyone has tested the mod in the browser (mods/overrides.json wins).
+    "works": verified; "untested"; "broken"/"unsupported": not offered on the page."""
     if m["native"]:
         return "unsupported", "Ships native libraries, which can't run in the browser."
-    if m["harmony"]:
-        return "needs-harmony", "Uses Harmony patches, which the browser doesn't support yet."
-    if m["dll"]:
-        return "untested", "Code mod without Harmony."
-    return "untested", "Content-only mod."
+    return "untested", "Not tested in the browser yet."
 
 
 def main():

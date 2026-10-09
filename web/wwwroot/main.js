@@ -3,6 +3,7 @@
 //  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
 
 import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, locateDarkWorld, locateGame, syncFortRise } from "./gamefiles.js";
+import * as Mods from "./mods.js";
 
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
@@ -69,25 +70,105 @@ $("mute").addEventListener("click", () => {
 });
 applyMute();
 
-// FortRise (mod loader) on or off, remembered per browser. ?fortrise / ?vanilla override it.
-const FORTRISE_KEY = "towerfall.fortrise";
-let useFortRise = (() => {
+// --- Mods (see mods.js) ---------------------------------------------------------------------
+
+let catalog = [];
+let modState = Mods.loadState();
+
+function escapeHtml(text) {
+	return String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// Catalog mods that will be installed (enabled ones and their dependencies).
+function enabledCatalogMods() {
+	return Mods.withDependencies(catalog, Mods.enabledNames(modState));
+}
+
+// FortRise runs when any mod is enabled; ?fortrise / ?vanilla force it on or off.
+function useFortRise() {
 	const params = new URLSearchParams(location.search);
-	if (params.has("fortrise")) return true;
 	if (params.has("vanilla")) return false;
-	try {
-		return localStorage.getItem(FORTRISE_KEY) === "1";
-	} catch {
-		return false;
+	if (params.has("fortrise")) return true;
+	return enabledCatalogMods().length > 0 || modState.custom.some((c) => c.enabled);
+}
+
+async function renderMods() {
+	const list = $("modList");
+	const names = new Set(Mods.enabledNames(modState));
+	const needed = new Set(enabledCatalogMods().map((m) => m.name));
+	const rows = Mods.offered(catalog).map((m) => {
+		const viaDependency = needed.has(m.name) && !names.has(m.name);
+		return `<label class="mod" title="${escapeHtml(m.note)}">
+			<input type="checkbox" data-mod="${escapeHtml(m.name)}" ${names.has(m.name) || viaDependency ? "checked" : ""} ${viaDependency ? "disabled" : ""}>
+			<span class="name">${escapeHtml(m.displayName)}</span>
+			<span class="by">by ${escapeHtml(m.entry.author)}${m.status === "untested" ? " · untested" : ""}${viaDependency ? " · needed by another mod" : ""}</span>
+			<a href="${escapeHtml(m.entry.page)}" target="_blank" rel="noopener">page</a>
+		</label>`;
+	});
+	for (const c of modState.custom) {
+		rows.push(`<label class="mod">
+			<input type="checkbox" data-custom="${c.sha256}" ${c.enabled ? "checked" : ""}>
+			<span class="name">${escapeHtml(c.file)}</span>
+			<span class="by">your zip</span>
+			<button class="link" data-remove="${c.sha256}">remove</button>
+		</label>`);
 	}
-})();
-$("fortrise").checked = useFortRise;
-$("fortrise").addEventListener("change", () => {
-	useFortRise = $("fortrise").checked;
-	try {
-		localStorage.setItem(FORTRISE_KEY, useFortRise ? "1" : "0");
-	} catch {}
+	list.innerHTML = rows.join("") || `<div class="hint">No mods available yet.</div>`;
+
+	const files = [
+		...enabledCatalogMods().map((m) => ({ name: m.name, version: m.version, sha256: m.entry.file.sha256 })),
+		...modState.custom.filter((c) => c.enabled).map((c) => ({ name: c.file, sha256: c.sha256 })),
+	];
+	$("modSummary").textContent = files.length
+		? `${files.length} on · mod set ${await Mods.fingerprint(files)}`
+		: "off (plain TowerFall)";
+	const missing = Mods.missingDependencies(catalog, enabledCatalogMods());
+	$("modWarning").textContent = missing.length ? `Also needs mods that aren't available here: ${missing.join(", ")}.` : "";
+}
+
+$("modList").addEventListener("change", (e) => {
+	const box = e.target;
+	if (box.dataset.mod) {
+		const set = new Set(modState.enabled);
+		box.checked ? set.add(box.dataset.mod) : set.delete(box.dataset.mod);
+		modState.enabled = [...set];
+	} else if (box.dataset.custom) {
+		const c = modState.custom.find((x) => x.sha256 === box.dataset.custom);
+		if (c) c.enabled = box.checked;
+	}
+	Mods.saveState(modState);
+	renderMods();
 });
+$("modList").addEventListener("click", (e) => {
+	const sha = e.target.dataset?.remove;
+	if (!sha) return;
+	e.preventDefault();
+	modState.custom = modState.custom.filter((c) => c.sha256 !== sha);
+	Mods.saveState(modState);
+	renderMods();
+});
+$("addMod").addEventListener("click", () => $("modFile").click());
+$("modFile").addEventListener("change", async () => {
+	for (const file of $("modFile").files) {
+		const added = await Mods.addZip(file);
+		// A zip matching a catalog file (e.g. after a failed download) just fills that in.
+		if (!catalog.some((m) => m.entry.file.sha256 === added.sha256) && !modState.custom.some((c) => c.sha256 === added.sha256)) {
+			modState.custom.push({ ...added, enabled: true });
+		}
+	}
+	$("modFile").value = "";
+	Mods.saveState(modState);
+	renderMods();
+});
+
+// Downloads what's needed and tells the host which mod zips to install.
+async function prepareMods() {
+	status("Getting mods…");
+	$("bar").hidden = false;
+	const shas = await Mods.ensureFiles(enabledCatalogMods(), (done, total) => progress(done / total));
+	shas.push(...modState.custom.filter((c) => c.enabled).map((c) => c.sha256));
+	await Mods.writeEnabled(shas);
+}
 
 // "served-name|assembly-name" for each of the app's assemblies, for Cecil (see BrowserHost.MountAssemblies).
 function assemblyFiles() {
@@ -256,22 +337,40 @@ async function main() {
 	const exports = await startDotnet();
 
 	// Audio can only start after a user gesture, so wait for a click before booting the game.
-	status("Ready");
+	catalog = await Mods.loadCatalog();
+	await renderMods();
 	const play = $("play");
-	play.hidden = false;
-	$("options").hidden = false;
-	// ?autoplay skips the click (for automated tests); audio then stays suspended.
-	if (!new URLSearchParams(location.search).has("autoplay")) {
-		await new Promise((resolve) => play.addEventListener("click", resolve, { once: true }));
+	const noIntro = new URLSearchParams(location.search).has("nointro");
+	let autoplay = new URLSearchParams(location.search).has("autoplay");
+	for (;;) {
+		status("Ready");
+		$("bar").hidden = true;
+		detail("");
+		play.hidden = false;
+		$("modsPanel").hidden = false;
+		// ?autoplay skips the click (for automated tests); audio then stays suspended.
+		if (!autoplay) {
+			await new Promise((resolve) => play.addEventListener("click", resolve, { once: true }));
+		}
+		autoplay = false;
+		play.hidden = true;
+		$("modsPanel").hidden = true;
+		$("error").textContent = "";
+		if (!useFortRise()) break;
+		try {
+			await prepareMods();
+			break;
+		} catch (e) {
+			if (!(e instanceof Mods.ModDownloadError)) throw e;
+			$("bar").hidden = true;
+			$("error").innerHTML = `${escapeHtml(e.message)} Download it from <a href="${escapeHtml(e.mod.entry.page)}" target="_blank" rel="noopener">its GameBanana page</a> and add it with "Add a mod zip", then press Play again.`;
+		}
 	}
-	play.hidden = true;
 	$("change").hidden = true;
 	$("dw").hidden = true;
-	$("options").hidden = true;
 	stopDarkWorldOffer();
 
-	const noIntro = new URLSearchParams(location.search).has("nointro");
-	if (useFortRise) {
+	if (useFortRise()) {
 		status("Getting FortRise…");
 		$("bar").hidden = false;
 		const version = await syncFortRise(showProgress);

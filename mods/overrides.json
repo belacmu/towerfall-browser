@@ -1,0 +1,6 @@
+{
+	"Ralidon.SpeedrunTimer": {
+		"status": "works",
+		"note": "Timer shows in levels and stops on game over (Harmony postfix), tested 2026-10-09."
+	}
+}
