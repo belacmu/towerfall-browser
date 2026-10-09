@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# Builds vendor/statics/FAudio.a from FAudio 26.10 + patches/FAudio.patch, matching the
+# Builds vendor/statics/FAudio.a from FAudio + patches/FAudio.patch, matching the
 # prebuilt lib (SDL3 platform, Emscripten 3.1.56) but compiled with -pthread.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+FAUDIO_VERSION=26.10
+want="$FAUDIO_VERSION $(shasum -a 256 patches/FAudio.patch | cut -c1-16)"
+if [ "${1:-}" = "--if-needed" ] && [ -f vendor/statics/FAudio.a ] && [ "$(cat vendor/FAudio/.stamp 2>/dev/null)" = "$want" ]; then
+	exit 0
+fi
 source tools/emenv.sh
 
-if [ ! -d vendor/FAudio ]; then
-	git clone --depth 1 -b 26.10 https://github.com/FNA-XNA/FAudio vendor/FAudio
+if [ "$(cat vendor/FAudio/.stamp 2>/dev/null)" != "$want" ]; then
+	rm -rf vendor/FAudio
+	git clone --quiet --depth 1 -b $FAUDIO_VERSION https://github.com/FNA-XNA/FAudio vendor/FAudio
 	patch -d vendor/FAudio -p1 --forward < patches/FAudio.patch
+	echo "$want" > vendor/FAudio/.stamp
 fi
 if [ ! -d vendor/SDL3/include ]; then
 	git clone --depth 1 --filter=blob:none --sparse -b release-3.4.4 https://github.com/libsdl-org/SDL vendor/SDL3

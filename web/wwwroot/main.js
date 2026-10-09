@@ -219,7 +219,10 @@ async function main() {
 	status("Ready");
 	const play = $("play");
 	play.hidden = false;
-	await new Promise((resolve) => play.addEventListener("click", resolve, { once: true }));
+	// ?autoplay skips the click (for automated tests); audio then stays suspended.
+	if (!new URLSearchParams(location.search).has("autoplay")) {
+		await new Promise((resolve) => play.addEventListener("click", resolve, { once: true }));
+	}
 	play.hidden = true;
 	$("change").hidden = true;
 	$("dw").hidden = true;

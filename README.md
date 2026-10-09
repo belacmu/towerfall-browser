@@ -61,7 +61,7 @@ tools/stage-gamefiles.sh --clear  # back to public mode
 
 The published site is `web/bin/Release/net10.0/publish/wwwroot`.
 
-URL options: `?nointro` skips the intro, `?mute` / `?unmute`, `?uncapped` ticks on every display frame.
+URL options: `?nointro` skips the intro, `?mute` / `?unmute`, `?uncapped` ticks on every display frame, `?autoplay` starts without the Play click (tests).
 
 Keyboard: arrows move/aim, C jump/confirm, X shoot/cancel, Shift dodge/catch (rebindable in Options).
 
