@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Mono.Cecil;
@@ -20,7 +21,7 @@ public static class FortRisePatcher
 	public const string PatchFile = "TowerFall.Patch.dll";
 
 	// Bump when BrowserFixups changes, so cached patches are redone.
-	private const int FixupsVersion = 3;
+	private const int FixupsVersion = 4;
 
 	// fortriseDir holds TowerFall.FortRise.mm.dll plus the assemblies TowerFall.exe references
 	// (FNA.dll, Steamworks.NET.dll); MonoMod resolves dependencies from the working directory.
@@ -109,10 +110,26 @@ public static class FortRisePatcher
 				}
 			}
 		}
+		// FortRise's own updater would show "update available" for FortRise and download newer mod
+		// versions behind the page's back; the site pins both (mods/catalog.json), so turn it off.
+		int updaters = 0;
+		TypeDefinition tfGame = module.GetType("TowerFall.TFGame");
+		var completed = module.ImportReference(typeof(System.Threading.Tasks.Task).GetProperty("CompletedTask").GetMethod);
+		foreach (MethodDefinition method in tfGame?.Methods.Where(m => m.Name is "CheckUpdate" or "CheckModUpdate" && m.HasBody && m.Parameters.Count == 0) ?? Enumerable.Empty<MethodDefinition>())
+		{
+			method.Body.Instructions.Clear();
+			method.Body.ExceptionHandlers.Clear();
+			method.Body.Variables.Clear();
+			ILProcessor il = method.Body.GetILProcessor();
+			il.Emit(OpCodes.Call, completed);
+			il.Emit(OpCodes.Ret);
+			updaters++;
+		}
+
 		module.Write(patchFile);
 		// MonoMod's symbols no longer match the rewritten module.
 		File.Delete(Path.ChangeExtension(patchFile, ".pdb"));
-		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host.", platforms, locations);
+		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {Updaters} update checks disabled.", platforms, locations, updaters);
 	}
 
 	private static string Sha256(string path)

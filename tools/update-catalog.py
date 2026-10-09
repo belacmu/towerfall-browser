@@ -8,8 +8,12 @@ may host a copy), and a download URL the page can fetch cross-origin. GameBanana
 redirect through a host without CORS headers, so the final mirror URL is resolved here; the page
 falls back to asking the player for the zip if a mirror has moved.
 
-mods/overrides.json (hand-written) can set "status"/"note" per mod name, e.g. after testing.
-Downloads are cached in vendor/mod-cache/. Usage: tools/update-catalog.py [--limit N]
+mods/overrides.json holds test results per mod name: "status", "note" and the "version" tested
+(written by tools/smoke-mods.mjs, or by hand). A result only applies to the version it was for;
+once a mod updates on GameBanana it's "untested" again until retested.
+Downloads are cached in vendor/mod-cache/.
+Usage: tools/update-catalog.py [--limit N]
+       tools/update-catalog.py --offline   (re-apply mods/overrides.json to the existing catalog)
 """
 import hashlib
 import io
@@ -140,9 +144,36 @@ def status_of(m):
     return "untested", "Not tested in the browser yet."
 
 
+def apply_status(m, overrides):
+    status, note = status_of(m)
+    o = overrides.get(m["name"])
+    if o and status != "unsupported":
+        if o.get("version") in (None, m["version"]):
+            status, note = o.get("status", status), o.get("note", note)
+        else:
+            note = f"Updated since it was last tested ({o['version']}: {o.get('status')})."
+    m["status"], m["note"] = status, note
+
+
+def write(entries):
+    entries.sort(key=lambda e: (e["category"] or "", (e["title"] or "").lower()))
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT, "w") as f:
+        json.dump({"source": "gamebanana", "game": GAME_ID, "mods": entries}, f, indent=1)
+        f.write("\n")
+
+
 def main():
     limit = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else None
     overrides = json.load(open(OVERRIDES)) if os.path.exists(OVERRIDES) else {}
+    if "--offline" in sys.argv:
+        entries = json.load(open(OUT))["mods"]
+        for e in entries:
+            for m in e["mods"]:
+                apply_status(m, overrides)
+        write(entries)
+        print(f"Re-applied {OVERRIDES} to {OUT}")
+        return
     entries = []
     records = list_mods()[:limit]
     for i, rec in enumerate(records, 1):
@@ -181,21 +212,14 @@ def main():
                 "mods": [],
             }
             for m in mods:
-                status, note = status_of(m)
-                o = overrides.get(m["name"], {})
-                m["status"] = o.get("status", status)
-                m["note"] = o.get("note", note)
+                apply_status(m, overrides)
                 entry["mods"].append(m)
             entries.append(entry)
             print(f"[{i}/{len(records)}] {rec['_sName']}: " + ", ".join(f"{m['name']} {m['version']} ({m['status']})" for m in mods))
         except Exception as e:
             print(f"[{i}/{len(records)}] {rec.get('_sName')}: error {e}", file=sys.stderr)
         time.sleep(0.3)  # be polite to GameBanana
-    entries.sort(key=lambda e: (e["category"] or "", (e["title"] or "").lower()))
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w") as f:
-        json.dump({"source": "gamebanana", "game": GAME_ID, "mods": entries}, f, indent=1)
-        f.write("\n")
+    write(entries)
     print(f"Wrote {OUT}: {len(entries)} GameBanana entries, {sum(len(e['mods']) for e in entries)} mods")
 
 

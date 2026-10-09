@@ -1,0 +1,64 @@
+# Daily upkeep:
+# - refreshes mods/catalog.json from GameBanana (new mods and updates show up as "untested" until
+#   tools/smoke-mods.mjs is run on a machine with the game), commits it and redeploys;
+# - opens an issue when FortRise has a newer release than the one pinned in tools/fetch-fortrise.sh.
+name: Upkeep
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache downloaded mod zips
+        uses: actions/cache@v4
+        with:
+          path: vendor/mod-cache
+          key: mod-cache-${{ github.run_id }}
+          restore-keys: mod-cache-
+
+      - name: Refresh the catalog
+        run: python3 tools/update-catalog.py
+
+      - name: Commit and redeploy if it changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet mods/catalog.json; then
+            echo "Catalog unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh mod catalog from GameBanana" mods/catalog.json
+          git push
+          # Pushes made with the workflow token don't trigger other workflows; dispatches do.
+          gh workflow run deploy.yml --ref main
+
+  fortrise:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for a newer FortRise
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(grep -oP '^FORTRISE_VERSION=\K.*' tools/fetch-fortrise.sh)
+          latest=$(gh api repos/FortRise/FortRise/releases/latest --jq .tag_name)
+          echo "Pinned $pinned, latest $latest"
+          [ "$pinned" = "$latest" ] && exit 0
+          title="FortRise $latest is out (pinned: $pinned)"
+          if gh issue list --state open --search "in:title \"FortRise $latest is out\"" --json number --jq length | grep -q '^0$'; then
+            gh issue create --title "$title" --body "Update FORTRISE_VERSION and FORTRISE_SHA256 in tools/fetch-fortrise.sh, rebuild, and rerun tools/smoke-mods.mjs (FortRise changes can affect mods). Release: https://github.com/FortRise/FortRise/releases/tag/$latest"
+          fi
