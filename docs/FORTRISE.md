@@ -37,22 +37,35 @@ Sources: github.com/FortRise/FortRise (MIT), the installed 5.3.5 build, and its 
 
 ## Milestones
 
-1. **FNA 26.10.** Check native entry points against the prebuilt Emscripten libs (26.04) and rebase `patches/FNA.patch`.
-2. **FortRise boots with no third-party mods.** Fetch a pinned FortRise release at build time and ship its
-   managed DLLs. Patch in the host, load, start, tick. Leave out FortRise.ImGui. Add a "Use FortRise" toggle.
-3. **Harmony works.** Switch to the patched runtime and the MonoMod fork. Prove it with
-   FortRise.WorkshopFixes, then Wider Set and Three Team Mode.
-4. **Mod catalog.** `mods/catalog.json` lists each mod's name, version, source, sha256, license and browser
-   status. CI bundles redistributable mod zips into the site (same origin, so no CORS); for the rest,
-   players drop the zip themselves. The page lists mods with toggles, and the enabled set (names,
-   versions, hashes) is what online play compares.
-5. **Staying current.** A scheduled workflow checks FortRise releases and the catalog sources, then opens
-   PRs that bump the pins. CI builds and smoke-tests what it can without game files.
+1. **FNA 26.10.** Done. No new native entry points compared with the prebuilt Emscripten libs.
+2. **FortRise boots.** Done. The host runs FortRise's own `TryPatch` in the browser (about 20 s,
+   cached), then browser fixups (`FortRisePatcher.BrowserFixups`):
+   - SDL platform checks are answered "Linux" for the game only;
+   - `Assembly.Location` for bundled assemblies is pointed at `/bin`;
+   - FortRise's self-updater is disabled.
+
+   The host then repeats the patched `TFGame.Main` up to `Run()` (`FortRiseLauncher`).
+   FortRise.ImGui is left out because it needs native cimgui.
+3. **Harmony works.** Done.
+   - `patches/MonoMod.patch` carries r58Playz's WebAssembly detours onto upstream MonoMod 69fdc9de,
+     built by `tools/build-monomod.sh`.
+   - It runs on the patched runtime pack plus the native glue from `tools/fetch-runtime.sh`.
+   - Verified with Speedrun Timer: its postfix on `QuestGameOver`'s constructor fires.
+4. **Mod catalog.** Done; see `docs/MODS.md`.
+   - `tools/update-catalog.py` builds the catalog and `tools/smoke-mods.mjs` tests mods.
+   - The page lists working mods, downloads them from GameBanana, and `ModInstaller` installs them.
+5. **Staying current.** Partly done.
+   - `.github/workflows/catalog.yml` refreshes the catalog daily and opens an issue for new
+     FortRise releases.
+   - Bumping FortRise is still a manual edit to `tools/fetch-fortrise.sh`, followed by a rerun of
+     the smoke test.
 
 ## Open questions and risks
 
-- Redistribution: the patched runtime and C glue come from repos with unclear licenses
-  (FNA-WASM-Build has none). The forks themselves are MIT, so building them ourselves is the clean path.
+- Redistribution: the patched runtime is a build of r58playz/dotnet-runtime (MIT), but the C glue
+  `liba.o` comes from FNA-WASM-Build, which has no license. Replacing it with our own source needs
+  Mono's internal headers from the runtime fork (`interp-internals.h`, `class-internals.h`); the
+  pack only ships the public ones.
 - In-browser MonoMod patching costs time and memory (cached after the first run).
 - Generic methods can only take the "overwrite" detour strategy, which fails on bodies shorter than
   the trampoline. Watch for Harmony patches on tiny generic methods.
