@@ -1,0 +1,2404 @@
+{
+ "source": "gamebanana",
+ "game": 18654,
+ "mods": [
+  {
+   "gamebanana": 667614,
+   "title": "Among Us: Red & Blue",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/667614",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d660cda7abc.jpg",
+   "updated": 1775657242,
+   "redistributable": false,
+   "file": {
+    "name": "amongusredblue.zip",
+    "size": 24278,
+    "md5": "e19452ccc1969b1a19552c6e65f9e114",
+    "sha256": "24991eb7ecc0fabbac404d1d2eadc63db773cd19ccd3cf404a4a7bd8a76532a9",
+    "download": "https://gamebanana.com/dl/1670781",
+    "mirror": "https://filecache46.gamebanana.com/mods/amongusredblue.zip"
+   },
+   "mods": [
+    {
+     "name": "AmongUsRedBlue",
+     "version": "1.0.0",
+     "displayName": "AmongUsRedBlue",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 667608,
+   "title": "Crimson Puppet & Spooky Puppet",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/667608",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d65bc6b3a68.jpg",
+   "updated": 1775656108,
+   "redistributable": false,
+   "file": {
+    "name": "spookyan.zip",
+    "size": 53933,
+    "md5": "28e55078fd945eb0222c7ebc6bb19354",
+    "sha256": "a5cf0833621848f8cde9a21b969c0018f3f2527941c4876c537c3f713cfdde2d",
+    "download": "https://gamebanana.com/dl/1670766",
+    "mirror": "https://filecache35.gamebanana.com/mods/spookyan.zip"
+   },
+   "mods": [
+    {
+     "name": "Spookyan",
+     "version": "1.0.0",
+     "displayName": "Spookyan",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 639657,
+   "title": "Hitbox Archer",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/639657",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_694c2d2a61699.jpg",
+   "updated": 1766599987,
+   "redistributable": false,
+   "file": {
+    "name": "hitbox_d8eb8.zip",
+    "size": 11007,
+    "md5": "bd309f0f6321e8749e78c5a7c3e60dcd",
+    "sha256": "996556ac80ea31fb40bf74705dbe3b4e2a158b6f52133f14a31fa2996f37420d",
+    "download": "https://gamebanana.com/dl/1581208",
+    "mirror": "https://filecache37.gamebanana.com/mods/hitbox_d8eb8.zip"
+   },
+   "mods": [
+    {
+     "name": "Hitbox",
+     "version": "1.0.0",
+     "displayName": "Hitbox",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.1"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.1"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 668040,
+   "title": "King Louis Concent",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/668040",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d8affe22e91.jpg",
+   "updated": 1775808655,
+   "redistributable": false,
+   "file": {
+    "name": "ddrrobot.zip",
+    "size": 35703,
+    "md5": "a1f6e4c24372caa79a977d1d45a0d751",
+    "sha256": "f13a6aefa8760bd8645431196e4baece43a48c603d9845664dba142d2f478ad3",
+    "download": "https://gamebanana.com/dl/1672267",
+    "mirror": "https://filecache20.gamebanana.com/mods/ddrrobot.zip"
+   },
+   "mods": [
+    {
+     "name": "DDRROBOT",
+     "version": "1.0.0",
+     "displayName": "DDRROBOT",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 667613,
+   "title": "King of TowerFall!",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/667613",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d65fb63af29.jpg",
+   "updated": 1775656967,
+   "redistributable": false,
+   "file": {
+    "name": "king_b5883.zip",
+    "size": 54714,
+    "md5": "0fcaca4a5e3a9eae4f37f766ef26a3f2",
+    "sha256": "79a626f463b059cd34d522946cceb1803daf31de597f07b5f6129e5e33cfebea",
+    "download": "https://gamebanana.com/dl/1670779",
+    "mirror": "https://filecache40.gamebanana.com/mods/king_b5883.zip"
+   },
+   "mods": [
+    {
+     "name": "King",
+     "version": "1.0.0",
+     "displayName": "King",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 619431,
+   "title": "Madeline & Badeline",
+   "author": "Terria",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/619431",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_68c2e44263d0e.jpg",
+   "updated": 1790873270,
+   "redistributable": false,
+   "file": {
+    "name": "celeste_d14a1.zip",
+    "size": 8713920,
+    "md5": "378349dcc6f8cf567417aec446192c3c",
+    "sha256": "6db1427d7c9cf6ab393cddabbe2d338bb727984336b06ec4007e218f483d695a",
+    "download": "https://gamebanana.com/dl/1833493",
+    "mirror": "https://filecache31.gamebanana.com/mods/celeste_d14a1.zip"
+   },
+   "mods": [
+    {
+     "name": "Celeste",
+     "version": "1.2.0",
+     "displayName": "Celeste",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.3.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 667611,
+   "title": "Osiria Archers",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/667611",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d65eb9cc7d8.jpg",
+   "updated": 1776004395,
+   "redistributable": false,
+   "file": {
+    "name": "osiria_e39d8.zip",
+    "size": 86079,
+    "md5": "dff1643dab710b0a81e9d81ba5104bd2",
+    "sha256": "cf4140b30114f73a9e0ee5cb7aa28e8b6fabf1ec9171038fbf8c5325edd3d22c",
+    "download": "https://gamebanana.com/dl/1674771",
+    "mirror": "https://filecache36.gamebanana.com/mods/osiria_e39d8.zip"
+   },
+   "mods": [
+    {
+     "name": "Osiria",
+     "version": "1.0.0",
+     "displayName": "Osiria",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 667609,
+   "title": "Perplexing Puppet & Rainbow Puppet",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/667609",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d65dcdbfe55.jpg",
+   "updated": 1775656496,
+   "redistributable": false,
+   "file": {
+    "name": "perplexing.zip",
+    "size": 104764,
+    "md5": "7841fd5ce21d0c007e2861c6d17ff5d4",
+    "sha256": "9e45e743020bd4b474415cd92ce0d91ac42ffc7578527a168507e9e9ddf5ad6e",
+    "download": "https://gamebanana.com/dl/1670772",
+    "mirror": "https://filecache36.gamebanana.com/mods/perplexing.zip"
+   },
+   "mods": [
+    {
+     "name": "Perplexing",
+     "version": "1.0.0",
+     "displayName": "Perplexing",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 667607,
+   "title": "Shadow Archer",
+   "author": "DantinouTheRealOne",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/667607",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_69d658060ecc8.jpg",
+   "updated": 1775655197,
+   "redistributable": false,
+   "file": {
+    "name": "shadow_dc922.zip",
+    "size": 24657,
+    "md5": "677cb9d3c176d832055d0ba139920051",
+    "sha256": "ae51efe1b661e260688d738b069d249083febccd61307f9b45609f33222b1b1a",
+    "download": "https://gamebanana.com/dl/1670760",
+    "mirror": "https://filecache20.gamebanana.com/mods/shadow_dc922.zip"
+   },
+   "mods": [
+    {
+     "name": "Shadow",
+     "version": "1.0.0",
+     "displayName": "Shadow",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 638281,
+   "title": "Skeleton Archer",
+   "author": "Terria",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/638281",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_693666116afb9.jpg",
+   "updated": 1765172978,
+   "redistributable": false,
+   "file": {
+    "name": "skeleton_980ed.zip",
+    "size": 3399148,
+    "md5": "a03e95283e6fbf63d5e4f744dd96c3f2",
+    "sha256": "104e7000e5a0c1a84f361611ef26ede7c158e31620d93eb995f852140d2a91fb",
+    "download": "https://gamebanana.com/dl/1576744",
+    "mirror": "https://filecache38.gamebanana.com/mods/skeleton_980ed.zip"
+   },
+   "mods": [
+    {
+     "name": "AllSeeing.Skeleton",
+     "version": "1.0.0",
+     "displayName": "AllSeeing.Skeleton",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.0"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 619424,
+   "title": "Training Dummy",
+   "author": "Terria",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/619424",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_68c2df8ce7aba.jpg",
+   "updated": 1757603682,
+   "redistributable": false,
+   "file": {
+    "name": "thevortexdummy_78140.zip",
+    "size": 296559,
+    "md5": "66699f8b88c16bdd6ce5fec4eee87c75",
+    "sha256": "7d15980e089695679b8a62742b8e391dae885e166e91733b9dae4c7de0599971",
+    "download": "https://gamebanana.com/dl/1515878",
+    "mirror": "https://filecache20.gamebanana.com/mods/thevortexdummy_78140.zip"
+   },
+   "mods": [
+    {
+     "name": "Dummy",
+     "version": "1.0.0",
+     "displayName": "Dummy",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.1.0"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.1.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 715767,
+   "title": "Yuu !",
+   "author": "liliovali",
+   "category": "Archer",
+   "page": "https://gamebanana.com/mods/715767",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6aa26fa050b2c.jpg",
+   "updated": 1789030597,
+   "redistributable": false,
+   "file": {
+    "name": "yuutfarcher_9997b.zip",
+    "size": 225618,
+    "md5": "7a2b9db79d65004313921e2442aa0970",
+    "sha256": "4e937967909805b05c9ba761b855d01257dc88fb48cf9d1af13d53ec763da801",
+    "download": "https://gamebanana.com/dl/1812533",
+    "mirror": "https://filecache54.gamebanana.com/mods/yuutfarcher_9997b.zip"
+   },
+   "mods": [
+    {
+     "name": "Yuu",
+     "version": "1.1.0",
+     "displayName": "Yuu",
+     "folder": "YuuTFArcher",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0-beta.3"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.0.0-beta.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713349,
+   "title": "Accelerate",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713349",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99da9ee06dd.jpg",
+   "updated": 1788893345,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1accelerate.zip",
+    "size": 16439,
+    "md5": "d9d3f2b97d18e4c36bb37e701e911cc4",
+    "sha256": "f7f77c5c43c5d014ff668e800ddf7c4367f89dedcddf8ea1f9bffd5b9d3760a1",
+    "download": "https://gamebanana.com/dl/1806241",
+    "mirror": "https://filecache38.gamebanana.com/mods/ebe1accelerate.zip"
+   },
+   "mods": [
+    {
+     "name": "Accelerate",
+     "version": "1.1.0",
+     "displayName": "Accelerate",
+     "folder": "",
+     "dll": "TFModFortRiseAccelerate.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 589901,
+   "title": "Additional Variants",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/589901",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6807598b8b300.jpg",
+   "updated": 1753892572,
+   "redistributable": false,
+   "file": {
+    "name": "teuriaadditionalvariants-231.zip",
+    "size": 54846,
+    "md5": "c2ec25df3d809573b4c6b088c6edb073",
+    "sha256": "8330f5aed78e4932c32b0d37a56ce9254b535d4af7f97ae5e9242a4b15357cb6",
+    "download": "https://gamebanana.com/dl/1487765",
+    "mirror": "https://filecache44.gamebanana.com/mods/teuriaadditionalvariants-231.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.AdditionalVariants",
+     "version": "2.3.1",
+     "displayName": "Additional Variants",
+     "folder": "",
+     "dll": "AdditionalVariants.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0-rc.6"
+      },
+      {
+       "name": "Teuria.Ascencore",
+       "version": "1.0.0"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "TF.EX",
+       "version": "0.9.5"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713342,
+   "title": "AIJimmy",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713342",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d5badf5c4.jpg",
+   "updated": 1788893389,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1jimmy.zip",
+    "size": 45876,
+    "md5": "160b946723e5f24a5b6c9cb783f325d7",
+    "sha256": "50193c550f94d5604ee3bb2458aef7721361deec7cfe90459d9ddeb83d398049",
+    "download": "https://gamebanana.com/dl/1806227",
+    "mirror": "https://filecache54.gamebanana.com/mods/ebe1jimmy.zip"
+   },
+   "mods": [
+    {
+     "name": "AIJimmy",
+     "version": "1.1.0",
+     "displayName": "AIJimmy",
+     "folder": "",
+     "dll": "TFModFortRiseAiJimmy.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      },
+      {
+       "name": "LoaderAI",
+       "version": "1.1.0"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Teuria.WiderSet",
+       "version": "0.9.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713344,
+   "title": "AINova",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713344",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d6177ba8f.jpg",
+   "updated": 1788893374,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1nova.zip",
+    "size": 30977,
+    "md5": "0069f3158d1a777c4e2bdbd9c41d790a",
+    "sha256": "d1b92fe6394e8932985840c529b013731130c5a62535c6411daa423b5a337049",
+    "download": "https://gamebanana.com/dl/1806229",
+    "mirror": "https://filecache39.gamebanana.com/mods/ebe1nova.zip"
+   },
+   "mods": [
+    {
+     "name": "AINova",
+     "version": "1.1.0",
+     "displayName": "AINova",
+     "folder": "",
+     "dll": "TFModFortRiseAiNova.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      },
+      {
+       "name": "LoaderAI",
+       "version": "1.1.0"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Teuria.WiderSet",
+       "version": "0.9.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713346,
+   "title": "Arcade",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713346",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d6bbd24b9.jpg",
+   "updated": 1788893359,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1arcade.zip",
+    "size": 839712,
+    "md5": "7a0a89d6e5443529a8d16da6495cd274",
+    "sha256": "b49c2cc1d9b6dd2d827126bace8197092219c2bbaba9f1a9d02087a6172cac2a",
+    "download": "https://gamebanana.com/dl/1806231",
+    "mirror": "https://filecache47.gamebanana.com/mods/ebe1arcade.zip"
+   },
+   "mods": [
+    {
+     "name": "Arcade",
+     "version": "1.1.0",
+     "displayName": "Arcade",
+     "folder": "",
+     "dll": "TFModFortRiseArcade.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713341,
+   "title": "Archer",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713341",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d555567b8.jpg",
+   "updated": 1788893398,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1archer.zip",
+    "size": 2239863,
+    "md5": "e5daf0a2f58bd88a55ea297925626abf",
+    "sha256": "56ef3b97adf97a981d74806c2c52076ed849aa19a4043d928dd34ef5f9a75994",
+    "download": "https://gamebanana.com/dl/1806226",
+    "mirror": "https://filecache52.gamebanana.com/mods/ebe1archer.zip"
+   },
+   "mods": [
+    {
+     "name": "Archer",
+     "version": "1.1.0",
+     "displayName": "Archer",
+     "folder": "",
+     "dll": "TFModFortRiseArcher.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Power",
+       "version": "1.1.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713328,
+   "title": "ArrowBomb",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713328",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d279934af.jpg",
+   "updated": 1788893487,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1arrowbomb.zip",
+    "size": 26295,
+    "md5": "f74f7bb6ae0183aeb03b0aa89cee5f21",
+    "sha256": "84b3cae5fe9aaf715a88c3ae45e275764c5b5ea06d30bef11c1eec9b5588b2e0",
+    "download": "https://gamebanana.com/dl/1806206",
+    "mirror": "https://filecache31.gamebanana.com/mods/ebe1arrowbomb.zip"
+   },
+   "mods": [
+    {
+     "name": "ArrowBomb",
+     "version": "1.1.0",
+     "displayName": "ArrowBomb",
+     "folder": "",
+     "dll": "TFModFortRisePickupArrowBomb.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713325,
+   "title": "Arrows",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713325",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d1e0d0ea9.jpg",
+   "updated": 1788893500,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1arrows.zip",
+    "size": 29635,
+    "md5": "6f9ea90343190800714383fb86121f04",
+    "sha256": "fb74db1b2a6562cbe381f74146019f76fcec64c4fb10fc8121f8cb4e2a0c7716",
+    "download": "https://gamebanana.com/dl/1806202",
+    "mirror": "https://filecache42.gamebanana.com/mods/ebe1arrows.zip"
+   },
+   "mods": [
+    {
+     "name": "Arrows",
+     "version": "1.1.0",
+     "displayName": "Arrows",
+     "folder": "",
+     "dll": "TFModFortRiseArrows.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 610579,
+   "title": "Ascencore",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/610579",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_688adaf7890a5.jpg",
+   "updated": 1753930567,
+   "redistributable": false,
+   "file": {
+    "name": "teuriaascencore-100.zip",
+    "size": 14727,
+    "md5": "3fb9b793218331c36d28224cac5f5d2b",
+    "sha256": "fbc56a5d8d571bd25ae233de8c678930f66c97c463bd8061a64a668667aaaa0a",
+    "download": "https://gamebanana.com/dl/1488172",
+    "mirror": "https://filecache45.gamebanana.com/mods/teuriaascencore-100.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.Ascencore",
+     "version": "1.0.0",
+     "displayName": "Ascencore",
+     "folder": "",
+     "dll": "Ascencore.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0-beta.7"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 607280,
+   "title": "Autolock Modifier",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/607280",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_687766d3e23dd.jpg",
+   "updated": 1787905939,
+   "redistributable": false,
+   "file": {
+    "name": "teuriaautolockmodifier-131.zip",
+    "size": 17745,
+    "md5": "4697e60b49c1d846589f48f79e65165e",
+    "sha256": "ccec5aa50a7cbe297bdfaa040a65c11b0221084e6cc6af446b68ab9b06c424ec",
+    "download": "https://gamebanana.com/dl/1799728",
+    "mirror": "https://filecache41.gamebanana.com/mods/teuriaautolockmodifier-131.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.AutolockModifier",
+     "version": "1.3.1",
+     "displayName": "Autolock Modifier",
+     "folder": "",
+     "dll": "AutolockModifier.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 590115,
+   "title": "Baron Mode",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/590115",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_68090be13223b.jpg",
+   "updated": 1784138492,
+   "redistributable": false,
+   "file": {
+    "name": "teuriabaronmode_9ea02.zip",
+    "size": 34232,
+    "md5": "131677937953b08baa5da1e90fa85e67",
+    "sha256": "695c9c5eb0464cd910691a78c30cac30c8c74862de18444976ae7aa025be8d37",
+    "download": "https://gamebanana.com/dl/1755274",
+    "mirror": "https://filecache46.gamebanana.com/mods/teuriabaronmode_9ea02.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.BaronMode",
+     "version": "2.2.1",
+     "displayName": "Baron Mode",
+     "folder": "",
+     "dll": "BaronMode.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Teuria.WiderSet",
+       "version": "0.6.1"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 590131,
+   "title": "Bartizan",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/590131",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_680922af6fd4a.jpg",
+   "updated": 1753365669,
+   "redistributable": false,
+   "file": {
+    "name": "khabartizan_6e81e.zip",
+    "size": 30720,
+    "md5": "ac93451899b9c68ddb525f7999f8e025",
+    "sha256": "2a4ebb53405b456a4bd78708c53307851154cd0b1db5f7ac4717cd1081f53111",
+    "download": "https://gamebanana.com/dl/1483519",
+    "mirror": "https://filecache54.gamebanana.com/mods/khabartizan_6e81e.zip"
+   },
+   "mods": [
+    {
+     "name": "Kha.Bartizan",
+     "version": "2.1.0",
+     "displayName": "Kha.Bartizan",
+     "folder": "",
+     "dll": "BartizanMod.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0-beta.8"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Teuria.WiderSet",
+       "version": "0.2.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713332,
+   "title": "BlackHole",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713332",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d311b6157.jpg",
+   "updated": 1788893471,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1blackhole.zip",
+    "size": 29684,
+    "md5": "0b344bb02495c490e01f64af5e1d4f3e",
+    "sha256": "9eefb95adac6cf0a0f7515e3e743ffd79c2ea2167cb36df3fa84843e4f57c9b0",
+    "download": "https://gamebanana.com/dl/1806212",
+    "mirror": "https://filecache38.gamebanana.com/mods/ebe1blackhole.zip"
+   },
+   "mods": [
+    {
+     "name": "BlackHole",
+     "version": "1.1.0",
+     "displayName": "BlackHole",
+     "folder": "",
+     "dll": "TFModFortRisePickupBlackHole.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713335,
+   "title": "Corpse",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713335",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d3b34eaf9.jpg",
+   "updated": 1788893433,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1corpse.zip",
+    "size": 24171,
+    "md5": "71e40b256d73328bf56c6b25aa310d38",
+    "sha256": "e6385a1b4b4e777e03a53fddbc3796afbc6dbb97bc36fccbed456fb4cfebdf30",
+    "download": "https://gamebanana.com/dl/1806215",
+    "mirror": "https://filecache40.gamebanana.com/mods/ebe1corpse.zip"
+   },
+   "mods": [
+    {
+     "name": "Corpse",
+     "version": "1.1.0",
+     "displayName": "Corpse",
+     "folder": "",
+     "dll": "TFModFortRiseVariantCorpse.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 693128,
+   "title": "Discord Presence",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/693128",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a510d1c74d40.jpg",
+   "updated": 1784044521,
+   "redistributable": false,
+   "file": {
+    "name": "teuriadiscordpresence_c25c1.zip",
+    "size": 5696338,
+    "md5": "68bfcaea1050af229bc69c9a0804c5ec",
+    "sha256": "167ee677cf5b88ef990b620f1dcddf5243c6f818e481a26fedfac5d0c5bcb76a",
+    "download": "https://gamebanana.com/dl/1754346",
+    "mirror": "https://filecache38.gamebanana.com/mods/teuriadiscordpresence_c25c1.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.DiscordPresence",
+     "version": "1.0.1",
+     "displayName": "Discord Presence",
+     "folder": "",
+     "dll": "DiscordPresence.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": true,
+     "status": "unsupported",
+     "note": "Ships native libraries, which can't run in the browser."
+    }
+   ]
+  },
+  {
+   "gamebanana": 688948,
+   "title": "Fortfeit",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/688948",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a3d549da7bee.jpg",
+   "updated": 1782653582,
+   "redistributable": false,
+   "file": {
+    "name": "teuriafortfeit_ba60a.zip",
+    "size": 15810,
+    "md5": "975bbcb35dde1efdd8071d6a1782cbe7",
+    "sha256": "aeccc52b400b835cfe3049ab994f10f51420707f1703c0c8e29ecd5edb308771",
+    "download": "https://gamebanana.com/dl/1739987",
+    "mirror": "https://filecache52.gamebanana.com/mods/teuriafortfeit_ba60a.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.Fortfeit",
+     "version": "1.1.1",
+     "displayName": "Teuria.Fortfeit",
+     "folder": "",
+     "dll": "Fortfeit.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0-beta.1"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Teuria.WiderSet",
+       "version": "0.6.1"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713329,
+   "title": "Gravity",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713329",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d2c18936b.jpg",
+   "updated": 1788893477,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1gravity.zip",
+    "size": 32239,
+    "md5": "c08a86c385c9acceaaffe3c2172b22f2",
+    "sha256": "85bcdda5f8fd3c0bb82cba654d697ddc9a29a475839e0d4a05a4920cb7386d9c",
+    "download": "https://gamebanana.com/dl/1806208",
+    "mirror": "https://filecache52.gamebanana.com/mods/ebe1gravity.zip"
+   },
+   "mods": [
+    {
+     "name": "Gravity",
+     "version": "1.1.0",
+     "displayName": "Gravity",
+     "folder": "",
+     "dll": "TFModFortRisePickupGravity.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713322,
+   "title": "Handicap",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713322",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d08e498a1.jpg",
+   "updated": 1788893517,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1handicap.zip",
+    "size": 23583,
+    "md5": "9fdd5ddcc07da91ddd8edd4eb14ef2d6",
+    "sha256": "3022af62e13a8ae394b287710db3b518c08f6a566093c9e8f17fef4ddad1e7dc",
+    "download": "https://gamebanana.com/dl/1806192",
+    "mirror": "https://filecache41.gamebanana.com/mods/ebe1handicap.zip"
+   },
+   "mods": [
+    {
+     "name": "Handicap",
+     "version": "1.1.0",
+     "displayName": "Handicap",
+     "folder": "",
+     "dll": "TFModFortRiseHandicap.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713327,
+   "title": "Lava",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713327",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d228a7ada.jpg",
+   "updated": 1788893493,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1lava.zip",
+    "size": 26984,
+    "md5": "1c8bf48a9cb28a0208bd402abfa16a01",
+    "sha256": "1b548b830f23fcc75bcb981deb4d1108cdb8665226bab9b7e92e1a01e6658a58",
+    "download": "https://gamebanana.com/dl/1806205",
+    "mirror": "https://filecache40.gamebanana.com/mods/ebe1lava.zip"
+   },
+   "mods": [
+    {
+     "name": "Lava",
+     "version": "1.1.0",
+     "displayName": "Lava",
+     "folder": "",
+     "dll": "TFModFortRisePickupLava.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713348,
+   "title": "LoaderAI",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713348",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99da46b448c.jpg",
+   "updated": 1788893352,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1loaderai.zip",
+    "size": 24794,
+    "md5": "50dc1a0c97b0d1f85c8733477299e8c8",
+    "sha256": "02d627ab8d2dcd93b0b5b47cc91d50c7d84a5aa8c94a8763826c171bec0ce5fb",
+    "download": "https://gamebanana.com/dl/1806240",
+    "mirror": "https://filecache41.gamebanana.com/mods/ebe1loaderai.zip"
+   },
+   "mods": [
+    {
+     "name": "LoaderAI",
+     "version": "1.1.0",
+     "displayName": "LoaderAI",
+     "folder": "",
+     "dll": "TFModFortRiseLoaderAI.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      },
+      {
+       "name": "Archer",
+       "version": "1.1.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713323,
+   "title": "MatchRecord",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713323",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d119ea73b.jpg",
+   "updated": 1788893512,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1record.zip",
+    "size": 742178,
+    "md5": "8338fe825d44e27d78bf59efb2a3976a",
+    "sha256": "41d53af4ec494ee7156c153440452f3a70edf239f6afd74e31b999cde4602852",
+    "download": "https://gamebanana.com/dl/1806195",
+    "mirror": "https://filecache52.gamebanana.com/mods/ebe1record.zip"
+   },
+   "mods": [
+    {
+     "name": "MatchRecord",
+     "version": "1.1.0",
+     "displayName": "MatchRecord",
+     "folder": "",
+     "dll": "TFModFortRiseRecord.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 466427,
+   "title": "Miasma Colors",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/466427",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_64f3616e38bf9.jpg",
+   "updated": 1745425288,
+   "redistributable": false,
+   "file": {
+    "name": "teuriamiasmacolors.zip",
+    "size": 24453,
+    "md5": "b0d710ad4c48c27b1e43d5ce17cf4807",
+    "sha256": "d2f1a89e4142ad0397bd89ff69853b731b93f2f3048b03d91d8b38b0b49df895",
+    "download": "https://gamebanana.com/dl/1426374",
+    "mirror": "https://filecache41.gamebanana.com/mods/teuriamiasmacolors.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.MiasmaColors",
+     "version": "2.0.0",
+     "displayName": "Teuria.MiasmaColors",
+     "folder": "",
+     "dll": "MiasmaColors.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Code mod without Harmony."
+    }
+   ]
+  },
+  {
+   "gamebanana": 463749,
+   "title": "More Replay",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/463749",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_64e30c47aadc9.jpg",
+   "updated": 1784719796,
+   "redistributable": false,
+   "file": {
+    "name": "teuriamorereplay-230.zip",
+    "size": 22983,
+    "md5": "ab6a7c785377e1715a85f6d8f544980f",
+    "sha256": "e26a9310fba15113e4c0b5ce3405914086624cc9b15dd7bd760a1ab336be6ad6",
+    "download": "https://gamebanana.com/dl/1761405",
+    "mirror": "https://filecache38.gamebanana.com/mods/teuriamorereplay-230.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.MoreReplay",
+     "version": "2.3.0",
+     "displayName": "More Replay",
+     "folder": "",
+     "dll": "MoreReplay.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713338,
+   "title": "MoveOrDie",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713338",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d4b48dc78.jpg",
+   "updated": 1788893412,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1moveordie.zip",
+    "size": 22968,
+    "md5": "597a887488534344782e5b9de0ba7670",
+    "sha256": "c4920c8f52f98ba6dab4ecb50646b7df7a646a8fb63e452b68ff64ccbfa28190",
+    "download": "https://gamebanana.com/dl/1806221",
+    "mirror": "https://filecache37.gamebanana.com/mods/ebe1moveordie.zip"
+   },
+   "mods": [
+    {
+     "name": "MoveOrDie",
+     "version": "1.1.0",
+     "displayName": "MoveOrDie",
+     "folder": "",
+     "dll": "TFModFortRiseVariantMoveOrDie.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 460729,
+   "title": "Music Restart",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/460729",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_64ce8b45460fc.jpg",
+   "updated": 1751093128,
+   "redistributable": false,
+   "file": {
+    "name": "teuriamusicrestart-211.zip",
+    "size": 10917,
+    "md5": "241594cb47496b498b24722024549e81",
+    "sha256": "165f4ce96d5e7285fc1099fcea651eb70b08b9891be7e992da4606c2857ad830",
+    "download": "https://gamebanana.com/dl/1467190",
+    "mirror": "https://filecache38.gamebanana.com/mods/teuriamusicrestart-211.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.MusicRestart",
+     "version": "2.1.1",
+     "displayName": "Music Restart",
+     "folder": "",
+     "dll": "MusicRestart.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0-beta.1"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713312,
+   "title": "PlayTag",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713312",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99c83a0396f.jpg",
+   "updated": 1788893531,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1playtag.zip",
+    "size": 36633,
+    "md5": "e2e1430534a0fde4de2b011e30bbb68c",
+    "sha256": "876274115e9efc66658fe8e881a1c249fad998cd45be6be003c5f8b5798b324e",
+    "download": "https://gamebanana.com/dl/1806160",
+    "mirror": "https://filecache40.gamebanana.com/mods/ebe1playtag.zip"
+   },
+   "mods": [
+    {
+     "name": "PlayTag",
+     "version": "1.1.0",
+     "displayName": "PlayTag",
+     "folder": "",
+     "dll": "TFModFortRiseGameModePlaytag.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 714876,
+   "title": "Power",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/714876",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a9f038307302.jpg",
+   "updated": 1788893267,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1power.zip",
+    "size": 1776218,
+    "md5": "40d428e8459ae8f023cd719316387314",
+    "sha256": "2c755ef271a1969b1c3afdd3bf39a876076b6c564fecb6f2e4ce5b03fef4373c",
+    "download": "https://gamebanana.com/dl/1810204",
+    "mirror": "https://filecache36.gamebanana.com/mods/ebe1power.zip"
+   },
+   "mods": [
+    {
+     "name": "Power",
+     "version": "1.1.0",
+     "displayName": "Power",
+     "folder": "",
+     "dll": "TFModFortRisePower.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Archer",
+       "version": "1.1.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 693658,
+   "title": "Profiles",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/693658",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a539a2d8a4c0.jpg",
+   "updated": 1787590221,
+   "redistributable": false,
+   "file": {
+    "name": "teuriaprofiles-111.zip",
+    "size": 54834,
+    "md5": "5998f94164b8dfbf38f0f2263453bf3b",
+    "sha256": "ad1d17fb89b5a929952593fcbf147396d2fc88338391eb71af1dd1f5302569b4",
+    "download": "https://gamebanana.com/dl/1795969",
+    "mirror": "https://filecache41.gamebanana.com/mods/teuriaprofiles-111.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.Profiles",
+     "version": "1.1.1",
+     "displayName": "Profiles",
+     "folder": "",
+     "dll": "Profiles.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0-beta.3"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Teuria.WiderSet",
+       "version": "0.7.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713320,
+   "title": "Respawn",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713320",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99cfd3b4409.jpg",
+   "updated": 1788893524,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1respawn.zip",
+    "size": 26102,
+    "md5": "b4f5ee23f5f270430340ad412911eca9",
+    "sha256": "1b4047b024912605103833155c3ead347c482d29fce259f9a6d80128a270a982",
+    "download": "https://gamebanana.com/dl/1806189",
+    "mirror": "https://filecache52.gamebanana.com/mods/ebe1respawn.zip"
+   },
+   "mods": [
+    {
+     "name": "Ebe1.Respawn",
+     "version": "1.1.0",
+     "displayName": "Ebe1.Respawn",
+     "folder": "",
+     "dll": "TFModFortRiseGameModeRespawn.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713334,
+   "title": "Rotate",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713334",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d35f62fb7.jpg",
+   "updated": 1788893465,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1rotate.zip",
+    "size": 31480,
+    "md5": "4a816921d470e89c8e80ae26f641508f",
+    "sha256": "0587bb059de9e2a3a8aba58cfcbc4b79b819b83ad9985a078333b00ebc41972b",
+    "download": "https://gamebanana.com/dl/1806213",
+    "mirror": "https://filecache44.gamebanana.com/mods/ebe1rotate.zip"
+   },
+   "mods": [
+    {
+     "name": "Rotate",
+     "version": "1.1.0",
+     "displayName": "Rotate",
+     "folder": "",
+     "dll": "TFModFortRisePickupRotate.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 619407,
+   "title": "Score Counter",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/619407",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_68c2cc136611e.jpg",
+   "updated": 1783796600,
+   "redistributable": false,
+   "file": {
+    "name": "teuriascorecounter-110.zip",
+    "size": 21426,
+    "md5": "25a7d1c76e90c23c53fa6d2c1e6e7fd7",
+    "sha256": "f4399b4b73da7780132c777e05b0a938a0223178bc5eed101f248a3f6079a1fe",
+    "download": "https://gamebanana.com/dl/1751793",
+    "mirror": "https://filecache42.gamebanana.com/mods/teuriascorecounter-110.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.ScoreCounter",
+     "version": "1.1.0",
+     "displayName": "Score Counter",
+     "folder": "",
+     "dll": "ScoreCounter.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.0-beta.2"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713324,
+   "title": "Scroll",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713324",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d1821100e.jpg",
+   "updated": 1788893507,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1scroll.zip",
+    "size": 51625,
+    "md5": "2571c6e64e2dc64e5b00122a7df7c63f",
+    "sha256": "8339660448576994db60a3dfdc5154d2917d8c552c77bc5beb1168fa91d2a648",
+    "download": "https://gamebanana.com/dl/1806197",
+    "mirror": "https://filecache35.gamebanana.com/mods/ebe1scroll.zip"
+   },
+   "mods": [
+    {
+     "name": "Scroll",
+     "version": "1.1.0",
+     "displayName": "Scroll",
+     "folder": "",
+     "dll": "TFModFortRiseScroll.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713339,
+   "title": "Soccer",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713339",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d4faa029f.jpg",
+   "updated": 1788893405,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1soccer.zip",
+    "size": 40215,
+    "md5": "95f702e045bd4cd1434013041f6b4ad1",
+    "sha256": "567a3af8b8fd8cc9fd3ef63d655c1cb89071b966446cc5b24a2e150e25329293",
+    "download": "https://gamebanana.com/dl/1806223",
+    "mirror": "https://filecache42.gamebanana.com/mods/ebe1soccer.zip"
+   },
+   "mods": [
+    {
+     "name": "Soccer",
+     "version": "1.1.0",
+     "displayName": "Soccer",
+     "folder": "",
+     "dll": "TFModFortRiseGameModeSoccer.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 628505,
+   "title": "Speedrun Timer",
+   "author": "Ralidon",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/628505",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_68f7d17d191d6.jpg",
+   "updated": 1761074535,
+   "redistributable": false,
+   "file": {
+    "name": "ralidonspeedruntimer_9b7b9.zip",
+    "size": 16078,
+    "md5": "380d4eb6fe55189a8ce4c9bb409ef3d8",
+    "sha256": "5ddc5409e67189938000e165d44799871bd368105bd44002e7532bc6a01b253b",
+    "download": "https://gamebanana.com/dl/1543861",
+    "mirror": "https://filecache47.gamebanana.com/mods/ralidonspeedruntimer_9b7b9.zip"
+   },
+   "mods": [
+    {
+     "name": "Ralidon.SpeedrunTimer",
+     "version": "0.1.0",
+     "displayName": "Speedrun Timer",
+     "folder": "Ralidon.SpeedrunTimer",
+     "dll": "SpeedrunTimer.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713345,
+   "title": "Tournament",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713345",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d670131ff.jpg",
+   "updated": 1788893366,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1tournament.zip",
+    "size": 71274,
+    "md5": "0dbe0602c2a5ea4b9ee95646b6abaef8",
+    "sha256": "92b25d4ae8242f99f68f9fdc2093e11d6f575b692efaaae0af7347f6d3ca66fa",
+    "download": "https://gamebanana.com/dl/1806230",
+    "mirror": "https://filecache35.gamebanana.com/mods/ebe1tournament.zip"
+   },
+   "mods": [
+    {
+     "name": "Tournament",
+     "version": "1.1.0",
+     "displayName": "Tournament",
+     "folder": "",
+     "dll": "TFModFortRiseTournament.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [
+      {
+       "name": "Archer",
+       "version": "1.1.0"
+      }
+     ],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 716577,
+   "title": "TowerFall - 8 Players Mod for FortRise",
+   "author": "Juan_JSAR",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/716577",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6aaa0199b8be9.jpg",
+   "updated": 1789528682,
+   "redistributable": false,
+   "file": {
+    "name": "tf8playe_011.zip",
+    "size": 265323,
+    "md5": "3636e41ebe73134d92cbc42a5897b12b",
+    "sha256": "3c1350a22963fc84b7a9a650480854cc9517fda4972f2c98ac69f3633f9b7cec",
+    "download": "https://gamebanana.com/dl/1817795",
+    "mirror": "https://filecache47.gamebanana.com/mods/tf8playe_011.zip"
+   },
+   "mods": [
+    {
+     "name": "TF8Player",
+     "version": "0.1.1",
+     "displayName": "TF8Player",
+     "folder": "TF8Player",
+     "dll": "TF8PlayerFortRise.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.4.0"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.4.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713336,
+   "title": "VariantSpeed",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713336",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d3fa6a15e.jpg",
+   "updated": 1788893426,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1speed.zip",
+    "size": 18236,
+    "md5": "fa0a1de11b7fc3adcd04096df03565ea",
+    "sha256": "54488cfa1898a978b92e6a610ba190e53356dcbf68f8e8ff1ab3a78317faf32b",
+    "download": "https://gamebanana.com/dl/1806218",
+    "mirror": "https://filecache44.gamebanana.com/mods/ebe1speed.zip"
+   },
+   "mods": [
+    {
+     "name": "VariantSpeed",
+     "version": "1.1.0",
+     "displayName": "VariantSpeed",
+     "folder": "",
+     "dll": "TFModFortRiseVariantSpeed.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 608884,
+   "title": "Wider Set",
+   "author": "Terria",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/608884",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6881134070130.jpg",
+   "updated": 1784108023,
+   "redistributable": false,
+   "file": {
+    "name": "teuriawiderset-090.zip",
+    "size": 638394,
+    "md5": "dae692156fd55593e1e8bba59deef880",
+    "sha256": "9299e85db1b69d472ad6fa64866b98e7856d8218572b7dbde86631aea317db70",
+    "download": "https://gamebanana.com/dl/1754984",
+    "mirror": "https://filecache39.gamebanana.com/mods/teuriawiderset-090.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.WiderSet",
+     "version": "0.9.0",
+     "displayName": "Wider Set",
+     "folder": "",
+     "dll": "WiderSet.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.2"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.3.2"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 713337,
+   "title": "WinCounters",
+   "author": "ebe1.kenobi",
+   "category": "Code",
+   "page": "https://gamebanana.com/mods/713337",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a99d44d873b1.jpg",
+   "updated": 1788893419,
+   "redistributable": false,
+   "file": {
+    "name": "ebe1wincounters.zip",
+    "size": 35114,
+    "md5": "1eefbd4c3edd7669d6087ded614ee1f9",
+    "sha256": "b3e2e591ce50979c95a93d829237811ee4f2329f9290533e0f1a7a4e116316ea",
+    "download": "https://gamebanana.com/dl/1806220",
+    "mirror": "https://filecache47.gamebanana.com/mods/ebe1wincounters.zip"
+   },
+   "mods": [
+    {
+     "name": "WinCounters",
+     "version": "1.1.0",
+     "displayName": "WinCounters",
+     "folder": "",
+     "dll": "TFModFortRiseWinCounters.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.3.3"
+      },
+      {
+       "name": "Archer",
+       "version": "1.1.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 461510,
+   "title": "MenuVariants Mod v2.5.0",
+   "author": "CoolModder_of_TowerFall",
+   "category": "Other/Misc",
+   "page": "https://gamebanana.com/mods/461510",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_64d3df2235daf.jpg",
+   "updated": 1691606845,
+   "redistributable": false,
+   "file": {
+    "name": "menuvariantsmodrelease.zip",
+    "size": 49598,
+    "md5": "cff2043ee0da7077b9786f337f20041f",
+    "sha256": "a613ef778ac5bbe5259adb3ed70695d9c9e242c24fc6ab00fbd2d9dcf8b6da27",
+    "download": "https://gamebanana.com/dl/1034323",
+    "mirror": "https://filecache20.gamebanana.com/mods/menuvariantsmodrelease.zip"
+   },
+   "mods": [
+    {
+     "name": "MenuVariantsMod",
+     "version": "1.0.0",
+     "displayName": "MenuVariantsMod",
+     "folder": "MenuVariantsModRelease",
+     "dll": "MenuVariantsMod.dll",
+     "dependencies": [],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 461511,
+   "title": "No Seek Quest",
+   "author": "CoolModder_of_TowerFall",
+   "category": "Other/Misc",
+   "page": "https://gamebanana.com/mods/461511",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_64d3dfce6587b.jpg",
+   "updated": 1691607347,
+   "redistributable": false,
+   "file": {
+    "name": "noseekquestvariantrelease.zip",
+    "size": 6270,
+    "md5": "c3e3e21846326098f1a43ef295c1e862",
+    "sha256": "f53c5dcedb36f603193d0b213ef3d357ac70141da91ed9494223dbda171d3a8b",
+    "download": "https://gamebanana.com/dl/1034325",
+    "mirror": "https://filecache37.gamebanana.com/mods/noseekquestvariantrelease.zip"
+   },
+   "mods": [
+    {
+     "name": "No Seek Quest",
+     "version": "1.0.0",
+     "displayName": "No Seek Quest",
+     "folder": "NoSeekQuestVariantRelease",
+     "dll": "NoSeekQuestVariant.dll",
+     "dependencies": [],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 483850,
+   "title": "TF.EX (Netplay mod)",
+   "author": "DShad",
+   "category": "Other/Misc",
+   "page": "https://gamebanana.com/mods/483850",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6578db53be06c.jpg",
+   "updated": 1702419757,
+   "redistributable": false,
+   "file": {
+    "name": "tfex.zip",
+    "size": 9268773,
+    "md5": "96ccf260d2488266b19aae8e949f9f16",
+    "sha256": "055b3c777e66da950ee022874f9f205b94fa3d75fb2c3ec39756484c7970f303",
+    "download": "https://gamebanana.com/dl/1101830",
+    "mirror": "https://filecache37.gamebanana.com/mods/tfex.zip"
+   },
+   "mods": [
+    {
+     "name": "TF.EX",
+     "version": "0.7.0",
+     "displayName": "TF.EX",
+     "folder": "TF.EX",
+     "dll": "TF.EX.Core.dll",
+     "dependencies": [],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Code mod without Harmony."
+    }
+   ]
+  },
+  {
+   "gamebanana": 461512,
+   "title": "TowerBall For FortRise",
+   "author": "CoolModder_of_TowerFall",
+   "category": "Other/Misc",
+   "page": "https://gamebanana.com/mods/461512",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_64d3e0e40a878.jpg",
+   "updated": 1691607319,
+   "redistributable": false,
+   "file": {
+    "name": "towerballmodrelease.zip",
+    "size": 125657,
+    "md5": "e4cfedbe415e26bb78b12471d38e0835",
+    "sha256": "94222dfe814a38dc0f98f7560783b77a9fcfcc8ff6d8d0a0036dc3f0a0c54c39",
+    "download": "https://gamebanana.com/dl/1034326",
+    "mirror": "https://filecache36.gamebanana.com/mods/towerballmodrelease.zip"
+   },
+   "mods": [
+    {
+     "name": "TowerBall",
+     "version": "1.0.0",
+     "displayName": "TowerBall",
+     "folder": "TowerBallModRelease",
+     "dll": "TowerBall.dll",
+     "dependencies": [],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 589965,
+   "title": "Colored Drill Arrows",
+   "author": "Terria",
+   "category": "Texture",
+   "page": "https://gamebanana.com/mods/589965",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_68090cec51446.jpg",
+   "updated": 1783697861,
+   "redistributable": false,
+   "file": {
+    "name": "teuriacoloreddrillarrows.zip",
+    "size": 13252,
+    "md5": "b6ca426e1871cd7f857ca593e78d80c4",
+    "sha256": "4fdeca7e194b7a87bf8ee152f7e2849319d484370a8c32e63454a78818a57c97",
+    "download": "https://gamebanana.com/dl/1750686",
+    "mirror": "https://filecache47.gamebanana.com/mods/teuriacoloreddrillarrows.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.ColoredDrillArrows",
+     "version": "1.2.0",
+     "displayName": "Colored Drill Arrows",
+     "folder": "",
+     "dll": "ColoredDrillArrows.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  },
+  {
+   "gamebanana": 470921,
+   "title": "Mech KingReaper Skin",
+   "author": "Terria",
+   "category": "Texture",
+   "page": "https://gamebanana.com/mods/470921",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_65141e0f56827.jpg",
+   "updated": 1745426153,
+   "redistributable": false,
+   "file": {
+    "name": "teuriamechreaperskin.zip",
+    "size": 57424,
+    "md5": "dce63598684837cdca78f96fea0fbe22",
+    "sha256": "a30e05eb4caea787419644c09cd5ecf98cc9240097f412000cd52d01a9b39585",
+    "download": "https://gamebanana.com/dl/1426382",
+    "mirror": "https://filecache40.gamebanana.com/mods/teuriamechreaperskin.zip"
+   },
+   "mods": [
+    {
+     "name": "Teuria.MechReaperKingSkin",
+     "version": "1.1.0",
+     "displayName": "Mech Reaper",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 693672,
+   "title": "Boss Practice Towers",
+   "author": "Terria",
+   "category": "Tower",
+   "page": "https://gamebanana.com/mods/693672",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6a53a52fb3177.jpg",
+   "updated": 1783866804,
+   "redistributable": false,
+   "file": {
+    "name": "bosspracticetowers_eb663.zip",
+    "size": 50769,
+    "md5": "b047f871e8eb23fde135b4f5d58cefdc",
+    "sha256": "00627127536a24e47497af580c9aa1595f6fffa3413d8d979b9ac8a5ca172dc2",
+    "download": "https://gamebanana.com/dl/1752495",
+    "mirror": "https://filecache52.gamebanana.com/mods/bosspracticetowers_eb663.zip"
+   },
+   "mods": [
+    {
+     "name": "ChallenginChuck.BossPraticeTowers",
+     "version": "1.0.0",
+     "displayName": "ChallenginChuck.BossPraticeTowers",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.2.5"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.2.5"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 634554,
+   "title": "Infinity Gauntlet",
+   "author": "Terria",
+   "category": "Tower",
+   "page": "https://gamebanana.com/mods/634554",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_691dabce1804b.jpg",
+   "updated": 1763552654,
+   "redistributable": false,
+   "file": {
+    "name": "infinitygauntlet.zip",
+    "size": 396070,
+    "md5": "d904d7be72554f2b33ac52bca66f9696",
+    "sha256": "23953b8fa3055c191f175a7bdc9e4df8ab6e171317a1784cd396c9a9c1299382",
+    "download": "https://gamebanana.com/dl/1564097",
+    "mirror": "https://filecache28.gamebanana.com/mods/infinitygauntlet.zip"
+   },
+   "mods": [
+    {
+     "name": "InfinityGauntlet",
+     "version": "1.0.0",
+     "displayName": "InfinityGauntlet",
+     "folder": "",
+     "dll": null,
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.0.0-beta.1"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.0.0-beta.1"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": false,
+     "native": false,
+     "status": "untested",
+     "note": "Content-only mod."
+    }
+   ]
+  },
+  {
+   "gamebanana": 716582,
+   "title": "TowerFall Localization (Multi-Language Support)",
+   "author": "Juan_JSAR",
+   "category": "Translations",
+   "page": "https://gamebanana.com/mods/716582",
+   "image": "https://images.gamebanana.com/img/ss/mods/220-90_6aa5b588780db.jpg",
+   "updated": 1789408327,
+   "redistributable": false,
+   "file": {
+    "name": "towerfalllocalization.zip",
+    "size": 70453,
+    "md5": "1825e47b6a365f325a5749258c3d252f",
+    "sha256": "8432d0e315b71168b76fb970a7026bcf4a5aede413056248a222103abd3d9ef5",
+    "download": "https://gamebanana.com/dl/1814844",
+    "mirror": "https://filecache47.gamebanana.com/mods/towerfalllocalization.zip"
+   },
+   "mods": [
+    {
+     "name": "TowerFallLocalization",
+     "version": "0.2.0",
+     "displayName": "TowerFallLocalization",
+     "folder": "TowerFallLocalization",
+     "dll": "TowerFallLocalization.dll",
+     "dependencies": [
+      {
+       "name": "FortRise",
+       "version": "5.4.0"
+      },
+      {
+       "name": "FortRise.Content",
+       "version": "5.4.0"
+      }
+     ],
+     "optionalDependencies": [],
+     "harmony": true,
+     "native": false,
+     "status": "needs-harmony",
+     "note": "Uses Harmony patches, which the browser doesn't support yet."
+    }
+   ]
+  }
+ ]
+}
