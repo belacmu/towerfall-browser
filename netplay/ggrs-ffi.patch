@@ -1,0 +1,19 @@
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index f0b1a61..b00094e 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -54,6 +54,14 @@ pub fn get_runtime() -> &'static tokio::runtime::Runtime {
+     static RUNTIME: OnceCell<tokio::runtime::Runtime> = OnceCell::new();
+ 
+     RUNTIME.get_or_init(|| {
++        // Browser (Emscripten): networking is done by the page (see netplay/tfnet.js), so a
++        // single-threaded runtime is enough to drive the futures here.
++        #[cfg(target_os = "emscripten")]
++        let runtime = tokio::runtime::Builder::new_current_thread()
++            .enable_all()
++            .build()
++            .unwrap();
++        #[cfg(not(target_os = "emscripten"))]
+         let runtime = tokio::runtime::Builder::new_multi_thread()
+             .worker_threads(4)
+             .enable_all()

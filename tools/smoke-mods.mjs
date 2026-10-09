@@ -46,7 +46,7 @@ process.on("exit", () => browser.kill());
 async function devtools(pathname, method = "GET") {
 	for (let i = 0; i < 100; i++) {
 		try {
-			return await (await fetch(`http://127.0.0.1:${port}${pathname}`, { method })).json();
+			return await (await fetch(`http://127.0.0.1:${port}${pathname}`, { method, signal: AbortSignal.timeout(10_000) })).json();
 		} catch {
 			await sleep(100);
 		}
@@ -54,9 +54,12 @@ async function devtools(pathname, method = "GET") {
 	throw new Error(`Chrome isn't answering on port ${port} (${pathname})`);
 }
 
+// Resolves to null if the page doesn't answer within 15 s (a hung main thread), undefined if the
+// evaluation failed (e.g. mid-navigation).
 async function evaluate(ws, expression) {
 	const id = Math.floor(Math.random() * 1e9);
 	return new Promise((resolve) => {
+		setTimeout(() => resolve(null), 15_000);
 		const onMessage = (m) => {
 			const d = JSON.parse(m.data);
 			if (d.id !== id) return;
@@ -78,10 +81,19 @@ async function test(mod) {
 	const started = Date.now();
 	let result = { status: "broken", note: "Timed out before reaching the title screen." };
 	let loadedAt = null;
+	let silent = 0;
 	while (Date.now() - started < 180_000) {
 		await sleep(2000);
 		const raw = await evaluate(ws, STATE);
+		if (raw === null) {
+			if (++silent >= 3) {
+				result = { status: "broken", note: "The page stopped responding (the game hung)." };
+				break;
+			}
+			continue;
+		}
 		if (!raw) continue;
+		silent = 0;
 		const s = JSON.parse(raw);
 		if (process.env.SMOKE_VERBOSE && Math.round((Date.now() - started) / 1000) % 20 < 2) {
 			console.log(`  ${Math.round((Date.now() - started) / 1000)}s: ${s.status} | ${(s.error || "").slice(0, 120)} | ${s.log.length} log lines`);

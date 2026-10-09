@@ -2,5 +2,279 @@
 	"Ralidon.SpeedrunTimer": {
 		"status": "works",
 		"note": "Timer shows in levels and stops on game over (Harmony postfix), tested 2026-10-09."
+	},
+	"AllSeeing.Skeleton": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"AmongUsRedBlue": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Spookyan": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Hitbox": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"DDRROBOT": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"King": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Celeste": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Osiria": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Perplexing": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Shadow": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Dummy": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Yuu": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Accelerate": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Teuria.AdditionalVariants": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"AIJimmy": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"AINova": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+	},
+	"Arcade": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Archer": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"ArrowBomb": {
+		"status": "broken",
+		"note": "The page stopped responding (the game hung).",
+		"version": "1.1.0"
+	},
+	"Arrows": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Teuria.Ascencore": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.0.0"
+	},
+	"Teuria.AutolockModifier": {
+		"status": "broken",
+		"note": "The page stopped responding (the game hung).",
+		"version": "1.3.1"
+	},
+	"Teuria.BaronMode": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "2.2.1"
+	},
+	"Kha.Bartizan": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "2.1.0"
+	},
+	"BlackHole": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Corpse": {
+		"status": "broken",
+		"note": "",
+		"version": "1.1.0"
+	},
+	"Teuria.Fortfeit": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.1"
+	},
+	"Gravity": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Handicap": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Lava": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"LoaderAI": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"MatchRecord": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Teuria.MiasmaColors": {
+		"status": "broken",
+		"note": "Error in Init()!",
+		"version": "2.0.0"
+	},
+	"Teuria.MoreReplay": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "2.3.0"
+	},
+	"MoveOrDie": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Teuria.MusicRestart": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "2.1.1"
+	},
+	"PlayTag": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Power": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Teuria.Profiles": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.1"
+	},
+	"Ebe1.Respawn": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Rotate": {
+		"status": "broken",
+		"note": "The page stopped responding (the game hung).",
+		"version": "1.1.0"
+	},
+	"Teuria.ScoreCounter": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Scroll": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Soccer": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Tournament": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"TF8Player": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "0.1.1"
+	},
+	"VariantSpeed": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"Teuria.WiderSet": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "0.9.0"
+	},
+	"WinCounters": {
+		"status": "broken",
+		"note": "Error in Init()!",
+		"version": "1.1.0"
+	},
+	"MenuVariantsMod": {
+		"status": "broken",
+		"note": "FortRise didn't load it (check its dependencies).",
+		"version": "1.0.0"
+	},
+	"No Seek Quest": {
+		"status": "broken",
+		"note": "FortRise didn't load it (check its dependencies).",
+		"version": "1.0.0"
+	},
+	"TF.EX": {
+		"status": "broken",
+		"note": "FortRise didn't load it (check its dependencies).",
+		"version": "0.7.0"
+	},
+	"TowerBall": {
+		"status": "broken",
+		"note": "FortRise didn't load it (check its dependencies).",
+		"version": "1.0.0"
+	},
+	"Teuria.ColoredDrillArrows": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.2.0"
+	},
+	"Teuria.MechReaperKingSkin": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.1.0"
+	},
+	"ChallenginChuck.BossPraticeTowers": {
+		"status": "broken",
+		"note": "",
+		"version": "1.0.0"
+	},
+	"InfinityGauntlet": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "1.0.0"
+	},
+	"TowerFallLocalization": {
+		"status": "works",
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"version": "0.2.0"
 	}
 }

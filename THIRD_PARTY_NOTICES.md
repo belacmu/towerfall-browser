@@ -18,6 +18,14 @@ It builds on, and in places contains code adapted from, the following projects:
   time by `tools/fetch-runtime.sh` along with two small native objects for MonoMod's WebAssembly
   detours (`hot_reload_detour.o`, derived from MIT-licensed runtime code, and `liba.o`). FNA-WASM-Build
   itself carries no license file; replacing `liba.o` with our own source is on the to-do list.
+- **Netplay** (`netplay/`, built by `tools/build-netplay.sh`): the site ships a browser build of
+  **ggrs-ffi** (GPL-2.0, https://github.com/Fcornaire/ggrs-ffi), the native library of the TF.EX
+  netplay mod, with **GGRS** (MIT or Apache-2.0, Fcornaire's fork of https://github.com/gschup/ggrs).
+  The complete corresponding source is the pinned upstream commits plus `netplay/ggrs-ffi.patch`,
+  `netplay/ggrs.patch`, `netplay/matchbox-browser/` and `netplay/tfnet.js`, all in this repository.
+  That build, and the WebAssembly module it's linked into, is distributed under GPL-2.0.
+  `netplay/matchbox-browser` reimplements part of **matchbox_socket**'s API (MIT or Apache-2.0,
+  https://github.com/johanhelsing/matchbox) and speaks its protocol.
 - **coi-serviceworker** (MIT, Guido Zuidhof and contributors) — `web/wwwroot/coi-serviceworker.js`,
   included unmodified with its license header.
 - **Steamworks.NET** (MIT) — `web/Steamworks.NET/` is an independent stand-in that mirrors the

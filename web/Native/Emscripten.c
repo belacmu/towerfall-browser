@@ -43,3 +43,16 @@ uint64_t SDL_GetWindowFlags(void *window);
 uint32_t SDL__GetWindowFlags(void *window) {
 	return (uint32_t)SDL_GetWindowFlags(window);
 }
+
+// Rust's standard library for Emscripten (ggrs_ffi, see tools/build-netplay.sh) imports the clock
+// under its older name.
+double emscripten_get_now(void);
+double _emscripten_get_now(void) {
+	return emscripten_get_now();
+}
+
+// MonoMod's WebAssembly interop (patches/MonoMod.patch) imports libc's close() as liba's _close.
+int close(int fd);
+int _close(int fd) {
+	return close(fd);
+}

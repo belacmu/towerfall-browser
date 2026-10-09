@@ -1,0 +1,56 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index e5e8312..b26f69b 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -27,7 +27,7 @@ instant = "0.1"
+ getrandom = { version = "0.2", optional = true }
+ tracing = "0.1"
+ 
+-[target.'cfg(target_arch = "wasm32")'.dependencies]
++[target.'cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))'.dependencies]
+ js-sys = "0.3"
+ 
+ [dev-dependencies]
+diff --git a/src/network/protocol.rs b/src/network/protocol.rs
+index 576b16f..46d6fa2 100644
+--- a/src/network/protocol.rs
++++ b/src/network/protocol.rs
+@@ -41,14 +41,14 @@ const QUALITY_REPORT_INTERVAL: Duration = Duration::from_millis(200);
+ pub const MAX_CHECKSUM_HISTORY_SIZE: usize = 32;
+ 
+ fn millis_since_epoch() -> u128 {
+-    #[cfg(not(target_arch = "wasm32"))]
++    #[cfg(not(all(target_arch = "wasm32", not(target_os = "emscripten"))))]
+     {
+         std::time::SystemTime::now()
+             .duration_since(std::time::UNIX_EPOCH)
+             .expect("Time went backwards")
+             .as_millis()
+     }
+-    #[cfg(target_arch = "wasm32")]
++    #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
+     {
+         js_sys::Date::new_0().get_time() as u128
+     }
+@@ -102,7 +102,7 @@ impl InputBytes {
+         if num_players == 0 {
+             return Err("packet has no player inputs to decode".to_owned());
+         }
+-        if !self.bytes.len().is_multiple_of(num_players) {
++        if !(if num_players == 0 { self.bytes.len() == 0 } else { self.bytes.len() % num_players == 0 }) {
+             return Err(format!(
+                 "input byte length {} is not divisible by player count {num_players}",
+                 self.bytes.len()
+diff --git a/src/sessions/p2p_session.rs b/src/sessions/p2p_session.rs
+index 42874b0..4fb7f12 100644
+--- a/src/sessions/p2p_session.rs
++++ b/src/sessions/p2p_session.rs
+@@ -691,7 +691,7 @@ impl<T: Config> P2PSession<T> {
+     }
+ 
+     fn yield_lockstep_wait() {
+-        #[cfg(not(target_arch = "wasm32"))]
++        #[cfg(not(all(target_arch = "wasm32", not(target_os = "emscripten"))))]
+         std::thread::yield_now();
+     }
+ 

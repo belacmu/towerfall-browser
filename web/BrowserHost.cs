@@ -194,6 +194,17 @@ public static partial class BrowserHost
 		return Task.FromResult((bool)runApplication.GetValue(game));
 	}
 
+	// FortRise asks for a restart (e.g. after changing mods in its in-game menu) by setting
+	// RiseCore.WillRestart and exiting; on desktop it relaunches itself. main.js reloads the page.
+	// (Async: the page's main thread may not call into .NET synchronously.)
+	[JSExport]
+	internal static Task<bool> WantsRestart()
+	{
+		return Task.FromResult(towerFall?.GetType("FortRise.RiseCore")
+			?.GetProperty("WillRestart", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+			?.GetValue(null) is true);
+	}
+
 	// Writes the exception to the game's own error_log.txt (in the save dir), like a desktop crash.
 	private static void LogToGame(Exception e)
 	{

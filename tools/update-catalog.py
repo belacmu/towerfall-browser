@@ -71,6 +71,15 @@ def final_url(url):
     return url
 
 
+def still_serves(url):
+    req = urllib.request.Request(url, method="HEAD", headers=UA)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 def download(url, md5):
     os.makedirs(CACHE, exist_ok=True)
     path = os.path.join(CACHE, md5 + ".zip")
@@ -174,6 +183,12 @@ def main():
         write(entries)
         print(f"Re-applied {OVERRIDES} to {OUT}")
         return
+    # GameBanana hands out a different mirror host per request; keep the previous one for an
+    # unchanged file while it still serves it, so the catalog only changes when something did.
+    previous = {}
+    if os.path.exists(OUT):
+        for e in json.load(open(OUT))["mods"]:
+            previous[e["file"]["md5"]] = e["file"].get("mirror")
     entries = []
     records = list_mods()[:limit]
     for i, rec in enumerate(records, 1):
@@ -207,7 +222,7 @@ def main():
                     "md5": file["_sMd5Checksum"],
                     "sha256": hashlib.sha256(data).hexdigest(),
                     "download": file["_sDownloadUrl"],
-                    "mirror": final_url(file["_sDownloadUrl"]),
+                    "mirror": previous.get(file["_sMd5Checksum"]) if still_serves(previous.get(file["_sMd5Checksum"]) or "") else final_url(file["_sDownloadUrl"]),
                 },
                 "mods": [],
             }

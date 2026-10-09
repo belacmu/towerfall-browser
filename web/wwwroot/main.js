@@ -413,6 +413,8 @@ async function main() {
 		applyMute();
 		if (keepRunning) {
 			requestAnimationFrame(frame);
+		} else if (await exports.BrowserHost.WantsRestart()) {
+			location.reload();
 		} else {
 			status("TowerFall has exited. Reload to play again.");
 			$("overlay").classList.remove("hidden");

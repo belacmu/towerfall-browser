@@ -1,0 +1,12 @@
+# Stand-in for matchbox_socket 0.12 in the browser build of ggrs-ffi: the same API subset, with
+# WebRTC done by the page (netplay/tfnet.js). Swapped in with [patch.crates-io] by
+# tools/build-netplay.sh.
+[package]
+name = "matchbox_socket"
+version = "0.12.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "matchbox_socket API subset for Emscripten builds, backed by browser WebRTC via tfnet.js"
+
+[dependencies]
+uuid = "1"

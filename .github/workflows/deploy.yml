@@ -32,10 +32,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor
-          key: vendor-${{ runner.os }}-${{ hashFiles('patches/**', 'tools/fetch-deps.sh', 'tools/build-faudio.sh', 'tools/emenv.sh', 'tools/fetch-fortrise.sh', 'tools/fetch-runtime.sh', 'tools/build-monomod.sh', 'tools/AnyCpu/**') }}
+          key: vendor-${{ runner.os }}-${{ hashFiles('patches/**', 'tools/fetch-deps.sh', 'tools/build-faudio.sh', 'tools/emenv.sh', 'tools/fetch-fortrise.sh', 'tools/fetch-runtime.sh', 'tools/build-monomod.sh', 'tools/build-netplay.sh', 'netplay/**', 'tools/AnyCpu/**') }}
+
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.towerfall-browser/rust
+          key: rust-${{ runner.os }}-${{ hashFiles('tools/install-rust.sh', 'tools/build-netplay.sh') }}
 
       - name: Install SDK
         run: tools/install-sdk.sh
+
+      - name: Install Rust
+        run: tools/install-rust.sh
 
       - name: Fetch dependencies
         run: tools/fetch-deps.sh
