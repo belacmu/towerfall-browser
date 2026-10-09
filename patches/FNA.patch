@@ -1,0 +1,108 @@
+Submodule lib/SDL2-CS contains modified content
+diff --git a/lib/SDL2-CS/src/SDL2.cs b/lib/SDL2-CS/src/SDL2.cs
+index ceecdf7..5274609 100644
+--- a/lib/SDL2-CS/src/SDL2.cs
++++ b/lib/SDL2-CS/src/SDL2.cs
+@@ -502,6 +502,13 @@ namespace SDL2
+ 		private static extern IntPtr INTERNAL_SDL_GetPlatform();
+ 		public static string SDL_GetPlatform()
+ 		{
++			/* Browser builds only link SDL3, and SDL2-era games only know
++			 * Windows/Mac OS X/Linux. Linux paths fit the browser's filesystem.
++			 */
++			if (OperatingSystem.IsBrowser())
++			{
++				return "Linux";
++			}
+ 			return UTF8_ToManaged(INTERNAL_SDL_GetPlatform());
+ 		}
+ 
+@@ -1354,6 +1361,12 @@ namespace SDL2
+ 			string message,
+ 			IntPtr window
+ 		) {
++			if (OperatingSystem.IsBrowser())
++			{
++				Console.Error.WriteLine("[SDL_ShowSimpleMessageBox] " + title + ": " + message);
++				return 0;
++			}
++
+ 			int utf8TitleBufSize = Utf8Size(title);
+ 			byte* utf8Title = stackalloc byte[utf8TitleBufSize];
+ 
+Submodule lib/SDL3-CS contains modified content
+diff --git a/lib/SDL3-CS/SDL3/SDL3.Legacy.cs b/lib/SDL3-CS/SDL3/SDL3.Legacy.cs
+index 5b5e453..c3b1a51 100644
+--- a/lib/SDL3-CS/SDL3/SDL3.Legacy.cs
++++ b/lib/SDL3-CS/SDL3/SDL3.Legacy.cs
+@@ -2385,7 +2385,7 @@ namespace SDL3
+ 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+ 		public static extern IntPtr SDL_GetWindows(out int count);
+ 
+-		[DllImport(nativeLibName, EntryPoint = "SDL_CreateWindow", CallingConvention = CallingConvention.Cdecl)]
++		[DllImport(nativeLibName, EntryPoint = "SDL__CreateWindow", CallingConvention = CallingConvention.Cdecl)]
+ 		private static extern IntPtr INTERNAL_SDL_CreateWindow(byte* title, int w, int h, SDL_WindowFlags flags);
+ 		public static IntPtr SDL_CreateWindow(string title, int w, int h, SDL_WindowFlags flags)
+ 		{
+@@ -2414,7 +2414,7 @@ namespace SDL3
+ 		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
+ 		public static extern uint SDL_GetWindowProperties(IntPtr window);
+ 
+-		[DllImport(nativeLibName, CallingConvention = CallingConvention.Cdecl)]
++		[DllImport(nativeLibName, EntryPoint = "SDL__GetWindowFlags", CallingConvention = CallingConvention.Cdecl)]
+ 		public static extern SDL_WindowFlags SDL_GetWindowFlags(IntPtr window);
+ 
+ 		[DllImport(nativeLibName, EntryPoint = "SDL_SetWindowTitle", CallingConvention = CallingConvention.Cdecl)]
+diff --git a/src/FNAPlatform/SDL3_FNAPlatform.cs b/src/FNAPlatform/SDL3_FNAPlatform.cs
+index 32e070b..99041ed 100644
+--- a/src/FNAPlatform/SDL3_FNAPlatform.cs
++++ b/src/FNAPlatform/SDL3_FNAPlatform.cs
+@@ -474,6 +474,15 @@ namespace Microsoft.Xna.Framework
+ 		) {
+ 			bool center = false;
+ 
++			/* Browser: SDL's emscripten fullscreen resizes the canvas behind our back
++			 * whenever the page resizes. The page scales the canvas itself, so stay a
++			 * fixed-size window and report BrowserDisplayMode as the "display" instead.
++			 */
++			if (OperatingSystem.IsBrowser())
++			{
++				wantsFullscreen = false;
++			}
++
+ 			/* The drawable size is now the primary width/height, so
+ 			 * the window needs to accommodate the GL viewport.
+ 			 * -flibit
+@@ -1325,8 +1334,32 @@ namespace Microsoft.Xna.Framework
+ 			return adapters;
+ 		}
+ 
++		/* The display size games see in the browser, e.g. for fullscreen backbuffers.
++		 * Override with FNA_BROWSER_DISPLAY_MODE=WIDTHxHEIGHT.
++		 */
++		private static DisplayMode BrowserDisplayMode()
++		{
++			string env = Environment.GetEnvironmentVariable("FNA_BROWSER_DISPLAY_MODE");
++			int w = 1536, h = 960;
++			if (!string.IsNullOrEmpty(env))
++			{
++				string[] parts = env.Split('x');
++				if (parts.Length == 2)
++				{
++					int.TryParse(parts[0], out w);
++					int.TryParse(parts[1], out h);
++				}
++			}
++			return new DisplayMode(w, h, SurfaceFormat.Color);
++		}
++
+ 		public static DisplayMode GetCurrentDisplayMode(int adapterIndex)
+ 		{
++			if (OperatingSystem.IsBrowser())
++			{
++				return BrowserDisplayMode();
++			}
++
+ 			SDL.SDL_DisplayMode *mode = (SDL.SDL_DisplayMode*) SDL.SDL_GetCurrentDisplayMode(displayIds[adapterIndex]);
+ 
+ 			// FIXME: iOS needs to factor in the DPI!

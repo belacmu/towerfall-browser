@@ -1,0 +1,28 @@
+diff --git a/src/FAudio_internal.c b/src/FAudio_internal.c
+index 3e87889..d44315a 100644
+--- a/src/FAudio_internal.c
++++ b/src/FAudio_internal.c
+@@ -732,7 +732,10 @@ static void FAudio_INTERNAL_DecodeBuffers(
+ #endif
+ 		{
+ 			uint32_t block_offset = voice->src.curBufferOffset % samples_per_block;
+-			const uint8_t *src = buffer->buffer.pAudioData;
++			/* Must match the main decode loop: buffers that follow unaligned data start
++			 * first_block_offset bytes in, otherwise the padding decodes garbage.
++			 */
++			const uint8_t *src = buffer->buffer.pAudioData + buffer->first_block_offset;
+ 
+ 			src += (voice->src.curBufferOffset / samples_per_block) * block_size;
+ 
+@@ -743,9 +746,10 @@ static void FAudio_INTERNAL_DecodeBuffers(
+ 
+ 		if (decode_count < EXTRA_DECODE_PADDING)
+ 		{
++			/* Zero only the padding samples we could not decode. */
+ 			FAudio_zero(
+ 				voice->audio->decoded_audio + (
+-					decoded * voice->src.format->nChannels
++					(decoded + decode_count) * voice->src.format->nChannels
+ 				),
+ 				sizeof(float) * (
+ 					(EXTRA_DECODE_PADDING - decode_count) *

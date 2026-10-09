@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Stand-in for Steamworks.NET: an unmodified TowerFall.exe binds to this by name.
+	     The version must be >= the one the game references (7.0.0.0) or binding fails. -->
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>Steamworks.NET</AssemblyName>
+		<AssemblyVersion>7.0.0.0</AssemblyVersion>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+	</PropertyGroup>
+</Project>

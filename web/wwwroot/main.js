@@ -1,0 +1,269 @@
+// Boots TowerFall in the browser:
+//  1. Get the player's game files into OPFS (see gamefiles.js), which .NET mounts at /libsdl.
+//  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
+
+import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, locateDarkWorld, locateGame } from "./gamefiles.js";
+
+const $ = (id) => document.getElementById(id);
+const status = (text) => ($("status").textContent = text);
+const detail = (text) => ($("detail").textContent = text);
+const progress = (fraction) => ($("bar").firstElementChild.style.width = `${(fraction * 100).toFixed(1)}%`);
+
+function fail(err) {
+	console.error(err);
+	status("Something went wrong");
+	// ManagedError's stack getter calls back into C#, which isn't allowed on this thread.
+	$("error").textContent = String(err?.message ?? err) + "\n\n(See the browser console for details.)";
+	$("overlay").classList.remove("hidden");
+}
+
+// Mute is remembered per browser. ?mute / ?unmute in the URL override it.
+const MUTE_KEY = "towerfall.muted";
+let muted = (() => {
+	const params = new URLSearchParams(location.search);
+	if (params.has("mute")) return true;
+	if (params.has("unmute")) return false;
+	try {
+		return localStorage.getItem(MUTE_KEY) !== "0";
+	} catch {
+		return true;
+	}
+})();
+
+// Muting zeroes a gain node between SDL's output and the speakers instead of suspending the
+// AudioContext, so the game's audio keeps running (and stays in sync) while silent.
+function applyMute() {
+	$("mute").textContent = muted ? "Sound: off" : "Sound: on";
+	const SDL3 = self.wasm?.Module?.SDL3;
+	const ctx = SDL3?.audioContext;
+	const node = SDL3?.audio_playback?.scriptProcessorNode;
+	if (!ctx || !node) return;
+	if (!node.muteGain) {
+		node.muteGain = ctx.createGain();
+		node.muteGain.connect(ctx.destination);
+		node.disconnect();
+		node.connect(node.muteGain);
+	}
+	node.muteGain.gain.value = muted ? 0 : 1;
+}
+
+$("mute").addEventListener("click", () => {
+	muted = !muted;
+	try {
+		localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+	} catch {}
+	applyMute();
+	$("canvas").focus();
+});
+applyMute();
+
+$("change").addEventListener("click", async () => {
+	await forgetGame();
+	location.reload();
+});
+
+function formatMB(bytes) {
+	return `${(bytes / 1048576).toFixed(0)} MB`;
+}
+
+// Private deployments host the game files (and the server's copy always wins); otherwise use
+// what the player imported before, or ask them for their TowerFall folder.
+async function ensureGameFiles() {
+	status("Checking game files…");
+	const server = await fromServer();
+	if (server) {
+		await copyIn(locateGame(server), "server");
+		return;
+	}
+	if (await importedGame()) {
+		$("change").hidden = false;
+	} else {
+		await askForGame();
+	}
+	if (!(await importedGame()).darkWorld) offerDarkWorld();
+}
+
+function showProgress(done, total) {
+	progress(done / total);
+	detail(`${formatMB(done)} / ${formatMB(total)}`);
+}
+
+async function copyIn(located, source) {
+	status("Copying game files into browser storage…");
+	await importGame(located, source, showProgress);
+	progress(1);
+	detail("");
+}
+
+// Lets the player drop folders on the page or choose one with `button`; calls take(entries, source)
+// with the files. Returns a function that stops listening.
+function acceptFolders(button, take) {
+	let busy = false;
+	const run = async (getEntries, source) => {
+		if (busy) return;
+		busy = true;
+		$("error").textContent = "";
+		try {
+			await take(await getEntries(), source);
+		} catch (e) {
+			if (e?.name !== "AbortError") {
+				console.error(e);
+				$("error").textContent = String(e?.message ?? e);
+			}
+		} finally {
+			busy = false;
+		}
+	};
+	button.onclick = () => {
+		if (self.showDirectoryPicker) {
+			run(async () => fromDirectoryHandle(await showDirectoryPicker({ id: "towerfall" })), "folder");
+		} else {
+			$("folder").onchange = () => {
+				if ($("folder").files.length) run(async () => fromFileList($("folder").files), "folder");
+			};
+			$("folder").click();
+		}
+	};
+	const onDragOver = (e) => e.preventDefault();
+	const onDrop = (e) => {
+		e.preventDefault();
+		const dt = e.dataTransfer;
+		// Read the entries now: DataTransfer items are only valid during the event.
+		const entries = fromDataTransfer(dt);
+		run(() => entries, "drop");
+	};
+	addEventListener("dragover", onDragOver);
+	addEventListener("drop", onDrop);
+	return () => {
+		button.onclick = null;
+		removeEventListener("dragover", onDragOver);
+		removeEventListener("drop", onDrop);
+	};
+}
+
+// Public site: the player supplies their own copy, by picking or dropping the install folder.
+function askForGame() {
+	const ask = () => {
+		status("Choose your TowerFall folder");
+		$("bar").hidden = true;
+		$("pick").hidden = false;
+	};
+	ask();
+	return new Promise((resolve) => {
+		const stop = acceptFolders($("choose"), async (entries, source) => {
+			let located;
+			try {
+				located = locateGame(entries);
+			} catch (e) {
+				ask();
+				throw e;
+			}
+			stop();
+			$("pick").hidden = true;
+			$("bar").hidden = false;
+			await copyIn(located, source);
+			resolve();
+		});
+	});
+}
+
+// Imported without Dark World (e.g. only TowerFall.app was dropped): until the game starts,
+// accept the DarkWorldContent folder on its own and add it.
+let stopDarkWorldOffer = () => {};
+function offerDarkWorld() {
+	$("dw").hidden = false;
+	stopDarkWorldOffer = acceptFolders($("dwchoose"), async (entries) => {
+		const located = locateDarkWorld(entries);
+		stopDarkWorldOffer();
+		$("dw").hidden = true;
+		status("Adding Dark World…");
+		$("bar").hidden = false;
+		await addDarkWorld(located, showProgress);
+		progress(1);
+		detail("");
+		status("Ready (with Dark World)");
+	});
+}
+
+async function startDotnet() {
+	status("Starting .NET runtime…");
+	const { dotnet } = await import("./_framework/dotnet.js");
+	const runtime = await dotnet.withConfig({}).create();
+	const config = runtime.getConfig();
+	const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
+	const canvas = $("canvas");
+	dotnet.instance.Module.canvas = canvas;
+	self.wasm = { Module: dotnet.instance.Module, dotnet, runtime, config, exports, canvas };
+
+	await runtime.runMain();
+	await exports.BrowserHost.PreInit();
+	return exports;
+}
+
+async function main() {
+	if (!self.crossOriginIsolated && navigator.serviceWorker && !navigator.serviceWorker.controller) {
+		// First visit on a host without COOP/COEP: coi-serviceworker.js is installing and will
+		// reload the page. Give it a moment before calling it a failure.
+		status("Setting up…");
+		await new Promise((resolve) => setTimeout(resolve, 5000));
+	}
+	if (!self.crossOriginIsolated) {
+		// coi-serviceworker.js reloads the page once it's installed; if we're still not isolated,
+		// the browser blocked it (e.g. private browsing) or the page isn't on https/localhost.
+		throw new Error("This page needs cross-origin isolation for threads, which this browser didn't allow here. Try a regular (non-private) window over https.");
+	}
+	await ensureGameFiles();
+	const exports = await startDotnet();
+
+	// Audio can only start after a user gesture, so wait for a click before booting the game.
+	status("Ready");
+	const play = $("play");
+	play.hidden = false;
+	await new Promise((resolve) => play.addEventListener("click", resolve, { once: true }));
+	play.hidden = true;
+	$("change").hidden = true;
+	$("dw").hidden = true;
+	stopDarkWorldOffer();
+	$("overlay").classList.add("hidden");
+	$("canvas").focus();
+
+	const noIntro = new URLSearchParams(location.search).has("nointro");
+	await exports.BrowserHost.Init(noIntro);
+
+	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
+	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).
+	const uncapped = new URLSearchParams(location.search).has("uncapped");
+	const TICK_MS = 1000 / 60;
+	let behind = TICK_MS;
+	let last = performance.now();
+
+	const frame = async (now) => {
+		behind = Math.min(behind + (now - last), TICK_MS * 4);
+		last = now;
+		// Small tolerance so 60 Hz displays (whose frames jitter around 16.7 ms) tick every frame.
+		if (!uncapped && behind < TICK_MS - 2) {
+			requestAnimationFrame(frame);
+			return;
+		}
+		behind = Math.max(0, behind - TICK_MS);
+
+		let keepRunning;
+		try {
+			keepRunning = await exports.BrowserHost.MainLoop();
+		} catch (e) {
+			fail(e);
+			return;
+		}
+		// SDL creates its AudioContext lazily, so keep the mute state applied.
+		applyMute();
+		if (keepRunning) {
+			requestAnimationFrame(frame);
+		} else {
+			status("TowerFall has exited. Reload to play again.");
+			$("overlay").classList.remove("hidden");
+		}
+	};
+	requestAnimationFrame(frame);
+}
+
+main().catch(fail);

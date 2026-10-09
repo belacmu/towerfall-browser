@@ -1,0 +1,8 @@
+.tools/
+vendor/
+bin/
+obj/
+dist/
+gamefiles/
+*.DS_Store
+reference/

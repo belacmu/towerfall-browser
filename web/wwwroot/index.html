@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>TowerFall</title>
+		<style>
+			html, body {
+				margin: 0;
+				height: 100%;
+				background: #000;
+				color: #ddd;
+				font: 14px/1.4 ui-monospace, Menlo, monospace;
+				overflow: hidden;
+			}
+			#stage {
+				position: fixed;
+				inset: 0;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+			/* SDL sizes the drawing buffer (e.g. to the screen in fullscreen mode) and the game
+			   letterboxes its 4:3 view inside it, so fill the page and keep the buffer's own
+			   aspect ratio. !important because SDL writes its window size into the inline style. */
+			canvas.canvas {
+				width: 100vw !important;
+				height: 100vh !important;
+				object-fit: contain;
+				image-rendering: pixelated;
+				outline: none;
+				background: #000;
+			}
+			#overlay {
+				position: fixed;
+				inset: 0;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				gap: 12px;
+				background: #000;
+				text-align: center;
+				padding: 16px;
+			}
+			#overlay.hidden { display: none; }
+			#bar {
+				width: min(420px, 80vw);
+				height: 8px;
+				border: 1px solid #666;
+			}
+			#bar > div {
+				height: 100%;
+				width: 0;
+				background: #e8c547;
+			}
+			#error { color: #ff7b7b; white-space: pre-wrap; max-width: 90vw; }
+			#pick { max-width: 34em; }
+			#pick p { margin: 0 0 12px; }
+			.hint { color: #999; font-size: 12px; }
+			button.link {
+				background: none;
+				border: none;
+				color: #999;
+				text-decoration: underline;
+				padding: 0;
+			}
+			#mute {
+				position: fixed;
+				top: 8px;
+				right: 8px;
+				z-index: 10;
+				opacity: 0.6;
+			}
+			#mute:hover { opacity: 1; }
+			button {
+				font: inherit;
+				background: #222;
+				color: #ddd;
+				border: 1px solid #666;
+				padding: 6px 14px;
+				cursor: pointer;
+			}
+		</style>
+		<!-- Threads need cross-origin isolation. Hosts that can't send COOP/COEP headers (GitHub
+		     Pages) get them from this service worker; it does nothing when the server sends them. -->
+		<script src="./coi-serviceworker.js"></script>
+		<script type="module" src="./main.js"></script>
+	</head>
+	<body>
+		<div id="stage">
+			<canvas id="canvas" class="canvas" tabindex="0"></canvas>
+		</div>
+		<button id="mute" title="Toggle sound">Sound: on</button>
+		<div id="overlay">
+			<div id="status">Starting…</div>
+			<div id="bar"><div></div></div>
+			<div id="detail"></div>
+			<div id="error"></div>
+			<div id="pick" hidden>
+				<p>
+					This runs TowerFall from your own copy of the PC version (Steam, itch.io or Humble).
+					Drop the folder it's installed in onto this page, or choose it below.
+					The files are copied into this browser's storage and never leave your device.
+				</p>
+				<button id="choose">Choose TowerFall folder</button>
+				<input id="folder" type="file" webkitdirectory hidden>
+				<p class="hint">
+					Steam: right-click TowerFall in your library, then Manage &rarr; Browse local files, and drag that folder here.
+				</p>
+			</div>
+			<div id="dw" hidden>
+				<p class="hint">
+					Dark World wasn't included. If you have it, drop the <b>DarkWorldContent</b> folder here too
+					(on Steam for Mac it's next to TowerFall.app), or <button id="dwchoose" class="link">choose it</button>.
+				</p>
+			</div>
+			<button id="play" hidden>Play</button>
+			<button id="change" class="link" hidden>Use different game files</button>
+		</div>
+	</body>
+</html>
