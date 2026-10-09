@@ -11,6 +11,6 @@ for f in FNA3D.a libmojoshader.a SDL3.a; do
 done
 if [ ! -d vendor/FNA ]; then
 	git clone --recursive -b 26.04 https://github.com/FNA-XNA/FNA vendor/FNA
-	git -C vendor/FNA apply ../../patches/FNA.patch
+	patch -d vendor/FNA -p1 --forward < patches/FNA.patch
 fi
 [ -f vendor/statics/FAudio.a ] || tools/build-faudio.sh

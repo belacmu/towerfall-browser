@@ -7,7 +7,7 @@ source tools/emenv.sh
 
 if [ ! -d vendor/FAudio ]; then
 	git clone --depth 1 -b 26.10 https://github.com/FNA-XNA/FAudio vendor/FAudio
-	git -C vendor/FAudio apply ../../patches/FAudio.patch
+	patch -d vendor/FAudio -p1 --forward < patches/FAudio.patch
 fi
 if [ ! -d vendor/SDL3/include ]; then
 	git clone --depth 1 --filter=blob:none --sparse -b release-3.4.4 https://github.com/libsdl-org/SDL vendor/SDL3
