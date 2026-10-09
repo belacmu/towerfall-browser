@@ -13,6 +13,11 @@ It builds on, and in places contains code adapted from, the following projects:
   the launcher library, `TowerFall.FortRise.mm.dll` and its built-in modules, plus its dependencies
   **MonoMod** (MIT), **Harmony** (MIT), **Mono.Cecil** (MIT), **Pintail** (MIT) and
   **Microsoft.Extensions.\*** (MIT).
+- **Patched .NET WebAssembly runtime** (MIT) — built by https://github.com/r58Playz/FNA-WASM-Build
+  from https://github.com/r58playz/dotnet-runtime (a fork of dotnet/runtime), fetched at build
+  time by `tools/fetch-runtime.sh` along with two small native objects for MonoMod's WebAssembly
+  detours (`hot_reload_detour.o`, derived from MIT-licensed runtime code, and `liba.o`). FNA-WASM-Build
+  itself carries no license file; replacing `liba.o` with our own source is on the to-do list.
 - **coi-serviceworker** (MIT, Guido Zuidhof and contributors) — `web/wwwroot/coi-serviceworker.js`,
   included unmodified with its license header.
 - **Steamworks.NET** (MIT) — `web/Steamworks.NET/` is an independent stand-in that mirrors the

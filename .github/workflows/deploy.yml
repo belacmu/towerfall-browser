@@ -32,7 +32,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor
-          key: vendor-${{ runner.os }}-${{ hashFiles('patches/**', 'tools/fetch-deps.sh', 'tools/build-faudio.sh', 'tools/emenv.sh', 'tools/fetch-fortrise.sh', 'tools/AnyCpu/**') }}
+          key: vendor-${{ runner.os }}-${{ hashFiles('patches/**', 'tools/fetch-deps.sh', 'tools/build-faudio.sh', 'tools/emenv.sh', 'tools/fetch-fortrise.sh', 'tools/fetch-runtime.sh', 'tools/AnyCpu/**') }}
 
       - name: Install SDK
         run: tools/install-sdk.sh

@@ -46,6 +46,10 @@
 		<NativeFileReference Include="..\vendor\statics\libmojoshader.a" />
 		<NativeFileReference Include="..\vendor\statics\FAudio.a" />
 		<NativeFileReference Include="Native\Emscripten.c" />
+		<!-- MonoMod's WebAssembly detours: interpreter hooks (liba) and a hot-reload component that
+		     serves detoured method bodies (hot_reload_detour); both from tools/fetch-runtime.sh. -->
+		<NativeFileReference Include="..\vendor\runtime\liba.o" Condition="Exists('..\vendor\runtime\liba.o')" />
+		<NativeFileReference Include="..\vendor\runtime\hot_reload_detour.o" Condition="Exists('..\vendor\runtime\hot_reload_detour.o')" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -53,5 +57,20 @@
 		<!-- Not used by the host itself; published so the game's Steamworks.NET reference binds to it. -->
 		<ProjectReference Include="Steamworks.NET\Steamworks.NET.csproj" />
 	</ItemGroup>
+	<!-- Patched Mono runtime pack (tools/fetch-runtime.sh): MonoMod's WebAssembly detours, which
+	     Harmony-based FortRise mods need, rely on its interpreter changes. -->
+	<PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)\..\vendor\runtime\dotnet')">
+		<MicrosoftNetCoreAppRuntimePackDir>$(MSBuildProjectDirectory)\..\vendor\runtime\dotnet</MicrosoftNetCoreAppRuntimePackDir>
+		<MicrosoftNetCoreAppRuntimePackRidDir>$(MicrosoftNetCoreAppRuntimePackDir)\runtimes\browser-wasm</MicrosoftNetCoreAppRuntimePackRidDir>
+		<ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+	</PropertyGroup>
+	<Target Name="UsePatchedRuntimePack" AfterTargets="ResolveFrameworkReferences" Condition="'$(MicrosoftNetCoreAppRuntimePackDir)' != ''">
+		<ItemGroup>
+			<ResolvedRuntimePack PackageDirectory="$(MicrosoftNetCoreAppRuntimePackDir)"
+				Condition="'%(ResolvedRuntimePack.FrameworkName)' == 'Microsoft.NETCore.App'" />
+		</ItemGroup>
+		<Message Text="Using patched runtime pack: %(ResolvedRuntimePack.PackageDirectory)" Importance="High" />
+	</Target>
+
 	<Import Project="FortRise\FortRise.References.props" />
 </Project>
