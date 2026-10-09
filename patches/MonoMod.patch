@@ -1,0 +1,1557 @@
+diff --git a/global.json b/global.json
+index 27925aa2..fbe71f5d 100644
+--- a/global.json
++++ b/global.json
+@@ -1,7 +1,7 @@
+ {
+   "sdk": {
+     "version": "10.0.100",
+-    "rollForward": "latestPatch",
++    "rollForward": "latestFeature",
+     "allowPrerelease": true
+   },
+   "msbuild-sdks": {
+diff --git a/src/MonoMod.Core/IDetourFactory.cs b/src/MonoMod.Core/IDetourFactory.cs
+index 9fcc4aac..34d46f4a 100644
+--- a/src/MonoMod.Core/IDetourFactory.cs
++++ b/src/MonoMod.Core/IDetourFactory.cs
+@@ -94,12 +94,12 @@ namespace MonoMod.Core
+         private static IDetourFactory? lazyDefault;
+ 
+         /// <summary>
+-        /// Gets the default <see cref="IDetourFactory"/>. This is always the <see cref="PlatformTriple"/>-based <see cref="IDetourFactory"/>.
++        /// Gets the default <see cref="IDetourFactory"/>. On this (WebAssembly-only) build, this is always the <see cref="WasmDetourFactory"/>.
+         /// </summary>
+         public static unsafe IDetourFactory Default => Helpers.GetOrInitWithLock(ref lazyDefault, currentLock, &CreateDefault);
+         [SuppressMessage("Performance", "CA1859:Use concrete types when possible for improved performance",
+             Justification = "Must have this exact return type.")]
+-        private static IDetourFactory CreateDefault() => new PlatformTripleDetourFactory(PlatformTriple.Current);
++        private static IDetourFactory CreateDefault() => new WasmDetourFactory(PlatformTriple.Current);
+ 
+         private static IDetourFactory? lazyCurrent;
+         /// <summary>
+diff --git a/src/MonoMod.Core/Interop/Unix.cs b/src/MonoMod.Core/Interop/Unix.cs
+index 92f3adbe..987ef0d9 100644
+--- a/src/MonoMod.Core/Interop/Unix.cs
++++ b/src/MonoMod.Core/Interop/Unix.cs
+@@ -6,37 +6,37 @@ namespace MonoMod.Core.Interop
+     internal static class Unix
+     {
+         // If this dllimport decl isn't enough to get the runtime to load the right thing, I give up
+-        public const string LibC = "libc";
++        public const string LibC = "liba";
+ 
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "read")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_read")]
+         public static extern unsafe nint Read(int fd, IntPtr buf, nint count);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "write")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_write")]
+         public static extern unsafe nint Write(int fd, IntPtr buf, nint count);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "pipe2")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_pipe2")]
+         public static extern unsafe int Pipe2(int* pipefd, PipeFlags flags);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "close")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_close")]
+         public static extern unsafe int Close(int fd);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mmap")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_mmap")]
+         public static extern unsafe nint Mmap(IntPtr addr, nuint length, Protection prot, MmapFlags flags, int fd, int offset);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "munmap")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_munmap")]
+         public static extern unsafe int Munmap(IntPtr addr, nuint length);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mprotect")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_mprotect")]
+         public static extern unsafe int Mprotect(IntPtr addr, nuint len, Protection prot);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "sysconf")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_sysconf")]
+         public static extern unsafe long Sysconf(SysconfName name);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mincore")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_mincore")]
+         public static extern unsafe int Mincore(IntPtr addr, nuint len, byte* vec);
+ 
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mkstemp")]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_mkstemp")]
+         public static extern unsafe int MkSTemp(byte* template);
+ 
+         [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "__errno_location")]
+diff --git a/src/MonoMod.Core/Platforms/PlatformTriple.cs b/src/MonoMod.Core/Platforms/PlatformTriple.cs
+index c2713384..a839e0b2 100644
+--- a/src/MonoMod.Core/Platforms/PlatformTriple.cs
++++ b/src/MonoMod.Core/Platforms/PlatformTriple.cs
+@@ -70,6 +70,8 @@ namespace MonoMod.Core.Platforms
+                 ArchitectureKind.x86_64 => new Architectures.x86_64Arch(system),
+                 ArchitectureKind.Arm => throw new NotImplementedException(),
+                 ArchitectureKind.Arm64 => new Architectures.Arm64Arch(system),
++                // wasm: there is no real native architecture to target; WasmDetourFactory does not use the arch's detour codegen
++                ArchitectureKind.Wasm32 => new Architectures.x86_64Arch(system),
+                 var kind => throw new PlatformNotSupportedException($"Architecture kind {kind} not supported"),
+             };
+         }
+@@ -93,6 +95,7 @@ namespace MonoMod.Core.Platforms
+                 OSKind.IOS => throw new NotImplementedException(),
+                 OSKind.BSD => throw new NotImplementedException(),
+                 OSKind.Windows or OSKind.Wine => new Systems.WindowsSystem(),
++                OSKind.Emscripten => new Systems.EmscriptenSystem(),
+                 var kind => throw new PlatformNotSupportedException($"OS kind {kind} not supported"),
+             };
+ 
+@@ -632,6 +635,7 @@ namespace MonoMod.Core.Platforms
+         {
+             Helpers.ThrowIfArgumentNull(from);
+             Helpers.ThrowIfArgumentNull(to);
++            return to;
+ 
+             // TODO: check that `from` and `to` are actually argument- and return-compatible.
+             // When we use this method internally, all the necessary checks are already performed
+diff --git a/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs b/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs
+index f72c399e..13ddffee 100644
+--- a/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs
++++ b/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs
+@@ -211,7 +211,9 @@ namespace MonoMod.Core.Platforms.Runtimes
+             typeof(DynamicMethod).GetMethod("CreateDynMethod", BindingFlags.NonPublic | BindingFlags.Instance)!;
+ 
+         private static readonly FieldInfo _DynamicMethod_mhandle =
+-            typeof(DynamicMethod).GetField("mhandle", BindingFlags.NonPublic | BindingFlags.Instance)!;
++            // .NET 10's Mono renamed DynamicMethod.mhandle to _mhandle
++            typeof(DynamicMethod).GetField("_mhandle", BindingFlags.NonPublic | BindingFlags.Instance)
++            ?? typeof(DynamicMethod).GetField("mhandle", BindingFlags.NonPublic | BindingFlags.Instance)!;
+ 
+         public RuntimeMethodHandle GetMethodHandle(MethodBase method)
+         {
+diff --git a/src/MonoMod.Core/Platforms/Systems/EmscriptenSystem.cs b/src/MonoMod.Core/Platforms/Systems/EmscriptenSystem.cs
+new file mode 100644
+index 00000000..1039cb7a
+--- /dev/null
++++ b/src/MonoMod.Core/Platforms/Systems/EmscriptenSystem.cs
+@@ -0,0 +1,392 @@
++using MonoMod.Core.Interop;
++using MonoMod.Core.Platforms.Memory;
++using MonoMod.Core.Utils;
++using MonoMod.Utils;
++using System;
++using System.Collections.Generic;
++using System.ComponentModel;
++using System.Diagnostics.CodeAnalysis;
++
++namespace MonoMod.Core.Platforms.Systems
++{
++    internal sealed class EmscriptenSystem : ISystem, IInitialize<IArchitecture>
++    {
++        public OSKind Target => OSKind.Emscripten;
++
++        public SystemFeature Features => SystemFeature.RWXPages | SystemFeature.RXPages;
++
++        private readonly Abi defaultAbi;
++        public Abi? DefaultAbi => defaultAbi;
++
++        public IEnumerable<LoadedModule> EnumerateLoadedModules()
++        {
++            // Emscripten has no /proc/self/maps (and no real native modules to speak of)
++            yield break;
++        }
++
++        public IEnumerable<string?> EnumerateLoadedModuleFiles()
++        {
++            foreach (var module in EnumerateLoadedModules())
++            {
++                yield return module.FileName;
++            }
++        }
++
++        private readonly nint PageSize;
++
++        private readonly MmapPagedMemoryAllocator allocator;
++        public IMemoryAllocator MemoryAllocator => allocator;
++
++        public EmscriptenSystem()
++        {
++            PageSize = (nint)Unix.Sysconf(Unix.SysconfName.PageSize);
++            allocator = new MmapPagedMemoryAllocator(PageSize);
++
++            switch (PlatformDetection.Architecture)
++            {
++                case ArchitectureKind.x86_64:
++                    defaultAbi = new Abi(
++                        new[] { SpecialArgumentKind.ReturnBuffer, SpecialArgumentKind.ThisPointer, SpecialArgumentKind.UserArguments },
++                        SystemVABI.ClassifyAMD64,
++                        true
++                    );
++                    break;
++                case ArchitectureKind.Arm64:
++                    defaultAbi = new Abi(
++                        new[]
++                        {
++                            //SpecialArgumentKind.ReturnBuffer, // ARM64 passes the return buffer in a dedicated register
++                            SpecialArgumentKind.ThisPointer,
++                            SpecialArgumentKind.UserArguments
++                        },
++                        SystemVABI.ClassifyARM64,
++                        false
++                    );
++                    break;
++                default:
++                    // wasm: there is no native ABI that MonoMod needs to know about; WasmDetourFactory doesn't use it
++                    break;
++            }
++        }
++
++        public nint GetSizeOfReadableMemory(IntPtr start, nint guess)
++        {
++            var currentPage = allocator.RoundDownToPageBoundary(start);
++            if (!MmapPagedMemoryAllocator.PageReadable(currentPage))
++            {
++                return 0;
++            }
++            currentPage += PageSize;
++
++            var known = currentPage - start;
++
++            while (known < guess)
++            {
++                if (!MmapPagedMemoryAllocator.PageReadable(currentPage))
++                {
++                    return known;
++                }
++                known += PageSize;
++                currentPage += PageSize;
++            }
++
++            return known;
++        }
++
++        public unsafe void PatchData(PatchTargetKind patchKind, IntPtr patchTarget, ReadOnlySpan<byte> data, Span<byte> backup)
++        {
++            // TODO: should this be thread-safe? It definitely is not right now.
++
++            // Update the protection of this
++            if (patchKind == PatchTargetKind.Executable)
++            {
++                // Because Windows is Windows, we don't actually need to do anything except make sure we're in RWX
++                ProtectRWX(patchTarget, data.Length);
++            }
++            else
++            {
++                ProtectRW(patchTarget, data.Length);
++            }
++
++            var target = new Span<byte>((void*)patchTarget, data.Length);
++            // now we copy target to backup, then data to target, then flush the instruction cache
++            _ = target.TryCopyTo(backup);
++            data.CopyTo(target);
++        }
++
++        private void RoundToPageBoundary(ref nint addr, ref nint size)
++        {
++            var newAddr = allocator.RoundDownToPageBoundary(addr);
++            size += addr - newAddr;
++            addr = newAddr;
++        }
++
++        private void ProtectRW(IntPtr addr, nint size)
++        {
++            RoundToPageBoundary(ref addr, ref size);
++            if (Unix.Mprotect(addr, (nuint)size, Unix.Protection.Read | Unix.Protection.Write) != 0)
++            {
++                throw new Win32Exception(Unix.Errno);
++            }
++        }
++
++        private void ProtectRWX(IntPtr addr, nint size)
++        {
++            RoundToPageBoundary(ref addr, ref size);
++            if (Unix.Mprotect(addr, (nuint)size, Unix.Protection.Read | Unix.Protection.Write | Unix.Protection.Execute) != 0)
++            {
++                throw new Win32Exception(Unix.Errno);
++            }
++        }
++
++        private sealed class MmapPagedMemoryAllocator : PagedMemoryAllocator
++        {
++            public MmapPagedMemoryAllocator(nint pageSize)
++                : base(pageSize)
++            {
++            }
++
++            [SuppressMessage("Design", "CA1032:Implement standard exception constructors")]
++            [SuppressMessage("Design", "CA1064:Exceptions should be public",
++                Justification = "This is used exclusively internally as jank control flow because I'm lazy")]
++            private sealed class SyscallNotImplementedException : Exception { }
++
++            private static int PageProbePipeReadFD, PageProbePipeWriteFD;
++
++            [SuppressMessage("Design", "CA1065:Do not raise exceptions in unexpected locations",
++                Justification = "If the exception is thrown, the application is in an unrecoverable state. Methods on this type will not behave well.")]
++            [SuppressMessage("Performance", "CA1810:Initialize reference type static fields inline",
++                Justification = "There is no good way to inline the initialization here, and we want to make sure that the cctor runs before anything is done with the type.")]
++            static unsafe MmapPagedMemoryAllocator()
++            {
++                // Open a temporary pipe for page probes
++                // This pipe gets leaked, but eh
++                var pipefd = stackalloc int[2];
++                if (Unix.Pipe2(pipefd, Unix.PipeFlags.CloseOnExec) == -1)
++                {
++                    throw new Win32Exception(Unix.Errno, "Failed to create pipe for page probes");
++                }
++
++                PageProbePipeReadFD = pipefd[0];
++                PageProbePipeWriteFD = pipefd[1];
++            }
++
++            public static unsafe bool PageAllocated(nint page)
++            {
++                byte garbage;
++                // TODO: Mincore isn't implemented in WSL, and always gives ENOSYS
++                if (Unix.Mincore(page, 1, &garbage) == -1)
++                {
++                    var lastError = Unix.Errno;
++                    if (lastError == 12)
++                    {  // ENOMEM, page is unallocated
++                        return false;
++                    }
++                    if (lastError == 38)
++                    { // ENOSYS, function not implemented
++                        // TODO: possibly implement /proc/self/maps parsing as a fallback
++                        throw new SyscallNotImplementedException();
++                    }
++                    throw new NotImplementedException($"Got unimplemented errno for mincore(2); errno = {lastError}");
++                }
++                return true;
++            }
++
++            public static unsafe bool PageReadable(nint page)
++            {
++                // Try to write into a pipe using the page as the source buffer
++                if (Unix.Write(PageProbePipeWriteFD, page, 1) == -1)
++                {
++                    var lastError = Unix.Errno;
++                    if (lastError == 14)
++                    {  // EFAULT, buf is not readable
++                        return false;
++                    }
++                    throw new NotImplementedException($"Got unimplemented errno for write(2); errno = {lastError}");
++                }
++
++                // Success - clean up the pipe
++                byte garbage;
++                if (Unix.Read(PageProbePipeReadFD, new IntPtr(&garbage), 1) == -1)
++                {
++                    throw new Win32Exception("Failed to clean up page probe pipe after successful page probe");
++                }
++
++                return true;
++            }
++
++            private bool canTestPageAllocation = true;
++
++            protected override bool TryAllocateNewPage(AllocationRequest request, [MaybeNullWhen(false)] out IAllocatedMemory allocated)
++            {
++                var prot = request.Executable ? Unix.Protection.Execute : Unix.Protection.None;
++                prot |= Unix.Protection.Read | Unix.Protection.Write;
++
++                // mmap the page we found
++                var mmapPtr = Unix.Mmap(IntPtr.Zero, (nuint)PageSize, prot, Unix.MmapFlags.Private | Unix.MmapFlags.Anonymous, -1, 0);
++                if (mmapPtr is 0 or -1)
++                {
++                    // fuck
++                    var errno = Unix.Errno;
++                    MMDbgLog.Error($"Error creating allocation: {errno} {new Win32Exception(errno).Message}");
++                    allocated = null;
++                    return false;
++                }
++
++                // create a Page object for the newly mapped memory, even before deciding whether we succeeded or not
++                var page = new Page(this, mmapPtr, (uint)PageSize, request.Executable);
++                InsertAllocatedPage(page);
++
++                // for simplicity, we'll try to allocate out of the page before checking bounds
++                if (!page.TryAllocate((uint)request.Size, (uint)request.Alignment, out var pageAlloc))
++                {
++                    // huh???
++                    RegisterForCleanup(page);
++                    allocated = null;
++                    return false;
++                }
++
++                // we got an allocation!
++                allocated = pageAlloc;
++                return true;
++            }
++
++            protected override bool TryAllocateNewPage(
++                PositionedAllocationRequest request,
++                nint targetPage, nint lowPageBound, nint highPageBound,
++                [MaybeNullWhen(false)] out IAllocatedMemory allocated
++            )
++            {
++                if (!canTestPageAllocation)
++                {
++                    allocated = null;
++                    return false;
++                }
++
++                var prot = request.Base.Executable ? Unix.Protection.Execute : Unix.Protection.None;
++                prot |= Unix.Protection.Read | Unix.Protection.Write;
++
++                // number of pages needed to satisfy length requirements
++                var numPages = request.Base.Size / PageSize + 1;
++
++                // find the nearest unallocated page within our bounds
++                var low = targetPage - PageSize;
++                var high = targetPage;
++                nint ptr = -1;
++
++                try
++                {
++                    while (low >= lowPageBound || high <= highPageBound)
++                    {
++
++                        // check above the target page first
++                        if (high <= highPageBound)
++                        {
++                            for (nint i = 0; i < numPages; i++)
++                            {
++                                if (PageAllocated(high + PageSize * i))
++                                {
++                                    high += PageSize;
++                                    goto FailHigh;
++                                }
++                            }
++                            // all pages are unallocated, we're done
++                            ptr = high;
++                            break;
++                        }
++                        FailHigh:
++                        if (low >= lowPageBound)
++                        {
++                            for (nint i = 0; i < numPages; i++)
++                            {
++                                if (PageAllocated(low + PageSize * i))
++                                {
++                                    low -= PageSize;
++                                    goto FailLow;
++                                }
++                            }
++                            // all pages are unallocated, we're done
++                            ptr = low;
++                            break;
++                        }
++                        FailLow:
++                        { }
++                    }
++                }
++                catch (SyscallNotImplementedException)
++                {
++                    canTestPageAllocation = false;
++                    allocated = null;
++                    return false;
++                }
++
++                // unable to find a page within bounds
++                if (ptr == -1)
++                {
++                    allocated = null;
++                    return false;
++                }
++
++                // mmap the page we found
++                var mmapPtr = Unix.Mmap(ptr, (nuint)PageSize, prot, Unix.MmapFlags.Private | Unix.MmapFlags.Anonymous | Unix.MmapFlags.FixedNoReplace, -1, 0);
++                if (mmapPtr is 0 or -1)
++                {
++                    // fuck
++                    allocated = null;
++                    return false;
++                }
++
++                // create a Page object for the newly mapped memory, even before deciding whether we succeeded or not
++                var page = new Page(this, mmapPtr, (uint)PageSize, request.Base.Executable);
++                InsertAllocatedPage(page);
++
++                // for simplicity, we'll try to allocate out of the page before checking bounds
++                if (!page.TryAllocate((uint)request.Base.Size, (uint)request.Base.Alignment, out var pageAlloc))
++                {
++                    // huh???
++                    RegisterForCleanup(page);
++                    allocated = null;
++                    return false;
++                }
++
++                if ((nint)pageAlloc.BaseAddress < request.LowBound || (nint)pageAlloc.BaseAddress + pageAlloc.Size >= request.HighBound)
++                {
++                    // the allocation didn't land in bounds, fail out
++                    pageAlloc.Dispose(); // because this is the only allocation in the page, this auto-registers it for cleanup
++                    allocated = null;
++                    return false;
++                }
++
++                // we got an allocation!
++                allocated = pageAlloc;
++                return true;
++            }
++
++            protected override bool TryFreePage(Page page, [NotNullWhen(false)] out string? errorMsg)
++            {
++                var res = Unix.Munmap(page.BaseAddr, page.Size);
++                if (res != 0)
++                {
++                    errorMsg = new Win32Exception(Unix.Errno).Message;
++                    return false;
++                }
++                errorMsg = null;
++                return true;
++            }
++        }
++
++        private IArchitecture? arch;
++        void IInitialize<IArchitecture>.Initialize(IArchitecture value)
++        {
++            arch = value;
++        }
++
++        // wasm: there is no native exception helper (it is a native .so); native exceptions can't cross managed frames there anyway
++        public INativeExceptionHelper? NativeExceptionHelper => null;
++
++        public unsafe IntPtr GetNativeJitHookConfig(int runtimeMajMin)
++        {
++            throw new NotImplementedException();
++        }
++    }
++}
+diff --git a/src/MonoMod.Core/Platforms/WasmDetourFactory.cs b/src/MonoMod.Core/Platforms/WasmDetourFactory.cs
+new file mode 100644
+index 00000000..743cd420
+--- /dev/null
++++ b/src/MonoMod.Core/Platforms/WasmDetourFactory.cs
+@@ -0,0 +1,358 @@
++using MonoMod.Utils;
++using System;
++using System.Reflection;
++using System.Runtime.InteropServices;
++using System.Collections.Generic;
++using System.Linq;
++
++namespace MonoMod.Core.Platforms
++{
++    /// <summary>
++    /// An <see cref="IDetourFactory"/> implementation based on LibA.
++    /// </summary>
++    public sealed class WasmDetourFactory : IDetourFactory
++    {
++        /// <summary>
++        /// Whether generated detour stubs should use a <c>tail.</c> prefixed <c>calli</c>. Falls back to a non-tail call if that fails.
++        /// </summary>
++        public static bool EnableTailCallDetours = false;
++        /// <summary>
++        /// Simple names of assemblies whose methods should never be detoured (as source or target). Detours involving them are silently nullified.
++        /// </summary>
++        public static HashSet<string> Blacklist = new();
++
++        private static class LibA
++        {
++            [DllImport("liba")]
++            public static extern IntPtr magictranslate(IntPtr ptr);
++            [DllImport("liba")]
++            public static extern void magicinvalidate(IntPtr ptr);
++            [DllImport("liba")]
++            public static extern UInt32 magictranslatelen(IntPtr ptr);
++
++            [DllImport("liba")]
++            public static extern void magicdetour2(IntPtr ptr, IntPtr code);
++            [DllImport("liba")]
++            public static extern int magicdetour2allowed(IntPtr ptr);
++            [DllImport("liba")]
++            public static extern void magicundetour2(IntPtr ptr);
++        }
++
++        internal interface IWasmDetourStrategy
++        {
++            public abstract void ChangeMethodCode(IntPtr method, byte[] bytes);
++            public abstract void RevertMethodCode(IntPtr method);
++        }
++
++        internal sealed class HotReloadDetourStrategy : IWasmDetourStrategy
++        {
++            GCHandle? Code;
++
++            private void WriteFunc(IntPtr method, byte[] func)
++            {
++                Code = GCHandle.Alloc(func, GCHandleType.Pinned);
++
++                LibA.magicdetour2(method, Code.Value.AddrOfPinnedObject());
++            }
++
++            private byte[] CreateFunc(byte[] code)
++            {
++                // https://github.com/dotnet/runtime/blob/main/src/mono/mono/metadata/metadata.c#L4373-L4395
++                List<byte> func = new();
++				if (code.Length < 0b00111111) {
++					byte header = (byte) (0x2 | (code.Length << 2)); // 0x2: tiny header
++					func.Add(header);
++					func.AddRange(code);
++					return func.ToArray();
++				} else {
++					// currently hardcoding the stack size and locals which will probably cause mono to freak out
++					MMDbgLog.Trace("[HotReloadDetour] Fat header needed, may fail");
++
++					byte flags1 = (byte) (0x3); // 0x3: fat header
++					byte flags2 = (byte) (0);
++
++					UInt16 max_stack = (UInt16) (32);
++					UInt32 code_size = (UInt32) (code.Length);
++					UInt32 locals = (UInt32) (32);
++
++					func.Add(flags1);
++					func.Add(flags2);
++					func.AddRange(BitConverter.GetBytes(max_stack));
++					func.AddRange(BitConverter.GetBytes(code_size));
++					func.AddRange(BitConverter.GetBytes(locals));
++					func.AddRange(code);
++
++					return func.ToArray();
++				}
++            }
++
++            public void ChangeMethodCode(IntPtr method, byte[] bytes)
++            {
++                if (LibA.magicdetour2allowed(method) == 0)
++					throw new NotSupportedException("HotReloadDetour is known to not work for this function type (magicdetour2NOTallowed!!)");
++
++				MMDbgLog.Trace($"[HotReloadDetour] Detouring");
++				WriteFunc(method, CreateFunc(bytes));
++            }
++
++            public void RevertMethodCode(IntPtr method)
++            {
++                if (!Code.HasValue) throw new Exception("Trying to Undo() a Detour that was not applied");
++
++				MMDbgLog.Trace($"[HotReloadDetour] Undetouring");
++                LibA.magicundetour2(method);
++
++                Code.Value.Free();
++				Code = null;
++            }
++        }
++
++        internal sealed class MagicOverwriteDetourStrategy : IWasmDetourStrategy
++        {
++            private byte[]? OldCode;
++
++            private static byte[] ReadCode(IntPtr ptr, UInt32 len)
++            {
++                byte[] code = new byte[len];
++                for (int i = 0; i < len; i++)
++                {
++                    code[i] = Marshal.ReadByte(ptr + i);
++                }
++                return code;
++            }
++
++            private static byte[] OverwriteCode(IntPtr ptr, UInt32 len, byte[] code)
++            {
++                byte[] oldCode = ReadCode(ptr, len);
++
++                for (int i = 0; i < len; i++)
++                {
++                    Marshal.WriteByte(ptr + i, 0x00);
++                }
++                Marshal.Copy(code, 0, ptr, code.Length);
++
++                return oldCode;
++            }
++
++            public void ChangeMethodCode(IntPtr method, byte[] bytes)
++            {
++                IntPtr codeptr = LibA.magictranslate(method);
++                UInt32 codelen = LibA.magictranslatelen(method);
++
++                if (bytes.Length > codelen) throw new Exception($"Jump patch was too big for code! (jump len {bytes.Length} while code len {codelen})");
++
++                byte[] oldCode = OverwriteCode(codeptr, codelen, bytes);
++                MMDbgLog.Trace($"[MagicOverwriteDetour] Wrote to code ptr: {codeptr:X} {codelen}");
++
++                OldCode = oldCode;
++            }
++
++            public void RevertMethodCode(IntPtr method)
++            {
++                if (OldCode == null) throw new Exception("Trying to Undo() a Detour that was not applied");
++                ChangeMethodCode(method, OldCode);
++                OldCode = null;
++            }
++        }
++
++        private sealed class Detour : ICoreDetourBase, ICoreDetour
++        {
++            public MethodBase Source { get; }
++
++            public MethodBase Target { get; }
++
++            public bool IsApplied { get; private set; }
++
++            private PlatformTriple triple;
++
++            private IWasmDetourStrategy? Strategy;
++
++            public Detour(PlatformTriple triple, MethodBase src, MethodBase dst)
++            {
++                Source = src; // triple.GetIdentifiable(src);
++                Target = dst;
++
++                this.triple = triple;
++
++                IsApplied = false;
++            }
++
++            private byte[] BuildDetourBytes(IntPtr source, IntPtr target, bool disableTailCalls = false)
++            {
++                List<byte> il = new();
++
++                int argCount = Source.GetParameters().Length;
++                if (!Source.IsStatic)
++                    argCount++; // this parameter
++
++                foreach (var i in Enumerable.Range(0, argCount))
++                {
++                    if (i < 4)
++                    {
++                        il.Add((byte)(0x02 + i)); // ldarg.{0,1,2,3}
++                    }
++                    else if (i < 256)
++                    {
++                        il.Add(0x0E); // ldarg.s
++                        il.Add((byte)i);
++                    }
++                    else
++                    {
++                        il.AddRange([0xFE, 0x09]); // ldarg
++                        il.AddRange(BitConverter.GetBytes((UInt16)i));
++                    }
++                }
++
++                il.Add(0x20); // ldc.i4
++                il.AddRange(BitConverter.GetBytes((Int32)target));
++
++				// strictly worse for size but possibly faster?
++                if (!disableTailCalls && WasmDetourFactory.EnableTailCallDetours) {
++                    il.AddRange([0xFE, 0x14]); // tail.
++				}
++
++				il.Add(0x29); // calli
++				il.AddRange([0xF0, 0xF0, 0xF0, 0xF0]); // magic number that gets specialcased by patched runtime
++				il.Add(0x2A); // ret
++
++                return il.ToArray();
++            }
++
++			private void TryStrategies(IntPtr fn, byte[] jump) {
++				Strategy = new HotReloadDetourStrategy();
++				try {
++					MMDbgLog.Trace($"[WasmDetour] Trying HotReloadDetourStrategy");
++					Strategy.ChangeMethodCode(fn, jump);
++				} catch (Exception e) {
++					MMDbgLog.Trace($"[WasmDetour] Falling back to MagicOverwriteDetourStrategy: {e.Message}");
++					Strategy = new MagicOverwriteDetourStrategy();
++					Strategy.ChangeMethodCode(fn, jump);
++				}
++			}
++
++            public void Apply()
++            {
++                if (Strategy != null) return;
++
++                IntPtr source = triple.Runtime.GetMethodHandle(Source).GetFunctionPointer();
++                IntPtr target = triple.Runtime.GetMethodHandle(Target).GetFunctionPointer();
++                MMDbgLog.Trace($"[WasmDetour] Applying managed IL detour from {Source} ({source:X}) to {Target} ({target:X})");
++
++				try {
++					TryStrategies(source, BuildDetourBytes(source, target));
++				} catch(Exception e) {
++					if (WasmDetourFactory.EnableTailCallDetours) {
++						MMDbgLog.Trace($"[WasmDetour] tail call detour failed, trying without tail calls: {e.Message}");
++						TryStrategies(source, BuildDetourBytes(source, target, true));
++					} else {
++						throw;
++					}
++				}
++
++                triple.PinMethodIfNeeded(Source);
++                triple.PinMethodIfNeeded(Target);
++
++                MMDbgLog.Trace($"[WasmDetour] Pinned {source:X} and {target:X}");
++
++                LibA.magicinvalidate(source);
++                MMDbgLog.Trace($"[WasmDetour] Invalidated {source:X}");
++            }
++
++            public void Undo()
++            {
++                if (Strategy == null) return;
++
++                IntPtr source = triple.Runtime.GetMethodHandle(Source).GetFunctionPointer();
++                MMDbgLog.Trace($"[WasmDetour] Reverting managed IL detour on {Source} ({source:X}) ");
++                Strategy.RevertMethodCode(source);
++				Strategy = null;
++            }
++
++            private bool disposedValue;
++            private void Dispose(bool disposing)
++            {
++                if (!disposedValue)
++                {
++                    disposedValue = true;
++                }
++            }
++
++            ~Detour()
++            {
++                // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
++                Dispose(disposing: false);
++            }
++
++            public void Dispose()
++            {
++                // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
++                Dispose(disposing: true);
++                GC.SuppressFinalize(this);
++            }
++        }
++
++        private sealed class NullifiedDetour : ICoreDetourBase, ICoreDetour
++        {
++            public MethodBase Source { get; }
++            public MethodBase Target { get; }
++            public bool IsApplied => false;
++
++            public NullifiedDetour(MethodBase src, MethodBase dst)
++            {
++                Source = src;
++                Target = dst;
++            }
++
++            public void Apply() {}
++            public void Undo() {}
++            public void Dispose() {}
++        }
++
++        private readonly PlatformTriple triple;
++
++        /// <summary>
++        /// Constructs a <see cref="WasmDetourFactory"/> based on the provided <see cref="PlatformTriple"/>.
++        /// </summary>
++        /// <param name="triple">The <see cref="PlatformTriple"/> to create a detour factory using.</param>
++        public WasmDetourFactory(PlatformTriple triple)
++        {
++            MMDbgLog.Warning("RE'd by velzie and r58playz :33333");
++            this.triple = triple;
++        }
++
++        /// <inheritdoc/>
++        public ICoreDetour CreateDetour(CreateDetourRequest request)
++        {
++            Helpers.ThrowIfArgumentNull(request.Source);
++            Helpers.ThrowIfArgumentNull(request.Target);
++
++            string sourceAsm = request.Source.DeclaringType?.Assembly.GetName().Name ?? "Unknown";
++            string targetAsm = request.Target.DeclaringType?.Assembly.GetName().Name ?? "Unknown";
++
++            if (Blacklist.Contains(sourceAsm) || Blacklist.Contains(targetAsm))
++            {
++                MMDbgLog.Warning($"[WasmDetour] Skipping hook from \"{request.Source}\" to \"{request.Target}\" because containing assembly is blacklisted");
++                return new NullifiedDetour(request.Source, request.Target);
++            }
++
++            if (!triple.TryDisableInlining(request.Source))
++                MMDbgLog.Warning($"Could not disable inlining of method {request.Source}; detours may not be reliable");
++
++            var detour = new Detour(triple, request.Source, request.Target);
++            if (request.ApplyByDefault)
++            {
++                detour.Apply();
++            }
++            return detour;
++        }
++
++        /// <inheritdoc/>
++        public bool SupportsNativeDetourOrigEntrypoint => false;
++
++        /// <inheritdoc/>
++        public ICoreNativeDetour CreateNativeDetour(CreateNativeDetourRequest request)
++        {
++            throw new NotSupportedException("Native detours are not supported on WASM.");
++        }
++    }
++}
+diff --git a/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs b/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs
+index b87a1a69..cdb05696 100644
+--- a/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs
++++ b/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs
+@@ -13,6 +13,8 @@ namespace MonoMod.InlineRT
+     {
+ 
+         private static readonly Assembly MonoModAsm = typeof(MonoModRulesManager).Assembly;
++        [ThreadStatic]
++        private static MonoModder ThreadLocalCurrentModder;
+ 
+         private static long PrevID;
+         private static readonly Dictionary<long, WeakReference> ModderMap = new Dictionary<long, WeakReference>();
+@@ -22,22 +24,45 @@ namespace MonoMod.InlineRT
+         {
+             get
+             {
+-                var st = new StackTrace();
+-                for (var i = 1; i < st.FrameCount; i++)
++                try
+                 {
+-                    StackFrame frame = st.GetFrame(i);
+-                    MethodBase method = frame.GetMethod();
+-                    Assembly asm = method.DeclaringType.Assembly;
+-                    if (asm == MonoModAsm)
+-                        continue;
+-                    MonoModder modder = GetModder(method.DeclaringType.Assembly.GetName().Name);
+-                    if (modder != null)
+-                        return modder;
++                    var st = new StackTrace();
++                    for (var i = 1; i < st.FrameCount; i++)
++                    {
++                        StackFrame frame = st.GetFrame(i);
++                        MethodBase method = frame.GetMethod();
++                        Assembly asm = method.DeclaringType.Assembly;
++                        if (asm == MonoModAsm)
++                            continue;
++                        MonoModder modder = GetModder(method.DeclaringType.Assembly.GetName().Name);
++                        if (modder != null)
++                            return modder;
++                    }
+                 }
++
++                catch
++                {
++                }
++
++                if (ThreadLocalCurrentModder != null)
++                    return ThreadLocalCurrentModder;
++
+                 return null;
+             }
+         }
+ 
++        internal static MonoModder EnterModderContext(MonoModder modder)
++        {
++            var previousModder = ThreadLocalCurrentModder;
++            ThreadLocalCurrentModder = modder;
++            return previousModder;
++        }
++
++        internal static void ExitModderContext(MonoModder previousModder)
++        {
++            ThreadLocalCurrentModder = previousModder;
++        }
++
+         public static Type RuleType
+         {
+             get
+@@ -163,7 +188,15 @@ namespace MonoMod.InlineRT
+             self.MissingDependencyThrow = missingDependencyThrow;
+ 
+             Type rules = asm.GetType(orig.FullName);
+-            RuntimeHelpers.RunClassConstructor(rules.TypeHandle);
++            var previousModder = EnterModderContext(self);
++            try
++            {
++                RuntimeHelpers.RunClassConstructor(rules.TypeHandle);
++            }
++            finally
++            {
++                ExitModderContext(previousModder);
++            }
+ 
+             return rules;
+         }
+diff --git a/src/MonoMod.Patcher/MonoMod.Patcher.csproj b/src/MonoMod.Patcher/MonoMod.Patcher.csproj
+index 83aa8816..1c62d49b 100644
+--- a/src/MonoMod.Patcher/MonoMod.Patcher.csproj
++++ b/src/MonoMod.Patcher/MonoMod.Patcher.csproj
+@@ -16,6 +16,9 @@
+          (but different!) files with the same package path, which results in a pack error. -->
+     <PackAsPublish>false</PackAsPublish>
+     <IsPackable>false</IsPackable>
++    <!-- Version.props is only imported for packable projects; give the assembly a real version so that
++         references to MonoMod.Patcher 25.0.x (e.g. from FortRise) bind to it. -->
++    <VersionPrefix>25.0.2</VersionPrefix>
+   </PropertyGroup>
+ 
+   <!-- Dependencies -->
+diff --git a/src/MonoMod.Patcher/MonoModder.cs b/src/MonoMod.Patcher/MonoModder.cs
+index fb3d2e17..89736d26 100644
+--- a/src/MonoMod.Patcher/MonoModder.cs
++++ b/src/MonoMod.Patcher/MonoModder.cs
+@@ -859,12 +859,21 @@ namespace MonoMod
+             if (!cap.HasCustomAttributes)
+                 return;
+ 
+-            foreach (CustomAttribute attrib in cap.CustomAttributes.ToArray())
++            var previousModder = MonoModRulesManager.EnterModderContext(this);
++            try
++            {
++
++                foreach (CustomAttribute attrib in cap.CustomAttributes.ToArray())
++                {
++                    if (CustomAttributeHandlers.TryGetValue(attrib.AttributeType.FullName, out Action<object, object[]> handler))
++                        handler?.Invoke(null, new object[] { cap, attrib });
++                    if (cap is MethodReference && CustomMethodAttributeHandlers.TryGetValue(attrib.AttributeType.FullName, out handler))
++                        handler?.Invoke(null, new object[] { (MethodDefinition)cap, attrib });
++                }
++            }
++            finally
+             {
+-                if (CustomAttributeHandlers.TryGetValue(attrib.AttributeType.FullName, out Action<object, object[]> handler))
+-                    handler?.Invoke(null, new object[] { cap, attrib });
+-                if (cap is MethodReference && CustomMethodAttributeHandlers.TryGetValue(attrib.AttributeType.FullName, out handler))
+-                    handler?.Invoke(null, new object[] { (MethodDefinition)cap, attrib });
++                MonoModRulesManager.ExitModderContext(previousModder);
+             }
+         }
+ 
+@@ -904,11 +913,19 @@ namespace MonoMod
+ 
+             if (PostProcessors != null)
+             {
+-                Delegate[] pps = PostProcessors.GetInvocationList();
+-                for (var i = 0; i < pps.Length; i++)
++                var previousModder = MonoModRulesManager.EnterModderContext(this);
++                try
++                {
++                    Delegate[] pps = PostProcessors.GetInvocationList();
++                    for (var i = 0; i < pps.Length; i++)
++                    {
++                        Log($"[PostProcessor] PostProcessor pass #{i + 1}");
++                        ((PostProcessor)pps[i])?.Invoke(this);
++                    }
++                }
++                finally
+                 {
+-                    Log($"[PostProcessor] PostProcessor pass #{i + 1}");
+-                    ((PostProcessor)pps[i])?.Invoke(this);
++                    MonoModRulesManager.ExitModderContext(previousModder);
+                 }
+             }
+         }
+diff --git a/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs b/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
+index 834e2a62..057293b6 100644
+--- a/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
++++ b/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
+@@ -460,7 +460,7 @@ namespace MonoMod.RuntimeDetour
+                         PrepareEndOfChain(ilhook.Factory);
+                         UpdateEndOfChain();
+                     }
+-                    catch
++                    catch (Exception e)
+                     {
+                         // the add failed, remove the node and re-update end of chain
+                         switch (Interlocked.Exchange(ref ilhook.ManagerData, null))
+@@ -474,6 +474,7 @@ namespace MonoMod.RuntimeDetour
+                             default:
+                                 throw new NotSupportedException("bad managerdata?");
+                         }
++                        MMDbgLog.Error($"End of chain add failed !!!! {e}");
+                         UpdateEndOfChain();
+                         throw;
+                     }
+diff --git a/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs b/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs
+index cd39d995..2c0994a5 100644
+--- a/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs
++++ b/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs
+@@ -309,7 +309,7 @@ namespace MonoMod.RuntimeDetour
+                 // Determine active call depth of the current thread
+                 var stackFrames = new StackTrace().GetFrames();
+                 var syncProxyIdentif = PlatformTriple.Current.GetIdentifiable(SyncProxy);
+-                return stackFrames.Count(f => f.GetMethod() is { } m && PlatformTriple.Current.GetIdentifiable(m) == syncProxyIdentif);
++                return stackFrames.Count(f => f.GetMethod() is { } m && (PlatformTriple.Current.GetIdentifiable(m) == syncProxyIdentif || m.Name == SyncProxy.Name));
+             }
+         }
+ 
+diff --git a/src/MonoMod.Utils/ArchitectureKind.cs b/src/MonoMod.Utils/ArchitectureKind.cs
+index bf4c5520..69c2de44 100644
+--- a/src/MonoMod.Utils/ArchitectureKind.cs
++++ b/src/MonoMod.Utils/ArchitectureKind.cs
+@@ -41,5 +41,9 @@ namespace MonoMod.Utils
+         /// The 64-bit ARM instruction set.
+         /// </summary>
+         Arm64 = Arm | Bits64,
++        /// <summary>
++        /// The WASM instruction set.
++        /// </summary>
++        Wasm32 = 0x03 << 1,
+     }
+ }
+diff --git a/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs b/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs
+index 74e7dffa..aebb8b7d 100644
+--- a/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs
++++ b/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs
+@@ -108,6 +108,7 @@ namespace MonoMod.Utils
+             var paramOffs = def.HasThis ? 1 : 0;
+             var emitArgs = new object?[2];
+             var checkTryEndEarly = false;
++            var skipInstrEmit = false;
+             foreach (var instr in def.Body.Instructions)
+             {
+                 if (labelMap.TryGetValue(instr, out var label))
+@@ -163,7 +164,9 @@ namespace MonoMod.Utils
+ 
+                     }
+ 
+-                    // Avoid duplicate endfilter / endfinally
++                    // Avoid duplicate endfilter / endfinally when another handler starts next.
++                    // ILGenerator.BeginFinallyBlock/BeginCatchBlock/BeginExceptFilterBlock call
++                    // InternalEndClause() which emits an implicit endfinally/endfilter.
+                     if (handler.HandlerStart == instr.Next)
+                     {
+                         switch (handler.HandlerType)
+@@ -178,8 +181,91 @@ namespace MonoMod.Utils
+                                 break;
+                         }
+                     }
++
++                    // Avoid duplicate leave when a handler starts next.
++                    // ILGenerator.BeginFinallyBlock/BeginCatchBlock/BeginFaultBlock call
++                    // InternalEndClause() which emits an implicit "leave end" when the
++                    // last clause type is CATCH/FILTER (i.e., first handler in try block,
++                    // or after a catch/filter handler). If the source IL has an explicit
++                    // leave right before the handler start, we get two consecutive leave
++                    // instructions. The second (implicit) one is dead code, but the v10
++                    // Mono interpreter's BB_STATE system mishandles this pattern, causing
++                    // infinite loops. Skip the explicit leave only when the implicit one
++                    // targets the same destination (the end of the last handler in this
++                    // exception block = HandlerEnd of the last handler sharing TryStart).
++                    if (handler.HandlerStart == instr.Next
++                        && (instr.OpCode == Mono.Cecil.Cil.OpCodes.Leave || instr.OpCode == Mono.Cecil.Cil.OpCodes.Leave_S))
++                    {
++                        // Determine what InternalEndClause would emit. It emits "leave end"
++                        // when LastClauseType() returns CATCH or FILTER. For the first handler
++                        // in a try block (no prior handlers), LastClauseType() returns CATCH.
++                        // After a FINALLY/FAULT handler, it emits endfinally instead (already
++                        // handled above). So we check: would InternalEndClause emit a leave?
++                        bool wouldEmitLeave;
++                        // Find the previous handler in the same exception block (same TryStart)
++                        var prevHandler = def.Body.ExceptionHandlers
++                            .Where(h => h.TryStart == handler.TryStart && h != handler
++                                     && h.HandlerStart?.Offset < handler.HandlerStart?.Offset)
++                            .OrderByDescending(h => h.HandlerStart?.Offset)
++                            .FirstOrDefault();
++                        if (prevHandler == null)
++                        {
++                            // First handler in try block: LastClauseType() returns CATCH → emits leave
++                            wouldEmitLeave = true;
++                        }
++                        else
++                        {
++                            // After a handler: depends on its type
++                            wouldEmitLeave = prevHandler.HandlerType == ExceptionHandlerType.Catch
++                                          || prevHandler.HandlerType == ExceptionHandlerType.Filter;
++                        }
++
++                        if (wouldEmitLeave)
++                        {
++                            // The implicit "leave end" targets the end label, which gets marked
++                            // at EndExceptionBlock at HandlerEnd of the last handler in this block.
++                            var lastHandler = def.Body.ExceptionHandlers
++                                .Where(h => h.TryStart == handler.TryStart)
++                                .OrderByDescending(h => h.HandlerStart?.Offset)
++                                .First();
++                            var endTarget = lastHandler.HandlerEnd;
++                            var explicitTarget = (Instruction)instr.Operand;
++
++                            if (explicitTarget == endTarget)
++                            {
++                                // Both leave instructions target the same destination.
++                                // Skip the explicit one to avoid dead code that confuses
++                                // the v10 Mono interpreter.
++                                skipInstrEmit = true;
++                            }
++                        }
++                    }
++
++                    // Avoid duplicate endfinally / endfault at end of handler.
++                    // ILGenerator.EndExceptionBlock() calls InternalEndClause() which
++                    // emits an implicit endfinally, so skip the explicit one from source IL.
++                    // We use skipInstrEmit instead of goto SkipEmit here because SkipEmit
++                    // defers EndExceptionBlock to the next iteration (via checkTryEndEarly),
++                    // which would place it AFTER the next instruction's MarkLabel, corrupting
++                    // branch targets. Instead, we skip only the emit and let EndExceptionBlock
++                    // fire at its normal position (lines below), before the next MarkLabel.
++                    if (handler.HandlerEnd == instr.Next)
++                    {
++                        switch (handler.HandlerType)
++                        {
++                            case ExceptionHandlerType.Finally:
++                            case ExceptionHandlerType.Fault:
++                                if (instr.OpCode == Mono.Cecil.Cil.OpCodes.Endfinally)
++                                {
++                                    skipInstrEmit = true;
++                                }
++                                break;
++                        }
++                    }
+                 }
+ 
++                if (!skipInstrEmit)
++                {
+                 if (instr.OpCode.OperandType == Mono.Cecil.Cil.OperandType.InlineNone)
+                     il.Emit(_ReflOpCodes[instr.OpCode.Value]);
+                 else
+@@ -281,6 +367,7 @@ namespace MonoMod.Utils
+ 
+                     il.DynEmit(_ReflOpCodes[opcode.Value], operand);
+                 }
++                } // !skipInstrEmit
+ 
+                 if (!checkTryEndEarly)
+                 {
+@@ -294,10 +381,12 @@ namespace MonoMod.Utils
+                 }
+ 
+                 checkTryEndEarly = false;
++                skipInstrEmit = false;
+                 continue;
+ 
+                 SkipEmit:
+                 checkTryEndEarly = true;
++                skipInstrEmit = false;
+                 continue;
+             }
+         }
+diff --git a/src/MonoMod.Utils/DynamicMethodDefinition.cs b/src/MonoMod.Utils/DynamicMethodDefinition.cs
+index 668ae990..5472783d 100644
+--- a/src/MonoMod.Utils/DynamicMethodDefinition.cs
++++ b/src/MonoMod.Utils/DynamicMethodDefinition.cs
+@@ -211,7 +211,9 @@ namespace MonoMod.Utils
+             => Generate(null);
+         public MethodInfo Generate(object? context)
+         {
+-            var dmdType = Switches.TryGetSwitchValue(Switches.DMDType, out var swValue) ? swValue as string : null;
++            // Switches.TryGetSwitchValue(Switches.DMDType, out var swValue) ? swValue as string : null;
++            // dm is the only one that actually works everywhere on wasm
++            var dmdType = "dm";
+ 
+             if (dmdType is not null)
+             {
+diff --git a/src/MonoMod.Utils/Interop/Unix.cs b/src/MonoMod.Utils/Interop/Unix.cs
+index 4aaff10a..e1d5867f 100644
+--- a/src/MonoMod.Utils/Interop/Unix.cs
++++ b/src/MonoMod.Utils/Interop/Unix.cs
+@@ -11,19 +11,14 @@ namespace MonoMod.Utils.Interop
+     internal unsafe static partial class Unix
+     {
+         // If this dllimport decl isn't enough to get the runtime to load the right thing, I give up
+-        public const string LibC = "libc";
++        public const string LibC = "liba";
+         public const string DL2 = "libdl.so.2";
+ 
+         // We have to do these shenanigans, because we *need* SetLastError; this can set errno.
+         // SetLastError on DllImport involves an ILStub, and DisableRuntimeMarshalling prevents that.
+         // LibraryImport can't be used downlevel for this, because it relies on Marshal.GetLastSystemError(), which is new in .NET 6.
+-#if NET7_0_OR_GREATER
+-        [LibraryImport(LibC, EntryPoint = "uname", SetLastError = true)]
+-        public static unsafe partial int Uname(byte* buf);
+-#else
+-        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "uname", SetLastError = true)]
++        [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "_uname")]
+         public static extern unsafe int Uname(byte* buf);
+-#endif
+ 
+         [StructLayout(LayoutKind.Sequential)]
+         public struct LinuxAuxvEntry
+@@ -87,7 +82,10 @@ namespace MonoMod.Utils.Interop
+             LibDl2,
+         }
+ 
+-        private static LibDlType? currentLibDlType = DetermineLibDlType();
++        // wasm: determined lazily (instead of in the static initializer), so that a missing dl* export in liba
++        // cannot break the type initializer and with it Uname() during platform detection.
++        private static LibDlType? lazyLibDlType;
++        private static LibDlType currentLibDlType => lazyLibDlType ??= DetermineLibDlType();
+ 
+         private static LibDlType DetermineLibDlType()
+         {
+@@ -108,9 +106,8 @@ namespace MonoMod.Utils.Interop
+                 DL2dlerror();
+                 return LibDlType.LibDl2;
+             }
+-            catch (DllNotFoundException)
+-            {
+-            }
++            catch (DllNotFoundException) { }
++            catch (EntryPointNotFoundException) { }
+ 
+             throw new PlatformNotSupportedException("Could not find the library containing dynamic linker functions");
+         }
+diff --git a/src/MonoMod.Utils/Logs/DebugLog.cs b/src/MonoMod.Utils/Logs/DebugLog.cs
+index 278132ac..175f9761 100644
+--- a/src/MonoMod.Utils/Logs/DebugLog.cs
++++ b/src/MonoMod.Utils/Logs/DebugLog.cs
+@@ -181,6 +181,8 @@ namespace MonoMod.Logs
+ 
+         private void PostMessage(LogMessage message)
+         {
++            // wasm: there is no debugger/log file to speak of, so mirror every posted message to the console
++            Console.WriteLine(DebugFormatter.Format($"[{message.Source}] {message.Level.FastToString(null)}: {message.FormattedMessage}"));
+             // we do this log here because we want to always log to the debugger when its attached, instead of just if its attached at startup
+             if (Debugger.IsAttached)
+             {
+diff --git a/src/MonoMod.Utils/OSKind.cs b/src/MonoMod.Utils/OSKind.cs
+index e5aedd6a..3a8c37a7 100644
+--- a/src/MonoMod.Utils/OSKind.cs
++++ b/src/MonoMod.Utils/OSKind.cs
+@@ -47,6 +47,14 @@
+         /// A BSD kernel.
+         /// </summary>
+         BSD = 1 << 4 | Posix,
++        /// <summary>
++        /// The Emscripten (WebAssembly) environment.
++        /// </summary>
++        /// <remarks>
++        /// <see cref="OSKindExtensions.GetKernel(OSKind)"/> will return <see cref="Linux"/>, and
++        /// <see cref="OSKindExtensions.GetSubtypeId(OSKind)"/> will return <c>2</c>.
++        /// </remarks>
++        Emscripten = 0x01 << 6 | Linux,
+ 
+         /// <summary>
+         /// A Windows kernel.
+diff --git a/src/MonoMod.Utils/PlatformDetection.cs b/src/MonoMod.Utils/PlatformDetection.cs
+index 0fdd8f6b..927ae69a 100644
+--- a/src/MonoMod.Utils/PlatformDetection.cs
++++ b/src/MonoMod.Utils/PlatformDetection.cs
+@@ -123,6 +123,11 @@ namespace MonoMod.Utils
+                 {
+                     os = OSKind.Posix;
+                 }
++                // TODO fix this to detect only Emscripten
++                else if (platID.Contains("OTHER", StringComparison.Ordinal))
++                {
++                    os = OSKind.Posix;
++                }
+             }
+ 
+             // Try to use OS-specific methods of determining OS/Arch info
+@@ -239,6 +244,10 @@ namespace MonoMod.Utils
+                     // Note: I'm fairly sure that the different BSDs vary quite a lot, so it may be worth checking with more specificity here
+                     os = OSKind.BSD;
+                 }
++                else if (kernelName.Contains("EMSCRIPTEN", StringComparison.Ordinal))
++                {
++                    os = OSKind.Emscripten;
++                }
+                 // TODO: fill in other known kernel names
+ 
+                 var machineName = GetMachineNamePosix(os, buffer).ToUpperInvariant();
+@@ -259,6 +268,10 @@ namespace MonoMod.Utils
+                 {
+                     arch = ArchitectureKind.Arm;
+                 }
++                else if (machineName.Contains("WASM32", StringComparison.Ordinal))
++                {
++                    arch = ArchitectureKind.Wasm32;
++                }
+                 // TODO: fill in other values for machine
+ 
+                 MMDbgLog.Trace($"uname() detected architecture info: {os} {arch}");
+diff --git a/src/MonoMod.Utils/ReflectionHelper.cs b/src/MonoMod.Utils/ReflectionHelper.cs
+index 66e975bc..e3d2865d 100644
+--- a/src/MonoMod.Utils/ReflectionHelper.cs
++++ b/src/MonoMod.Utils/ReflectionHelper.cs
+@@ -44,6 +44,114 @@ namespace MonoMod.Utils
+             return value!;
+         }
+ 
++        private static bool IsIgnorableResolveException(Exception e)
++            => e is FileNotFoundException ||
++               e is FileLoadException ||
++               e is TypeLoadException ||
++               e is ReflectionTypeLoadException ||
++               e is MissingMethodException ||
++               e is BadImageFormatException;
++
++        private static bool SafeIs(MemberReference mref, MemberInfo minfo)
++        {
++            try
++            {
++                return mref.Is(minfo);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return false;
++            }
++        }
++
++        private static IEnumerable<Type> SafeGetTypes(Module module)
++        {
++            try
++            {
++                return module.GetTypes();
++            }
++            catch (ReflectionTypeLoadException e)
++            {
++                return e.Types.Where(t => t != null)!;
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<Type>();
++            }
++        }
++
++        private static MethodInfo[] SafeGetMethods(Type type)
++        {
++            try
++            {
++                return type.GetMethods(_BindingFlagsAll);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<MethodInfo>();
++            }
++        }
++
++        private static ConstructorInfo[] SafeGetConstructors(Type type)
++        {
++            try
++            {
++                return type.GetConstructors(_BindingFlagsAll);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<ConstructorInfo>();
++            }
++        }
++
++        private static FieldInfo[] SafeGetFields(Type type)
++        {
++            try
++            {
++                return type.GetFields(_BindingFlagsAll);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<FieldInfo>();
++            }
++        }
++
++        private static MemberInfo[] SafeGetMembers(Type type)
++        {
++            try
++            {
++                return type.GetMembers(_BindingFlagsAll);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<MemberInfo>();
++            }
++        }
++
++        private static MethodInfo[] SafeGetMethods(Module module)
++        {
++            try
++            {
++                return module.GetMethods(_BindingFlagsAll);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<MethodInfo>();
++            }
++        }
++
++        private static FieldInfo[] SafeGetFields(Module module)
++        {
++            try
++            {
++                return module.GetFields(_BindingFlagsAll);
++            }
++            catch (Exception e) when (IsIgnorableResolveException(e))
++            {
++                return Array.Empty<FieldInfo>();
++            }
++        }
++
+         public static Assembly Load(ModuleDefinition module)
+         {
+             Helpers.ThrowIfArgumentNull(module);
+@@ -223,6 +331,9 @@ namespace MonoMod.Utils
+             }
+ 
+             var (asmName, moduleName) = GetScope(mref);
++            // wasm: references to mscorlib must resolve against the actual corelib (System.Private.CoreLib)
++            if (asmName != null && asmName.StartsWith("mscorlib", StringComparison.Ordinal))
++                asmName = typeof(object).Assembly.GetName().Name;
+             string ToCacheKeyPart(string? asmName, string? moduleName)
+                 => $" | {asmName ?? "NOASSEMBLY"}, {moduleName ?? "NOMODULE"}";
+             IEnumerable<MemberReference> GetGenericArgumentsRecursive(MemberReference mref)
+@@ -420,11 +531,20 @@ namespace MonoMod.Utils
+                 else
+                 {
+                     type = modules
+-                        .Select(module => module.GetType(mref.FullName.Replace("/", "+", StringComparison.Ordinal), false, false))
++                        .Select(module => {
++                            try
++                            {
++                                return module.GetType(mref.FullName.Replace("/", "+", StringComparison.Ordinal), false, false);
++                            }
++                            catch (Exception e) when (IsIgnorableResolveException(e))
++                            {
++                                return null;
++                            }
++                        })
+                         .FirstOrDefault(m => m != null);
+                     if (type == null)
+                         type = modules
+-                            .Select(module => module.GetTypes().FirstOrDefault(m => mref.Is(m)))
++                            .Select(module => SafeGetTypes(module).FirstOrDefault(m => SafeIs(mref, m)))
+                             .FirstOrDefault(m => m != null);
+                     if (type == null && !refetchingModules)
+                         goto RefetchModules;
+@@ -446,11 +566,11 @@ namespace MonoMod.Utils
+             {
+                 if (mref is MethodReference)
+                     member = modules
+-                        .Select(module => module.GetMethods(_BindingFlagsAll).FirstOrDefault(m => mref.Is(m)))
++                        .Select(module => SafeGetMethods(module).FirstOrDefault(m => SafeIs(mref, m)))
+                         .FirstOrDefault(m => m != null);
+                 else if (mref is FieldReference)
+                     member = modules
+-                        .Select(module => module.GetFields(_BindingFlagsAll).FirstOrDefault(m => mref.Is(m)))
++                        .Select(module => SafeGetFields(module).FirstOrDefault(m => SafeIs(mref, m)))
+                         .FirstOrDefault(m => m != null);
+                 else
+                     throw new NotSupportedException($"Unsupported <Module> member type {mref.GetType().FullName}");
+@@ -461,18 +581,15 @@ namespace MonoMod.Utils
+                 var declType = (Type?)_ResolveReflection(mref.DeclaringType, modules);
+ 
+                 if (mref is MethodReference)
+-                    member = declType!
+-                        .GetMethods(_BindingFlagsAll).Cast<MethodBase>()
+-                        .Concat(declType.GetConstructors(_BindingFlagsAll))
+-                        .FirstOrDefault(m => mref.Is(m));
++                    member = SafeGetMethods(declType!).Cast<MethodBase>()
++                        .Concat(SafeGetConstructors(declType!))
++                        .FirstOrDefault(m => SafeIs(mref, m));
+                 else if (mref is FieldReference)
+-                    member = declType!
+-                        .GetFields(_BindingFlagsAll)
+-                        .FirstOrDefault(m => mref.Is(m));
++                    member = SafeGetFields(declType!)
++                        .FirstOrDefault(m => SafeIs(mref, m));
+                 else
+-                    member = declType!
+-                        .GetMembers(_BindingFlagsAll)
+-                        .FirstOrDefault(m => mref.Is(m));
++                    member = SafeGetMembers(declType!)
++                        .FirstOrDefault(m => SafeIs(mref, m));
+             }
+ 
+             if (member == null && !refetchingModules)

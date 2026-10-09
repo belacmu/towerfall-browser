@@ -226,7 +226,9 @@ function offerDarkWorld() {
 async function startDotnet() {
 	status("Starting .NET runtime…");
 	const { dotnet } = await import("./_framework/dotnet.js");
-	const runtime = await dotnet.withConfig({}).create();
+	let builder = dotnet.withConfig({});
+	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
+	const runtime = await builder.create();
 	const config = runtime.getConfig();
 	const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
 	const canvas = $("canvas");

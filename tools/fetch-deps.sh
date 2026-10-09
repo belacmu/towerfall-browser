@@ -31,4 +31,5 @@ fi
 
 tools/build-faudio.sh --if-needed
 tools/fetch-fortrise.sh
+tools/build-monomod.sh
 tools/fetch-runtime.sh

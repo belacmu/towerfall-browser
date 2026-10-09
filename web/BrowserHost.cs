@@ -115,7 +115,9 @@ public static partial class BrowserHost
 				}
 				// ...and the framework from /bin.
 				Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
-				ILoggerFactory loggers = LoggerFactory.Create(b => b.AddProvider(new PlainConsoleLoggerProvider()));
+				// The provider decides what's shown (see PlainConsoleLoggerProvider); don't filter before it.
+				ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
+				ModInstaller.Apply(FortRiseDir, loggers.CreateLogger("Mods"));
 				game = FortRiseLauncher.Start(GameAssembly, FortRiseDir, fortriseVersion, noIntro, loggers);
 				towerFall = game.GetType().Assembly;
 			}

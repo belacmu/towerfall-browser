@@ -136,7 +136,12 @@ public sealed class PlainConsoleLoggerProvider : ILoggerProvider
 	{
 		public IDisposable BeginScope<TState>(TState state) where TState : notnull => null;
 
-		public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+		// TOWERFALL_LOG=debug (the page's ?debug) includes debug output, e.g. FortRise's list of
+		// Harmony patches and why mods were skipped.
+		private static readonly LogLevel Minimum =
+			Environment.GetEnvironmentVariable("TOWERFALL_LOG") == "debug" ? LogLevel.Debug : LogLevel.Information;
+
+		public bool IsEnabled(LogLevel logLevel) => logLevel >= Minimum;
 
 		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
 		{

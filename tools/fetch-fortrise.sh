@@ -5,8 +5,8 @@
 #   data/       TowerFall.FortRise.mm.dll (the MonoMod patch for TowerFall.exe) and Internals/, which
 #               the page copies into the player's FortRise folder in OPFS
 # Left out: the .NET runtime and native libs, FortRise's FNA (we use our patched FNA 26.10),
-# its Steamworks.NET (we use our stub), FortRise.ImGui (needs native cimgui) and, for now,
-# FortRise.WorkshopFixes (needs Harmony).
+# its Steamworks.NET (we use our stub) and FortRise.ImGui (needs native cimgui).
+# tools/build-monomod.sh then replaces its MonoMod with our WebAssembly-capable build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FORTRISE_VERSION=5.4.1
@@ -36,9 +36,6 @@ for m in "$src"/Internals/*/; do
 	case "$name" in
 		# Needs native cimgui.
 		FortRise.ImGui) continue ;;
-		# Needs Harmony detours, which don't work in the browser yet (docs/FORTRISE.md milestone 3).
-		# It only patches Steam Workshop browsing, which the browser doesn't have anyway.
-		FortRise.WorkshopFixes) continue ;;
 	esac
 	cp -R "$m" "$OUT/data/Internals/$name"
 done
