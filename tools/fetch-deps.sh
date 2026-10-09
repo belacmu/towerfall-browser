@@ -30,3 +30,4 @@ if [ "$(cat vendor/FNA/.stamp 2>/dev/null)" != "$want" ]; then
 fi
 
 tools/build-faudio.sh --if-needed
+tools/fetch-fortrise.sh

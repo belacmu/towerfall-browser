@@ -8,7 +8,8 @@ An unofficial fan project, not affiliated with TowerFall's developers. It contai
 content: the page loads your own, unmodified `TowerFall.exe` and content (PC version: Steam, itch.io
 or Humble) at runtime, from a folder you drop onto the page. Your files never leave your device.
 
-Status: the full game runs with keyboard controls. Next: FortRise mods, then online multiplayer.
+Status: the full game runs with keyboard controls, optionally under the FortRise mod loader
+(tick "Load mods" before Play). Next: Harmony-based mods and a mod catalog, then online multiplayer.
 
 ## Two modes, one build
 
@@ -43,6 +44,11 @@ The page picks the mode at runtime: private if `gamefiles/manifest.json` exists,
 - Threads need cross-origin isolation (COOP/COEP headers). `tools/serve.py` sends them; on hosts that
   can't (GitHub Pages), `coi-serviceworker.js` adds them.
 - `tools/RefCheck` verifies that a given `TowerFall.exe` binds to our FNA, Steamworks stub and .NET.
+- **FortRise** (`web/FortRise/`, `tools/fetch-fortrise.sh`, plan in `docs/FORTRISE.md`): the site
+  serves a pinned FortRise release. The host runs FortRise's own patch step on the player's
+  `TowerFall.exe` in the browser, cached until the game or FortRise changes; that takes about 20 s.
+  It then applies a few browser fixups and starts the game the way FortRise's launcher does.
+  `tools/FortRisePatch` runs the same patch code on desktop .NET for debugging.
 
 ## Setup
 

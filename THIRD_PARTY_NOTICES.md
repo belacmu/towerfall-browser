@@ -8,6 +8,11 @@ It builds on, and in places contains code adapted from, the following projects:
 - **FAudio** (zlib) — https://github.com/FNA-XNA/FAudio — fetched at build time; `patches/FAudio.patch` modifies it.
 - **SDL** (zlib), **FNA3D** (zlib), **MojoShader** (zlib) — prebuilt for Emscripten by
   https://github.com/r58Playz/FNA-WASM-Build and fetched at build time.
+- **FortRise** (MIT) — https://github.com/FortRise/FortRise — the pinned release's managed
+  assemblies are fetched at build time (`tools/fetch-fortrise.sh`) and served with the site:
+  the launcher library, `TowerFall.FortRise.mm.dll` and its built-in modules, plus its dependencies
+  **MonoMod** (MIT), **Harmony** (MIT), **Mono.Cecil** (MIT), **Pintail** (MIT) and
+  **Microsoft.Extensions.\*** (MIT).
 - **coi-serviceworker** (MIT, Guido Zuidhof and contributors) — `web/wwwroot/coi-serviceworker.js`,
   included unmodified with its license header.
 - **Steamworks.NET** (MIT) — `web/Steamworks.NET/` is an independent stand-in that mirrors the

@@ -18,6 +18,9 @@
 		<NoWarn>IL2026,IL2046,IL2057,IL2062,IL2065,IL2067,IL2070,IL2072,IL2075,IL2087,IL2090</NoWarn>
 		<NoWarn>$(NoWarn),SYSLIB0011,SYSLIB0050,SYSLIB0051,CS0169,CS0219,CS0414,CS0618,CS0649,CS0162,CS0168,CS8981,CA2022,CA1416,CS0108,CS0114</NoWarn>
 
+		<!-- Plain .dll files in _framework/, so MonoMod/Cecil can read them (see BrowserHost.MountAssemblies). -->
+		<WasmEnableWebcil>false</WasmEnableWebcil>
+
 		<WasmBuildNative>true</WasmBuildNative>
 		<WasmEnableThreads>true</WasmEnableThreads>
 		<WasmEnableSIMD>true</WasmEnableSIMD>
@@ -50,4 +53,5 @@
 		<!-- Not used by the host itself; published so the game's Steamworks.NET reference binds to it. -->
 		<ProjectReference Include="Steamworks.NET\Steamworks.NET.csproj" />
 	</ItemGroup>
+	<Import Project="FortRise\FortRise.References.props" />
 </Project>

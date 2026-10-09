@@ -1,0 +1,15 @@
+<Project>
+	<!-- References the managed FortRise release libraries fetched by tools/fetch-fortrise.sh
+	     (the launcher, MonoMod, Cecil, Harmony, Microsoft.Extensions.*). -->
+	<ItemGroup>
+		<FortRiseLib Include="$(MSBuildThisFileDirectory)..\..\vendor\fortrise\lib\*.dll" />
+	</ItemGroup>
+	<Target Name="AddFortRiseReferences" BeforeTargets="ResolveAssemblyReferences">
+		<ItemGroup>
+			<Reference Include="%(FortRiseLib.Filename)">
+				<HintPath>%(FortRiseLib.FullPath)</HintPath>
+				<Private>true</Private>
+			</Reference>
+		</ItemGroup>
+	</Target>
+</Project>

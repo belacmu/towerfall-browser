@@ -249,3 +249,59 @@ async function copyFiles(root, content, onProgress) {
 	};
 	await Promise.all(Array.from({ length: 6 }, worker));
 }
+
+// --- FortRise -----------------------------------------------------------------------------
+
+// Copies FortRise's patch module and built-in modules (served by this site under fortrise/) into
+// the player's FortRise folder in OPFS, where the host also keeps Mods/, Saves/ and the generated
+// TowerFall.Patch.dll. Returns the FortRise version.
+export async function syncFortRise(onProgress) {
+	const res = await fetch("fortrise/manifest.json", { cache: "no-store" });
+	if (!res.ok) throw new Error(`Couldn't load FortRise (fortrise/manifest.json: ${res.status}).`);
+	const manifest = await res.json();
+	const opfs = await navigator.storage.getDirectory();
+	const root = await opfs.getDirectoryHandle("fortrise", { create: true });
+
+	// A different FortRise version: drop the old one's files (but not the player's mods or saves).
+	let installed = null;
+	try {
+		installed = JSON.parse(await (await (await root.getFileHandle(MARKER)).getFile()).text()).version;
+	} catch {}
+	if (installed !== manifest.version) {
+		for (const name of ["Internals", "TowerFall.FortRise.mm.dll", "TowerFall.Patch.dll", "TowerFall.Patch.dll.inputs", MARKER]) {
+			await root.removeEntry(name, { recursive: true }).catch(() => {});
+		}
+	}
+
+	// Internals/ belongs to FortRise: mirror the site exactly (modules can be dropped between builds).
+	const published = new Set(manifest.files.map((f) => f.path));
+	const prune = async (dir, prefix) => {
+		for await (const [name, handle] of dir.entries()) {
+			const path = prefix + name;
+			if (handle.kind === "directory") {
+				if (![...published].some((p) => p.startsWith(path + "/"))) await dir.removeEntry(name, { recursive: true });
+				else await prune(handle, path + "/");
+			} else if (!published.has(path)) {
+				await dir.removeEntry(name);
+			}
+		}
+	};
+	const internals = await root.getDirectoryHandle("Internals", { create: true });
+	await prune(internals, "Internals/");
+
+	const content = manifest.files.map((f) => ({
+		from: {
+			path: f.path,
+			size: f.size,
+			open: async () => {
+				const r = await fetch("fortrise/" + f.path.split("/").map(encodeURIComponent).join("/"));
+				if (!r.ok) throw new Error(`Failed to fetch FortRise file ${f.path}: ${r.status}`);
+				return r;
+			},
+		},
+		to: f.path,
+	}));
+	await copyFiles(root, content, onProgress);
+	await writeMarker(root, { version: manifest.version, at: new Date().toISOString() });
+	return manifest.version;
+}

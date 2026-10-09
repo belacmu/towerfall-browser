@@ -2,7 +2,19 @@
 //  1. Get the player's game files into OPFS (see gamefiles.js), which .NET mounts at /libsdl.
 //  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
 
-import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, locateDarkWorld, locateGame } from "./gamefiles.js";
+import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, locateDarkWorld, locateGame, syncFortRise } from "./gamefiles.js";
+
+// Keep the last lines of console output (including .NET's, which is forwarded from its worker
+// threads) so problems can be read back from the page: self.consoleLog.
+self.consoleLog = [];
+for (const level of ["log", "info", "warn", "error", "debug"]) {
+	const original = console[level].bind(console);
+	console[level] = (...args) => {
+		self.consoleLog.push(`[${level}] ` + args.map((a) => (typeof a === "string" ? a : a?.stack ?? String(a))).join(" "));
+		if (self.consoleLog.length > 2000) self.consoleLog.splice(0, 500);
+		original(...args);
+	};
+}
 
 const $ = (id) => document.getElementById(id);
 const status = (text) => ($("status").textContent = text);
@@ -56,6 +68,32 @@ $("mute").addEventListener("click", () => {
 	$("canvas").focus();
 });
 applyMute();
+
+// FortRise (mod loader) on or off, remembered per browser. ?fortrise / ?vanilla override it.
+const FORTRISE_KEY = "towerfall.fortrise";
+let useFortRise = (() => {
+	const params = new URLSearchParams(location.search);
+	if (params.has("fortrise")) return true;
+	if (params.has("vanilla")) return false;
+	try {
+		return localStorage.getItem(FORTRISE_KEY) === "1";
+	} catch {
+		return false;
+	}
+})();
+$("fortrise").checked = useFortRise;
+$("fortrise").addEventListener("change", () => {
+	useFortRise = $("fortrise").checked;
+	try {
+		localStorage.setItem(FORTRISE_KEY, useFortRise ? "1" : "0");
+	} catch {}
+});
+
+// "served-name|assembly-name" for each of the app's assemblies, for Cecil (see BrowserHost.MountAssemblies).
+function assemblyFiles() {
+	const resources = self.wasm.config.resources;
+	return [...(resources.coreAssembly ?? []), ...(resources.assembly ?? [])].map((a) => `${a.name}|${a.virtualPath}`);
+}
 
 $("change").addEventListener("click", async () => {
 	await forgetGame();
@@ -219,6 +257,7 @@ async function main() {
 	status("Ready");
 	const play = $("play");
 	play.hidden = false;
+	$("options").hidden = false;
 	// ?autoplay skips the click (for automated tests); audio then stays suspended.
 	if (!new URLSearchParams(location.search).has("autoplay")) {
 		await new Promise((resolve) => play.addEventListener("click", resolve, { once: true }));
@@ -226,12 +265,24 @@ async function main() {
 	play.hidden = true;
 	$("change").hidden = true;
 	$("dw").hidden = true;
+	$("options").hidden = true;
 	stopDarkWorldOffer();
-	$("overlay").classList.add("hidden");
-	$("canvas").focus();
 
 	const noIntro = new URLSearchParams(location.search).has("nointro");
-	await exports.BrowserHost.Init(noIntro);
+	if (useFortRise) {
+		status("Getting FortRise…");
+		$("bar").hidden = false;
+		const version = await syncFortRise(showProgress);
+		progress(1);
+		detail("");
+		// Patching TowerFall.exe takes a while the first time (it's cached afterwards).
+		status(`Starting FortRise ${version}…`);
+		await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+	} else {
+		await exports.BrowserHost.Init(noIntro, null, null, null);
+	}
+	$("overlay").classList.add("hidden");
+	$("canvas").focus();
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
 	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).

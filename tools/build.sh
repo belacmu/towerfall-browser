@@ -19,5 +19,22 @@ perl -pi -e 's/var offscreenCanvases=\{\};/var offscreenCanvases={};if(globalThi
 # (a string) instead of the canvas, so resizing from the game thread throws.
 perl -pi -e 's/target=="canvas"&&Object\.keys\(GL\.offscreenCanvases\)\[0\]/target=="canvas"&&Object.values(GL.offscreenCanvases)[0]/' $FW/dotnet.native.*.js
 grep -q 'Object.values(GL.offscreenCanvases)\[0\]' $FW/dotnet.native.*.js || { echo "canvas lookup patch did not apply" >&2; exit 1; }
+# FortRise's patch module and built-in modules, served under fortrise/ for the page to copy into
+# the player's FortRise folder (see web/wwwroot/main.js).
+WWW=web/bin/Release/net10.0/publish/wwwroot
+mkdir -p $WWW/fortrise && cp -R vendor/fortrise/data/. $WWW/fortrise/
+python3 - "$WWW/fortrise" "$(cat vendor/fortrise/version.txt)" <<'PY'
+import json, os, sys
+root, version = sys.argv[1], sys.argv[2]
+files = []
+for dirpath, _, names in os.walk(root):
+    for n in names:
+        full = os.path.join(dirpath, n)
+        rel = os.path.relpath(full, root)
+        if rel != "manifest.json":
+            files.append({"path": rel, "size": os.path.getsize(full)})
+files.sort(key=lambda f: f["path"])
+json.dump({"version": version, "files": files}, open(os.path.join(root, "manifest.json"), "w"))
+PY
 grep -q TRANSFERRED_CANVAS $FW/dotnet.native.*.js || { echo "canvas transfer patch did not apply" >&2; exit 1; }
 echo "Built: web/bin/Release/net10.0/publish/wwwroot"

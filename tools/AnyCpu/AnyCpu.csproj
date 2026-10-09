@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Rewrites an IL-only assembly as AnyCPU. FortRise's launcher DLL is built x86-64-only,
+	     which .NET won't load on arm64 (and the browser has no business caring). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="Mono.Cecil" Version="0.11.6" />
+	</ItemGroup>
+</Project>
