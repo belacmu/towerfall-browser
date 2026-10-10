@@ -1,6 +1,7 @@
 // On-screen controls for touch screens. They drive a virtual gamepad in the host (TouchGamepad.cs),
 // so the game sees an ordinary controller. Layout: a floating stick anywhere on the left half,
-// jump/shoot/dodge at the bottom right, back and pause at the top left.
+// jump/shoot/dodge at the bottom right, back and pause at the top left (in portrait: the game at
+// the top, the controls below it, back and pause between).
 //
 // The page's Controls button turns them on and off (remembered per browser); by default they're on
 // for touch screens. ?touch / ?notouch in the URL override that.
@@ -58,8 +59,9 @@ export function createTouchControls(send) {
 	let sent = "0,0,0";
 
 	const buttonAt = (x, y) => document.elementFromPoint(x, y)?.closest?.("#touch .tbutton") ?? null;
-	// The resting stick's radius: 0.8 * --size in index.html.
-	const radius = () => Math.min(Math.min(innerWidth, innerHeight) * 0.19, 88) * 0.8;
+	// The stick is the size of its resting ring (index.html), measured when a thumb lands.
+	let stickRadius = 0;
+	const radius = () => stickRadius;
 
 	function stickValue(p) {
 		const r = radius();
@@ -101,6 +103,7 @@ export function createTouchControls(send) {
 		if (el) {
 			pointers.set(e.pointerId, { kind: "button", el });
 		} else if (e.clientX < innerWidth / 2 && ![...pointers.values()].some((p) => p.kind === "stick")) {
+			stickRadius = stick.offsetWidth / 2;
 			pointers.set(e.pointerId, { kind: "stick", ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY });
 		}
 		render();
@@ -129,6 +132,8 @@ export function createTouchControls(send) {
 		// Hiding lets go of everything held.
 		setVisible(visible) {
 			root.hidden = !visible;
+			// For the portrait layout, which moves the game up to make room.
+			document.body.classList.toggle("touchOn", visible);
 			if (!visible) pointers.clear();
 			render();
 		},

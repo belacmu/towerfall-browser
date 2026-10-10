@@ -77,7 +77,9 @@ that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
 - Layout: a floating stick wherever the left thumb lands on the left half (it follows the thumb
   past its rim, and rests across from the buttons on the right); Jump (A), Shoot (X) and Dodge (RB
   and RT both, whichever the game binds) at the bottom right, sliding between them works; Back (B)
-  and Pause (Start) at the top left.
+  and Pause (Start) at the top left. In portrait the game moves to the top and the controls go
+  below it, bigger and clear of the home bar, with Back and Pause centered above them (only while
+  the controls are on; otherwise the game stays centered).
 - The `keys` host command (`towerfallCommand("keys")`) logs connected gamepads' state too.
 
 The controls and the page's handling of them are tested headless with multi-touch input; the game

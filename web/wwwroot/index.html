@@ -101,6 +101,7 @@
 				-webkit-touch-callout: none;
 				--size: min(19vmin, 88px);
 				--edge: max(16px, env(safe-area-inset-right), env(safe-area-inset-left));
+				--bottom: 16px;
 			}
 			#touch .tbutton {
 				position: absolute;
@@ -117,9 +118,9 @@
 				text-transform: uppercase;
 			}
 			#touch .tbutton.down { background: rgba(232, 197, 71, 0.45); border-color: #e8c547; color: #fff; }
-			#touch .jump { right: var(--edge); bottom: 16px; }
-			#touch .shoot { right: calc(var(--edge) + var(--size) * 1.15); bottom: calc(16px + var(--size) * 0.35); }
-			#touch .dodge { right: calc(var(--edge) + var(--size) * 0.35); bottom: calc(16px + var(--size) * 1.15); }
+			#touch .jump { right: var(--edge); bottom: var(--bottom); }
+			#touch .shoot { right: calc(var(--edge) + var(--size) * 1.15); bottom: calc(var(--bottom) + var(--size) * 0.35); }
+			#touch .dodge { right: calc(var(--edge) + var(--size) * 0.35); bottom: calc(var(--bottom) + var(--size) * 1.15); }
 			#touch .back, #touch .pause {
 				top: max(8px, env(safe-area-inset-top));
 				width: calc(var(--size) * 0.75);
@@ -131,11 +132,11 @@
 			#touch .pause { left: calc(var(--edge) + var(--size) * 0.9); }
 			/* The stick appears where the left thumb lands; until then a faint one marks its spot,
 			   where the left thumb rests: across from the middle of the buttons on the right, a little
-			   lower. Its radius (0.8 * --size) is also in touch.js. */
+			   lower. touch.js takes its size from this resting ring. */
 			#touch .stick {
 				position: absolute;
 				left: calc(var(--edge) + var(--size));
-				top: calc(100% - 16px - var(--size) * 0.9);
+				top: calc(100% - var(--bottom) - var(--size) * 0.9);
 				width: calc(var(--size) * 1.6);
 				height: calc(var(--size) * 1.6);
 				transform: translate(-50%, -50%);
@@ -154,6 +155,23 @@
 				margin: -22% 0 0 -22%;
 				border-radius: 50%;
 				background: rgba(255, 255, 255, 0.25);
+			}
+			/* Portrait, with the controls on: the game at the top under the Sound/Controls buttons,
+			   the controls below it (bigger, and clear of the phone's home bar), Back and Pause
+			   centered above them. */
+			@media (orientation: portrait) {
+				body.touchOn #stage {
+					align-items: flex-start;
+					padding-top: calc(max(8px, env(safe-area-inset-top)) + 44px);
+				}
+				body.touchOn canvas.canvas { height: auto !important; }
+				#touch {
+					--size: min(22vmin, 96px);
+					--bottom: max(40px, calc(env(safe-area-inset-bottom) + 24px));
+				}
+				#touch .back, #touch .pause { top: auto; bottom: calc(var(--bottom) + var(--size) * 2.5); }
+				#touch .back { left: auto; right: calc(50% + 6px); }
+				#touch .pause { left: calc(50% + 6px); }
 			}
 			button {
 				font: inherit;
