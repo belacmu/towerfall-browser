@@ -19,6 +19,9 @@ const base = opt("--url", "http://localhost:8080/");
 const only = opt("--only", null)?.split(",");
 const retest = args.includes("--retest");
 const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// The real GPU where Chrome can use it headless (Metal on macOS); software rendering elsewhere,
+// which costs several CPU cores per running game.
+const GPU_FLAGS = process.platform === "darwin" ? ["--use-angle=metal", "--ignore-gpu-blocklist"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const profile = path.join(os.homedir(), ".towerfall-browser", "smoke-profile"); // keeps the imported game
 const port = 9334;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,7 +42,7 @@ try {
 fs.mkdirSync(profile, { recursive: true });
 const browser = spawn(chrome, [
 	"--headless=new", `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`, "--no-first-run",
-	"--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--autoplay-policy=no-user-gesture-required", "about:blank",
+	...GPU_FLAGS, "--autoplay-policy=no-user-gesture-required", "about:blank",
 ], { stdio: "ignore" });
 process.on("exit", () => browser.kill());
 

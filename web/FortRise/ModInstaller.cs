@@ -94,6 +94,7 @@ public static class ModInstaller
 		}
 
 		File.WriteAllText(installedPath, JsonSerializer.Serialize(installed));
+		StateSpeedups.Install(modsDir, log);
 	}
 
 	// The mods inside a zip: each folder (or the root) holding a meta.json, at most two levels deep,

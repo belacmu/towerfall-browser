@@ -39,7 +39,24 @@ public static class TfexPatches
 			harmony.Patch(clipboard.GetMethod("SetText", all),
 				postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(ClipboardSet), all)));
 		}
+		StateSpeedups.Patch(harmony);
 		Console.WriteLine("[netplay] TF.EX patched for the browser (update check via the GitHub API, no self-update).");
+	}
+
+	// What TF.EX's NETPLAY button does (version check, then the netplay menu), for scripted tests.
+	public static string EnterNetplay(object mainMenu)
+	{
+		Assembly patches = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetType("TF.EX.Patchs.Engine.TFGamePatch") != null);
+		if (patches == null) return "TF.EX isn't loaded";
+		MethodInfo request = patches.GetType("TF.EX.Patchs.Engine.TFGamePatch").GetMethod("RequestNetplayEntry", BindingFlags.Public | BindingFlags.Static);
+		FieldInfo requested = patches.GetType("TF.EX.Patchs.Scene.WiderSetMenu").GetField("IsNetplayRequested", BindingFlags.Public | BindingFlags.Static);
+		PropertyInfo state = mainMenu.GetType().GetProperty("State");
+		request.Invoke(null, new object[] { mainMenu, (Action)(() =>
+		{
+			requested.SetValue(null, true);
+			state.SetValue(mainMenu, Enum.ToObject(state.PropertyType, 62)); // TF.EX's MenuState.NetplaySelect
+		}) });
+		return "entering netplay";
 	}
 
 	private static bool FetchLatestVersion(ref Task<Version> __result)

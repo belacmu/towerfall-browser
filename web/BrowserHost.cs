@@ -188,16 +188,19 @@ public static partial class BrowserHost
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
 			// then e.g. "test" is the base game's own command).
-			menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
+			if (!commandsReady)
+			{
+				menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
+				commandsReady = menuFrames > 300;
+			}
+			while (commandsReady && commands.TryDequeue(out string[] command))
+			{
+				RunGameCommand(command);
+			}
 			// (Set on the game thread, which SDL belongs to.)
 			if (Interlocked.Exchange(ref pastedText, null) is string pasted)
 			{
 				SDL3.SDL.SDL_SetClipboardText(pasted);
-			}
-			while ((menuFrames > 300 || commandsRan) && commands.TryDequeue(out string[] command))
-			{
-				commandsRan = true;
-				RunGameCommand(command);
 			}
 			if (keysFrames > 0)
 			{
@@ -249,7 +252,7 @@ public static partial class BrowserHost
 	private static int menuFrames;
 	private static int keysFrames;
 	private static string lastKeys = "";
-	private static bool commandsRan;
+	private static bool commandsReady;
 
 	private static void RunGameCommand(string[] words)
 	{
@@ -260,6 +263,12 @@ public static partial class BrowserHost
 				// Logs the keys FNA reports as down, for the next 10 seconds (input debugging).
 				keysFrames = 600;
 				Console.WriteLine("[command] keys: logging pressed keys for 10 s");
+				return;
+			}
+			if (words[0] == "netplay")
+			{
+				object menu = game.GetType().GetProperty("Scene")?.GetValue(game);
+				Console.WriteLine($"[command] netplay: {(menu?.GetType().FullName == "TowerFall.MainMenu" ? TfexPatches.EnterNetplay(menu) : "not on the main menu")}");
 				return;
 			}
 			if (words[0] == "menustate" && words.Length > 1)
