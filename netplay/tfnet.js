@@ -346,21 +346,24 @@ var LibraryTFNet = {
 		return e[1];
 	},
 
-	// int tfnet_send(int h, const uint8_t peer[16], const uint8_t* data, size_t len): 0 sent,
-	// -1 peer not connected, -2 send failed.
-	tfnet_send__deps: ["$TFNet"],
-	tfnet_send__proxy: "sync",
-	tfnet_send__sig: "iippp",
-	tfnet_send: function (h, peer, data, len) {
+	// void tfnet_send(int h, uint8_t* packet, size_t len): sends packet[16..len) to the peer whose
+	// id is packet[0..16), if it's connected, then frees packet (malloc'd by the caller). Proxied
+	// asynchronously: the caller doesn't wait for the main thread (each wait took 33-63 us on a
+	// desktop, longer where the main thread is busier, ~490 times a second), so it hands over a copy
+	// and gets no result; ggrs only logs failed sends anyway. Calls from one thread arrive in order.
+	tfnet_send__deps: ["$TFNet", "free"],
+	tfnet_send__proxy: "async",
+	tfnet_send__sig: "vipp",
+	tfnet_send: function (h, packet, len) {
 		globalThis.tfnetCalls ??= {};
 		globalThis.tfnetCalls.tfnet_send = (globalThis.tfnetCalls.tfnet_send | 0) + 1; // calls proxied to the page (for diagnostics)
-		const p = TFNet.sockets.get(h)?.peers.get(TFNet.bytesToUuid(peer));
-		if (!p || !p.connected) return -1;
 		try {
-			p.dc.send(HEAPU8.slice(data, data + len));
-			return 0;
+			const p = TFNet.sockets.get(h)?.peers.get(TFNet.bytesToUuid(packet));
+			if (p?.connected) p.dc.send(HEAPU8.slice(packet + 16, packet + len));
 		} catch {
-			return -2;
+			// The channel closed in between: the packet is lost, as on any unreliable channel.
+		} finally {
+			_free(packet);
 		}
 	},
 
