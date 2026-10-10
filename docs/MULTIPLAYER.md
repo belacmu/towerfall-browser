@@ -25,7 +25,10 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
   times a second. So each socket (and each lobby WebSocket) shares counters in wasm memory that
   the page bumps when something arrives or changes, and polls whose counter didn't move return
   without calling the page. In an idle match that took each player from ~2,400 calls a second to
-  ~700 (packet sends and reads), and the main thread from ~54 to ~42 ms busy per second.
+  ~700 (packet sends and reads), and the main thread from ~54 to ~42 ms busy per second. Sends
+  don't wait at all: `tfnet_send` is proxied asynchronously with a copy of the packet, which took
+  the game's threads from 16-30 ms a second blocked on sends to ~2 ms, and the game's time per
+  frame from 5.6-7.8 ms to 4.9-5.4 ms in an idle match.
 - Lobbies use .NET's `ClientWebSocket` to TF.EX's server setting plus `/ws`. TF.EX's official
   server (`wss://tfex-server.balatro-vs-matchmaking.eu`) **turns browsers away**: since the TF.EX
   0.19.1 release (2026-10-10, ~08:00 UTC) a handshake carrying an `Origin` header gets 403 (by

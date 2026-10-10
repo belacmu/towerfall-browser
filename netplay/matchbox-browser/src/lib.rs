@@ -73,7 +73,8 @@ extern "C" {
 	fn tfnet_error(h: i32, buf: *mut u8, cap: usize) -> i32;
 	fn tfnet_id(h: i32, out: *mut u8) -> i32;
 	fn tfnet_next_event(h: i32, peer: *mut u8) -> i32;
-	fn tfnet_send(h: i32, peer: *const u8, data: *const u8, len: usize) -> i32;
+	fn tfnet_send(h: i32, packet: *mut u8, len: usize);
+	fn malloc(size: usize) -> *mut u8;
 	fn tfnet_recv_all(h: i32, buf: *mut u8, cap: usize) -> i32;
 }
 
@@ -261,12 +262,20 @@ pub struct WebRtcChannel {
 
 impl WebRtcChannel {
 	pub fn try_send(&mut self, packet: Packet, peer: PeerId) -> Result<(), SendError> {
-		let id = peer.0.into_bytes();
-		match unsafe { tfnet_send(self.handle, id.as_ptr(), packet.as_ptr(), packet.len()) } {
-			0 => Ok(()),
-			-1 => Err(SendError("peer not connected")),
-			_ => Err(SendError("data channel send failed")),
+		// tfnet_send doesn't wait for the page (see tfnet.js): it gets its own copy, the peer's id
+		// then the packet, which the page frees once sent. Like matchbox on an unreliable channel,
+		// a packet to a peer that isn't connected is dropped there.
+		let len = 16 + packet.len();
+		let copy = unsafe { malloc(len) };
+		if copy.is_null() {
+			return Err(SendError("out of memory"));
 		}
+		unsafe {
+			std::ptr::copy_nonoverlapping(peer.0.as_bytes().as_ptr(), copy, 16);
+			std::ptr::copy_nonoverlapping(packet.as_ptr(), copy.add(16), packet.len());
+			tfnet_send(self.handle, copy, len);
+		}
+		Ok(())
 	}
 
 	pub fn receive(&mut self) -> Vec<(PeerId, Packet)> {
