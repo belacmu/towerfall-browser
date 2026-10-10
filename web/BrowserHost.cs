@@ -194,6 +194,7 @@ public static partial class BrowserHost
 				menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
 				commandsReady = menuFrames > 300;
 			}
+			if (startMode != null) ApplyStartMode();
 			while (commandsReady && commands.TryDequeue(out string[] command))
 			{
 				RunGameCommand(command);
@@ -271,6 +272,58 @@ public static partial class BrowserHost
 		string[] words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 		if (words.Length > 0) commands.Enqueue(words);
 		return Task.CompletedTask;
+	}
+
+	// ?mode=versus|quest|darkworld|trials: once the main menu is up, do what that mode's button does.
+	[JSExport]
+	internal static Task SetStartMode(string mode)
+	{
+		startMode = mode.ToLowerInvariant();
+		return Task.CompletedTask;
+	}
+
+	private static string startMode;
+	private static int mainMenuFrames;
+
+	// MainMenu's FightButton, QuestButton, DarkWorldButton and TrialsButton: pick the match settings
+	// and rollcall mode, then go to the rollcall (archer select).
+	private static void ApplyStartMode()
+	{
+		object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
+		PropertyInfo state = scene?.GetType().GetProperty("State");
+		// Wait for the menu's top level, and give it a moment to tween in.
+		if (scene?.GetType().FullName != "TowerFall.MainMenu" || state.GetValue(scene).ToString() != "Main")
+		{
+			mainMenuFrames = 0;
+			return;
+		}
+		if (++mainMenuFrames < 30) return;
+		string mode = startMode;
+		startMode = null;
+		string rollcall = mode switch
+		{
+			"versus" => "Versus",
+			"quest" => "Quest",
+			"darkworld" => "DarkWorld",
+			"trials" => "Trials",
+			_ => null,
+		};
+		if (rollcall == null)
+		{
+			Console.WriteLine($"[mode] unknown mode \"{mode}\" (versus, quest, darkworld or trials)");
+			return;
+		}
+		Type menu = scene.GetType();
+		if (rollcall == "DarkWorld" && !(bool)menu.Assembly.GetType("TowerFall.GameData").GetProperty("DarkWorldDLC").GetValue(null))
+		{
+			Console.WriteLine("[mode] darkworld: Dark World isn't installed");
+			return;
+		}
+		menu.GetField("CurrentMatchSettings").SetValue(null, menu.GetField(rollcall + "MatchSettings").GetValue(null));
+		FieldInfo rollcallMode = menu.GetField("RollcallMode");
+		rollcallMode.SetValue(null, Enum.Parse(rollcallMode.FieldType, rollcall));
+		state.SetValue(scene, Enum.Parse(state.PropertyType, "Rollcall"));
+		Console.WriteLine($"[mode] {mode}");
 	}
 
 	private static int menuFrames;
