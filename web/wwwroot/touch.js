@@ -175,17 +175,16 @@ export function createTouchControls(send) {
 		if (el) {
 			pointers.set(e.pointerId, { kind: "button", el });
 		} else if (![...pointers.values()].some((p) => p.kind === "stick")) {
-			// A touch inside the resting stick's ring takes hold of it there, so a tap off centre is
-			// a press that way, and tapping again presses again, like flicking a real stick (picking
-			// the archer two to the right). Anywhere else on the left half the stick centres on the
-			// thumb. Let go, it goes back to rest.
+			// A touch anywhere on the left half (or in the resting stick's ring) takes hold of the
+			// stick from where it rests, so it's pushed from there towards the thumb at once: a tap
+			// off centre is a press that way, and tapping again presses again, like flicking a real
+			// stick (picking the archer two to the right). Past the rim the stick comes along with
+			// the thumb (stickValue); let go, it goes back to rest.
 			const b = stick.getBoundingClientRect();
 			const cx = (b.left + b.right) / 2;
 			const cy = (b.top + b.bottom) / 2;
-			if (Math.hypot(e.clientX - cx, e.clientY - cy) <= radius()) {
+			if (e.clientX < innerWidth / 2 || Math.hypot(e.clientX - cx, e.clientY - cy) <= radius()) {
 				pointers.set(e.pointerId, { kind: "stick", ox: cx, oy: cy, x: e.clientX, y: e.clientY });
-			} else if (e.clientX < innerWidth / 2) {
-				pointers.set(e.pointerId, { kind: "stick", ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY });
 			}
 		}
 		render();
