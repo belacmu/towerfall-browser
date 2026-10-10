@@ -130,15 +130,16 @@ the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process
 |---|---|
 | page loaded, .NET started, before Play | ~450 MB |
 | vanilla, title screen | ~910 MB |
-| TF.EX, title screen | ~1,150–1,230 MB → **~920 MB** with streamed music |
+| TF.EX, title screen | ~1,150–1,230 MB (~920 MB with the music bank streamed, see below) |
 | TF.EX, first launch (import, FortRise patch) | ~1,600 MB |
 | an instant replay | +70 MB for a moment (and ~90 MB in WebKit's GPU process) |
 
-- **Music is streamed** (`patches/FNA.patch`, `WaveBank`): TowerFall opens its 218 MB music bank
-  with XNA's in-memory constructor, which put all of it in the WebAssembly heap (and that heap
-  never shrinks). In the browser FNA opens it as a streaming bank instead, read from the file as
-  it plays; FAudio supports streaming a bank built for memory. A missing bank still throws, so
-  TowerFall still starts without music.
+- **The music bank takes 218 MB of the heap**: TowerFall opens it with XNA's in-memory
+  `WaveBank` constructor. Streaming it instead (FNA opening it as a streaming bank in the
+  browser) saved that, but **froze Safari at the title screen** (2026-10-10, reverted): in WebKit
+  the audio is mixed on the page's main thread, and streaming makes that mixing read the file from
+  browser storage (OPFS through WASMFS), which can't be waited on there. Streaming would need the
+  reads off the main thread, e.g. a worker that keeps the next chunks of each playing track ready.
 - The WebAssembly heap is 540–630 MB at the TF.EX title; WebKit adds roughly 400–600 MB on top
   (JavaScript, workers). Chrome holds the same title in about 850 MB in total.
 - The jiterpreter (`?runtime=--no-jiterpreter-traces-enabled` turns it off) costs about
