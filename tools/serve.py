@@ -11,7 +11,8 @@ import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WWW = os.path.join(ROOT, "web/bin/Release/net10.0/publish/wwwroot")
+# TOWERFALL_WWW serves another build (e.g. an AOT one published with tools/build.sh PUBLISH_DIR=...).
+WWW = os.environ.get("TOWERFALL_WWW") or os.path.join(ROOT, "web/bin/Release/net10.0/publish/wwwroot")
 GAMEFILES = os.path.join(ROOT, "gamefiles")
 
 

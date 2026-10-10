@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Publishes the browser build to web/bin/Release/net10.0/publish/wwwroot.
-# Pass AOT=1 for an ahead-of-time compiled build (much slower to build, faster to run).
+# Pass AOT=1 for an ahead-of-time compiled build (much slower to build, faster to run), and
+# PUBLISH_DIR=dir to publish somewhere else (e.g. an AOT build beside the regular one).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source ./env.sh
 
 [ -f vendor/statics/SDL3.a ] || tools/fetch-deps.sh
 
-rm -rf web/bin/Release/net10.0/publish
-dotnet publish web/TowerFallBrowser.csproj -c Release -p:RunAOTCompilation="${AOT:-false}" -nologo -v q
+PUB=${PUBLISH_DIR:-web/bin/Release/net10.0/publish}
+rm -rf "$PUB"
+case "${AOT:-}" in 1|true|yes) aot=true ;; *) aot=false ;; esac
+# MSBUILD_ARGS adds MSBuild options (e.g. -p:WasmNativeStrip=false to keep wasm function names).
+dotnet publish web/TowerFallBrowser.csproj -c Release -p:RunAOTCompilation=$aot -o "$PUB" -nologo -v q ${MSBUILD_ARGS:-}
 
-FW=web/bin/Release/net10.0/publish/wwwroot/_framework
+FW=$PUB/wwwroot/_framework
 # Fix Mono's init when -sWASMFS is enabled (from r58Playz/fna-wasm-threads).
 perl -pi -e 's/FS_createPath\("\/","usr\/share",!0,!0\)/FS_createPath("\/usr","share",!0,!0)/' $FW/dotnet.runtime.*.js
 # Transfer the `.canvas` element to the deputy thread (the C# main thread) so FNA can render there.
@@ -21,7 +25,7 @@ perl -pi -e 's/target=="canvas"&&Object\.keys\(GL\.offscreenCanvases\)\[0\]/targ
 grep -q 'Object.values(GL.offscreenCanvases)\[0\]' $FW/dotnet.native.*.js || { echo "canvas lookup patch did not apply" >&2; exit 1; }
 # FortRise's patch module and built-in modules, served under fortrise/ for the page to copy into
 # the player's FortRise folder (see web/wwwroot/main.js).
-WWW=web/bin/Release/net10.0/publish/wwwroot
+WWW=$PUB/wwwroot
 mkdir -p $WWW/fortrise && cp -R vendor/fortrise/data/. $WWW/fortrise/
 python3 - "$WWW/fortrise" "$(cat vendor/fortrise/version.txt)" <<'PY'
 import json, os, sys
@@ -68,4 +72,4 @@ if f'"./_framework/dotnet.js?v={v}"' not in open(os.path.join(root, "main.js")).
     sys.exit("cache busting: main.js's dotnet.js import wasn't stamped")
 print(f"Script version: {v}")
 PY
-echo "Built: web/bin/Release/net10.0/publish/wwwroot"
+echo "Built: $PUB/wwwroot"

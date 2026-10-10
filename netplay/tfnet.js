@@ -375,7 +375,11 @@ var LibraryTFNet = {
 // thread that owns the page's JS context, which deadlocks when a mod blocks that thread waiting
 // for a connection. These are polled instead, so nothing ever calls back into .NET.
 var LibraryTFWs = {
-	$TFWs__postset: "TFWs.sockets = new Map();",
+	$TFWs__postset:
+		"TFWs.sockets = new Map();" +
+		// Workers only report an error's message to the page; log the whole stack (wasm function
+		// names included, unless stripped) so traps can be traced.
+		"if (ENVIRONMENT_IS_PTHREAD) { self.addEventListener('error', (e) => console.error('[worker error] ' + (e.error && e.error.stack || e.message))); self.addEventListener('unhandledrejection', (e) => console.error('[worker rejection] ' + (e.reason && e.reason.stack || e.reason))); }",
 	$TFWs: { sockets: null, next: 1 },
 
 	// int tfws_open(const char* url): a handle (> 0), or 0 if the URL is invalid.

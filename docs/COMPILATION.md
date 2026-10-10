@@ -1,6 +1,6 @@
 # Compiling game code in the browser: scope
 
-Status: scoping (2026-10-10). Nothing here is built yet.
+Status: scoping (2026-10-10). Option A was built and measured the same day; see "Spike A: results".
 
 ## Why
 
@@ -117,7 +117,8 @@ In progress for .NET 11/12. Not expected to beat Mono+jiterpreter before 2027. R
 
 ## Recommendation
 
-1. **Spike A first (1–3 days).** It's the only option that's cheap, legal and independent of the
+1. **Spike A first (1–3 days).** *(Done; see "Spike A: results". No gameplay speedup; not
+   shipped.)* It's the only option that's cheap, legal and independent of the
    game, and it answers the questions B and C depend on:
    - Does AOT work with our multithreaded patched runtime?
    - What do interpreter↔AOT transitions cost?
@@ -136,6 +137,49 @@ In progress for .NET 11/12. Not expected to beat Mono+jiterpreter before 2027. R
 4. Upstream: TF.State's results/intro-screen rollback replays the HUD from the start on every
    rollback (docs/MULTIPLAYER.md), and saves state through LINQ and reflection. Fixes there help
    desktop players as well, and would shrink what compilation has to recover.
+
+## Spike A: results (2026-10-10)
+
+`tools/build.sh AOT=1 PUBLISH_DIR=web/bin/aot-publish` builds it; serve it with the
+`towerfall-aot` launch entry (port 8082). Build it from a path without spaces (e.g. a symlink to
+the repo): the AOT compiler runs LLVM through a shell. Getting it to run took these changes:
+
+- **The AOT compiler matching our runtime.** The 10.0.3 cross package (`MonoAotCrossCompiler`,
+  swapped in by a target) loads fine with r58playz's patched 10.0.3 runtime.
+- **Trimming.** The SDK requires the trimmer for AOT. Every assembly is kept whole (`TrimMode=copy`)
+  and the trimmed-app feature switches are set back: DI open-generic verification off, the
+  metadata updater on (MonoMod's detours), reflection JSON, nullability info.
+- **Interpreted exceptions.** `System.Net.WebSockets.Client` stays interpreted, because we patch it
+  at run time. IL is kept (`WasmStripILAfterAOT=false`), because Cecil and MonoMod read it.
+- **A real bug in our FNA patch.** The `SDL_CreateWindow` / `SDL_GetWindowFlags` C wrappers
+  (Mono interpreter bug dotnet/runtime#112262) take 32-bit flags, but the managed side declared
+  the 64-bit enum. The interpreter happened to agree; AOT code trapped with "function signature
+  mismatch". The managed side now declares `uint`, which is correct for both.
+
+Measured against the regular build:
+
+| | regular | AOT |
+|---|---|---|
+| `dotnet.native.wasm` | 5.3 MB (2.0 MB gzipped) | 74.8 MB (20.7 MB gzipped) |
+| FortRise's first-run patch (same busy machine) | 49.9 s | **12.4 s** |
+| `FieldInfo.GetValue` | 0.69 µs | 0.28 µs |
+| cached DynamicData read | 0.21 µs | 0.11 µs |
+| call into generated code (MonoMod fast invoker / DynamicMethod) | 0.048 / 0.033 µs | 0.111 / 0.061 µs (slower) |
+| TF.EX sync test, ms per frame (best windows) | ~12.6–15.5 | ~12.4–15.4 |
+
+**Verdict:** no gameplay speedup.
+- Game and mod code, and everything Harmony or MonoMod generates, stays interpreted.
+- In multithreaded builds every call from compiled into interpreted code goes through a slow
+  generic transition, which eats the framework's gains.
+- Startup patching is 4× faster, but it's cached after the first run.
+- The download is +18.7 MB gzipped, plus ~70 MB more code in memory, which is bad for iPhone.
+
+**So A isn't worth shipping.** AOT stays an opt-in build for experiments.
+
+For B and C: compiled-to-interpreted transitions are expensive here, so B only pays off if
+nearly all hot code, the frozen patches included, is compiled together. C keeps everything inside
+the interpreter's own compiled code and avoids those transitions, which makes it the more
+promising of the two.
 
 ## Tools for this work
 

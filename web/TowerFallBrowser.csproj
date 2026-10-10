@@ -77,4 +77,43 @@
 	</Target>
 
 	<Import Project="FortRise\FortRise.References.props" />
+	<!-- Ahead-of-time compiled build (tools/build.sh AOT=1; see docs/COMPILATION.md, option A).
+	     Only the site's own assemblies are compiled; the game and mods load at run time and stay
+	     interpreted. -->
+	<PropertyGroup Condition="'$(RunAOTCompilation)' == 'true'">
+		<!-- Keep IL: Cecil and MonoMod read framework assemblies (FortRise's relinker, detours). -->
+		<WasmStripILAfterAOT>false</WasmStripILAfterAOT>
+		<!-- AOT requires the trimmer to run, but nothing may be trimmed: the game and mods load at
+		     run time and can use any framework API (see KeepAllAssemblies below). -->
+		<PublishTrimmed>true</PublishTrimmed>
+		<!-- PublishTrimmed also flips feature switches to trimmed-app defaults; keep the untrimmed ones
+		     (mods use DI open generics, reflection-based JSON, nullability info; MonoMod's detours
+		     need the hot-reload metadata updater). -->
+		<JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+		<VerifyDependencyInjectionOpenGenericServiceTrimmability>false</VerifyDependencyInjectionOpenGenericServiceTrimmability>
+		<MetadataUpdaterSupport>true</MetadataUpdaterSupport>
+		<NullabilityInfoContextSupport>true</NullabilityInfoContextSupport>
+		<_AggressiveAttributeTrimming>false</_AggressiveAttributeTrimming>
+		<SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+		<!-- Outside the repo: the compiler runs LLVM through a shell, which breaks on paths with spaces
+		     (build AOT from a space-free path too, e.g. a symlink to the repo). -->
+		<AotCrossCompilerDir Condition="'$(AotCrossCompilerDir)' == ''">$(HOME)/.towerfall-browser/tools/aot-cross/10.0.3/tools</AotCrossCompilerDir>
+	</PropertyGroup>
+	<ItemGroup Condition="'$(RunAOTCompilation)' == 'true'">
+		<!-- Patched at run time (PolledWebSocket), which compiled code can't honour. -->
+		<_AOT_InternalForceInterpretAssemblies Include="System.Net.WebSockets.Client.dll" />
+	</ItemGroup>
+	<Target Name="KeepAllAssemblies" BeforeTargets="PrepareForILLink" Condition="'$(RunAOTCompilation)' == 'true'">
+		<ItemGroup>
+			<ManagedAssemblyToLink Update="@(ManagedAssemblyToLink)" TrimMode="copy" />
+		</ItemGroup>
+	</Target>
+	<!-- The AOT compiler matching the patched runtime pack (10.0.3) instead of the workload's; the
+	     workload adds its own after this file is evaluated, hence a target. -->
+	<Target Name="UseMatchingAotCompiler" BeforeTargets="PrepareForILLink" Condition="'$(RunAOTCompilation)' == 'true' and Exists('$(AotCrossCompilerDir)\mono-aot-cross')">
+		<ItemGroup>
+			<MonoAotCrossCompiler Remove="@(MonoAotCrossCompiler)" />
+			<MonoAotCrossCompiler Include="$(AotCrossCompilerDir)\mono-aot-cross" RuntimeIdentifier="browser-wasm" />
+		</ItemGroup>
+	</Target>
 </Project>
