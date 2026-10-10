@@ -130,16 +130,25 @@ the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process
 |---|---|
 | page loaded, .NET started, before Play | ~450 MB |
 | vanilla, title screen | ~910 MB |
-| TF.EX, title screen | ~1,150–1,230 MB (~920 MB with the music bank streamed, see below) |
+| TF.EX, title screen | ~1,150–1,230 MB → **~800 MB** (music streamed, see below) |
 | TF.EX, first launch (import, FortRise patch) | ~1,600 MB |
 | an instant replay | +70 MB for a moment (and ~90 MB in WebKit's GPU process) |
 
-- **The music bank takes 218 MB of the heap**: TowerFall opens it with XNA's in-memory
-  `WaveBank` constructor. Streaming it instead (FNA opening it as a streaming bank in the
-  browser) saved that, but **froze Safari at the title screen** (2026-10-10, reverted): in WebKit
-  the audio is mixed on the page's main thread, and streaming makes that mixing read the file from
-  browser storage (OPFS through WASMFS), which can't be waited on there. Streaming would need the
-  reads off the main thread, e.g. a worker that keeps the next chunks of each playing track ready.
+- **The music bank is streamed, and FAudio mixes on its own thread.** TowerFall opens its 218 MB
+  music bank with XNA's in-memory `WaveBank` constructor, which put all of it in the WebAssembly
+  heap (which never shrinks). In the browser FNA opens it as a streaming bank instead
+  (`patches/FNA.patch`), read from the file as it plays. A first try (2026-10-10) froze Safari at
+  the title screen: SDL runs FAudio's mixer on the page's main thread (in Web Audio's callback, or
+  a timer while audio is suspended), so streaming made the main thread read browser storage
+  (OPFS via WASMFS), and in Safari that read never completes. The main thread's stack, caught with
+  `--diag`: `silence_callback → SDL_PlaybackAudioThreadIterate → FAudio_INTERNAL_MixCallback →
+  FACT_INTERNAL_DefaultReadFile → … OPFSFile::read → emscripten_proxy_sync → futex wait`.
+  Now FAudio mixes on its own thread in the browser (`patches/FAudio.patch`) and the main thread
+  only takes finished samples. Web Audio takes 4096-frame blocks (~85 ms), so the mixer paces
+  itself to have each block complete just before it's due (plus two 10 ms quanta), rather than a
+  block ahead, which would delay every sound by a block. Checked with `--diag`'s gap count (blocks
+  with runs of exact silence): 0 in Safari (Simulator) and Chrome, music playing, 60 fps. The
+  main thread also no longer does the mixing work.
 - The WebAssembly heap is 540–630 MB at the TF.EX title; WebKit adds roughly 400–600 MB on top
   (JavaScript, workers). Chrome holds the same title in about 850 MB in total.
 - The jiterpreter (`?runtime=--no-jiterpreter-traces-enabled` turns it off) costs about
@@ -151,8 +160,14 @@ the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process
 
 To look inside a page that has no console you can read (Safari in the Simulator), run
 `python3 tools/serve.py 8081 --diag` (or the `towerfall-diag` launch config): pages report their
-WebAssembly heap, audio output level and notable log lines every 5 s as `[diag]` lines, and run
-JavaScript queued with `curl localhost:8081/__eval --data 'towerfallCommand("…")'`. Open the page
+WebAssembly heap, audio state, output level and gaps, and notable log lines every 5 s as `[diag]`
+lines, and run JavaScript queued with `curl localhost:8081/__eval --data 'towerfallCommand("…")'`.
+If the main thread spins (Emscripten waits for locks there by spinning on `performance.now()`),
+it sends its JavaScript stack, with WebAssembly function names when the build keeps them
+(temporarily add `--profiling-funcs` to `EmccExtraLDFlags` and `<WasmNativeStrip>false`). A
+watchdog worker reports which main-thread timer is running when it stops answering (in WebKit a
+worker's requests need the main thread, so this only arrives after shorter stalls). Audio in the
+Simulator needs a real tap: open the page without `autoplay` and tap Play with the Simulator tool. Open the page
 in the Simulator with `xcrun simctl openurl booted "http://localhost:8081/?mute&autoplay&…"`.
 
 ## Later steps

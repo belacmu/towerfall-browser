@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dev server for the browser build. Threads need cross-origin isolation (COOP/COEP).
 Usage: serve.py [port] [--pages] [--verbose] [--diag]
---diag: pages report their memory (WebAssembly heap, JS heap), audio output level (peak sample) and new [perf]/error log lines
+--diag: pages report their memory (WebAssembly heap, JS heap), audio output level (peak sample; gaps: blocks with runs of exact silence) and new [perf]/error log lines
 here every 5 s, printed as [diag] lines, and run JavaScript queued with
 `curl 'localhost:PORT/__eval' --data 'towerfallCommand("profile")'` (result: a [diag] line). For browsers whose console can't be read, e.g. iOS
 Safari in the Simulator or on a phone on this network (with --host 0.0.0.0 that isn't localhost,
@@ -19,8 +19,55 @@ GAMEFILES = os.path.join(ROOT, "gamefiles")
 # Injected into index.html with --diag. Runs on the page's main thread.
 DIAG_SCRIPT = b"""<script>
 (() => {
+	// Watchdog: the main thread records a heartbeat and whether it's inside SDL's audio callback
+	// in shared memory; a worker reports them, so a frozen main thread still shows where it is.
+	// [0] heartbeat (ms since start), [1] in audio callback, [2] audio callbacks so far.
+	// [3] the main-thread timer running now (an id; the worker knows where each was created).
+	const watch = new Int32Array(new SharedArrayBuffer(16));
+	const t0 = performance.now();
+	setInterval(() => Atomics.store(watch, 0, Math.round(performance.now() - t0)), 250);
+	const watchdog = new Worker("/__watchdog.js");
+	watchdog.postMessage([watch, performance.timeOrigin + t0]);
+	let nextTimer = 1;
+	for (const name of ["setTimeout", "setInterval"]) {
+		const original = self[name];
+		self[name] = function (fn, ...rest) {
+			if (typeof fn !== "function") return original.call(this, fn, ...rest);
+			const id = nextTimer++;
+			const where = (fn.name || "anonymous") + " < " + String(new Error().stack).split("\\n").slice(1, 6).join(" < ");
+			watchdog.postMessage({ timer: id, where: where.slice(0, 600) });
+			return original.call(this, function (...args) {
+				const outer = Atomics.exchange(watch, 3, id);
+				try {
+					return fn.apply(this, args);
+				} finally {
+					Atomics.store(watch, 3, outer);
+				}
+			}, ...rest);
+		};
+	}
+	// Spin trap: Emscripten's main thread waits for locks by spinning on performance.now(). If one
+	// task calls it a million times, send its stack with a synchronous request (the only way out of
+	// a stuck main thread: in WebKit even workers' requests go through it).
+	const now = performance.now.bind(performance);
+	let spinCalls = 0;
+	let spinSent = false;
+	queueMicrotask(function reset() { spinCalls = 0; setTimeout(reset, 50); });
+	performance.now = () => {
+		if (++spinCalls > 1000000 && !spinSent) {
+			spinSent = true;
+			try {
+				const xhr = new XMLHttpRequest();
+				xhr.open("GET", "/__diag?" + encodeURIComponent(JSON.stringify({ spinStack: String(new Error().stack), timer: Atomics.load(watch, 3) })), false);
+				xhr.send();
+			} catch {}
+		}
+		return now();
+	};
 	// Audio level: SDL plays through a ScriptProcessorNode; measure what it outputs.
 	let peak = 0;
+	let gaps = 0;
+	let blocks = 0;
 	const create = AudioContext.prototype.createScriptProcessor;
 	AudioContext.prototype.createScriptProcessor = function (...args) {
 		const node = create.apply(this, args);
@@ -33,9 +80,22 @@ DIAG_SCRIPT = b"""<script>
 				if (listener) node.removeEventListener("audioprocess", listener);
 				handler = fn;
 				listener = fn && ((e) => {
+					Atomics.store(watch, 1, 1);
+					Atomics.add(watch, 2, 1);
 					fn(e);
+					Atomics.store(watch, 1, 0);
 					const data = e.outputBuffer.getChannelData(0);
-					for (let i = 0; i < data.length; i += 16) peak = Math.max(peak, Math.abs(data[i]));
+					let zeros = 0;
+					let longest = 0;
+					for (let i = 0; i < data.length; i++) {
+						const v = Math.abs(data[i]);
+						if (v > peak) peak = v;
+						zeros = v === 0 ? zeros + 1 : 0;
+						if (zeros > longest) longest = zeros;
+					}
+					// A run of exact silence (>= 256 samples) inside sound: the mixer fell behind.
+					if (longest >= 256 && longest < data.length) gaps++;
+					blocks++;
 				});
 				if (listener) node.addEventListener("audioprocess", listener);
 			},
@@ -49,8 +109,10 @@ DIAG_SCRIPT = b"""<script>
 		const lines = log.slice(from).filter((l) => /\\[perf\\]|\\[diag\\]|rror|InstantReplay|etablished|Lobby|exception|command|sweep|scenario/i.test(l)).slice(-8);
 		from = log.length;
 		const heap = self.wasm?.Module?.HEAPU8?.length;
-		const d = { wasmMB: heap ? Math.round(heap / 1048576) : null, jsMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, audioPeak: Math.round(peak * 1000) / 1000, lines };
+		const d = { wasmMB: heap ? Math.round(heap / 1048576) : null, jsMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, audioPeak: Math.round(peak * 1000) / 1000, audioState: self.wasm?.Module?.SDL3?.audioContext?.state ?? null, audioCallbacks: Atomics.load(watch, 2), audioGaps: `${gaps}/${blocks}`, lines };
 		peak = 0;
+		gaps = 0;
+		blocks = 0;
 		fetch("/__diag?" + encodeURIComponent(JSON.stringify(d)), { cache: "no-store" }).catch(() => {});
 	};
 	setInterval(report, 5000);
@@ -70,6 +132,22 @@ DIAG_SCRIPT = b"""<script>
 </script>"""
 
 
+WATCHDOG_SCRIPT = b"""
+		const timers = new Map();
+		let started = false;
+		onmessage = ({ data }) => {
+			if (data.timer) return timers.set(data.timer, data.where);
+			if (started) return;
+			started = true;
+			const [watch, t0] = data;
+			fetch("/__diag?" + encodeURIComponent(JSON.stringify({ watchdog: "up" })));
+			setInterval(() => {
+				const age = Math.round(performance.timeOrigin + performance.now() - t0 - Atomics.load(watch, 0));
+				if (age > 3000) fetch("/__diag?" + encodeURIComponent(JSON.stringify({ frozenMs: age, inAudioCallback: Atomics.load(watch, 1), audioCallbacks: Atomics.load(watch, 2), inTimer: timers.get(Atomics.load(watch, 3)) ?? Atomics.load(watch, 3) })));
+			}, 2000);
+		};
+	"""
+
 PENDING_EVAL = []
 
 
@@ -88,6 +166,13 @@ class Handler(SimpleHTTPRequestHandler):
             print(f"[diag] {self.client_address[0]} {unquote(self.path[len('/__diag?'):])}", flush=True)
             self.send_response(204)
             self.end_headers()
+            return
+        if "--diag" in sys.argv and self.path == "/__watchdog.js":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.send_header("Content-Length", str(len(WATCHDOG_SCRIPT)))
+            self.end_headers()
+            self.wfile.write(WATCHDOG_SCRIPT)
             return
         if "--diag" in sys.argv and self.path == "/__eval":
             body = PENDING_EVAL.pop(0).encode() if PENDING_EVAL else b""
