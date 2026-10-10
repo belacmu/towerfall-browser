@@ -19,6 +19,7 @@ public static unsafe class TouchGamepad
 	private const int AxisCount = 6; // left x/y, right x/y, left/right trigger (SDL_GamepadAxis order)
 
 	public static bool Enabled;
+	private static bool attempted;
 	private static IntPtr joystick;
 	// Latest state from the page: buttons in the low 32 bits, then left stick x and y (16 bits each).
 	private static long pending = Pack(0, 0, 0);
@@ -28,10 +29,25 @@ public static unsafe class TouchGamepad
 
 	public static void Set(int buttons, int x, int y) => Interlocked.Exchange(ref pending, Pack(buttons, x, y));
 
-	// Plugs the pad in. Call on the game thread after the game is constructed (FNA has initialized
-	// SDL then) and before its first frame, so the game finds it like a controller that was there at
-	// launch.
-	public static void Attach()
+	// Plugs the pad in once it's enabled (game thread). Init() calls this after constructing the game
+	// (FNA has initialized SDL then) and before its first frame, so the game finds it like a
+	// controller that was there at launch; enabled later, it's plugged in like a controller connected
+	// mid-game. Without it the game still runs (keyboard, real gamepads).
+	public static void AttachIfEnabled()
+	{
+		if (!Enabled || attempted) return;
+		attempted = true;
+		try
+		{
+			Attach();
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[touch] Couldn't attach the virtual gamepad: {e}");
+		}
+	}
+
+	private static void Attach()
 	{
 		RuntimeHelpers.RunClassConstructor(typeof(Microsoft.Xna.Framework.Game).Assembly.GetType("Microsoft.Xna.Framework.FNAPlatform", throwOnError: true).TypeHandle);
 		byte[] name = System.Text.Encoding.UTF8.GetBytes("Touch controls\0");
@@ -72,6 +88,7 @@ public static unsafe class TouchGamepad
 	// Applies the page's latest state to the virtual pad (game thread, before a frame).
 	public static void Update()
 	{
+		AttachIfEnabled();
 		if (joystick == IntPtr.Zero) return;
 		long now = Interlocked.Read(ref pending);
 		if (now == applied) return;

@@ -75,14 +75,17 @@
 				text-decoration: underline;
 				padding: 0;
 			}
-			#mute {
+			/* Sound and Controls buttons. */
+			#corner {
 				position: fixed;
-				top: 8px;
-				right: 8px;
+				top: max(8px, env(safe-area-inset-top));
+				right: max(8px, env(safe-area-inset-right));
 				z-index: 10;
-				opacity: 0.6;
+				display: flex;
+				gap: 8px;
 			}
-			#mute:hover { opacity: 1; }
+			#corner button { opacity: 0.6; }
+			#corner button:hover { opacity: 1; }
 			/* On-screen controls (touch.js). */
 			#touch {
 				position: fixed;
@@ -166,7 +169,10 @@
 		<div id="stage">
 			<canvas id="canvas" class="canvas" tabindex="0"></canvas>
 		</div>
-		<button id="mute" title="Toggle sound">Sound: on</button>
+		<div id="corner">
+			<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
+			<button id="mute" title="Toggle sound">Sound: on</button>
+		</div>
 		<div id="overlay">
 			<div id="status">Starting…</div>
 			<div id="bar"><div></div></div>

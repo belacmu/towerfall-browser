@@ -125,18 +125,7 @@ public static partial class BrowserHost
 				game = FortRiseLauncher.Start(GameAssembly, FortRiseDir, fortriseVersion, noIntro, loggers);
 				towerFall = game.GetType().Assembly;
 			}
-			if (TouchGamepad.Enabled)
-			{
-				// Without it the game still runs (keyboard, real gamepads).
-				try
-				{
-					TouchGamepad.Attach();
-				}
-				catch (Exception e)
-				{
-					Console.Error.WriteLine($"[touch] Couldn't attach the virtual gamepad: {e}");
-				}
-			}
+			TouchGamepad.AttachIfEnabled();
 
 			// The constructor's GameData.CheckForDLC() also requires Steam to report the DLC as
 			// installed. In the browser, having the Dark World content is enough.
@@ -255,7 +244,7 @@ public static partial class BrowserHost
 	private static string pastedText;
 
 	// On-screen controls (wwwroot/touch.js): a virtual gamepad, plugged in by Init() when enabled
-	// before it.
+	// before it, or before the next frame when enabled later.
 	[JSExport]
 	internal static Task EnableTouchGamepad()
 	{

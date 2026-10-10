@@ -2,7 +2,8 @@
 // so the game sees an ordinary controller. Layout: a floating stick anywhere on the left half,
 // jump/shoot/dodge at the bottom right, back and pause at the top left.
 //
-// ?touch shows them on any device (mouse works too), ?notouch hides them.
+// The page's Controls button turns them on and off (remembered per browser); by default they're on
+// for touch screens. ?touch / ?notouch in the URL override that.
 
 // TouchGamepad's state bits: SDL_GamepadButton indices, plus the triggers.
 const A = 1 << 0;
@@ -21,11 +22,23 @@ const BUTTONS = [
 	{ name: "pause", label: "Pause", bits: START },
 ];
 
+const TOUCH_KEY = "towerfall.touch";
+
 export function touchWanted() {
 	const params = new URLSearchParams(location.search);
 	if (params.has("notouch")) return false;
 	if (params.has("touch")) return true;
+	try {
+		const saved = localStorage.getItem(TOUCH_KEY);
+		if (saved !== null) return saved === "1";
+	} catch {}
 	return matchMedia("(pointer: coarse)").matches;
+}
+
+export function saveTouchWanted(on) {
+	try {
+		localStorage.setItem(TOUCH_KEY, on ? "1" : "0");
+	} catch {}
 }
 
 // Adds the controls to the page. `send(buttons, x, y)` gets their state; flush() calls it once
@@ -113,6 +126,12 @@ export function createTouchControls(send) {
 	root.addEventListener("contextmenu", (e) => e.preventDefault());
 
 	return {
+		// Hiding lets go of everything held.
+		setVisible(visible) {
+			root.hidden = !visible;
+			if (!visible) pointers.clear();
+			render();
+		},
 		flush() {
 			let buttons = 0;
 			let x = 0;

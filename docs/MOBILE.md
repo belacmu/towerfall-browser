@@ -59,24 +59,28 @@ Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely fi
 
 ## Step 2: touch controls (virtual gamepad)
 
-On touch screens (`(pointer: coarse)`; `?touch` forces them on anywhere, mouse included, and
-`?notouch` off), the page draws on-screen controls (`web/wwwroot/touch.js`) and the host plugs in a
-virtual gamepad that they drive (`web/TouchGamepad.cs`):
+The page draws on-screen controls (`web/wwwroot/touch.js`) and the host plugs in a virtual gamepad
+that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
+(`(pointer: coarse)`); the Controls button next to Sound turns them on and off on any device
+(mouse included), remembered per browser, and `?touch` / `?notouch` override that.
 
 - SDL's virtual joystick driver (in the prebuilt `SDL3.a`) with the standard gamepad shape (15
   buttons, 6 axes), so SDL maps it like an Xbox controller and FNA, and the game, see an ordinary
   gamepad: analog aiming, controller prompts, rebindable in the game's options, no game patching.
 - `Init()` attaches it right after constructing the game and registers it with FNA the way FNA's
   `ProgramInit` does for controllers present at launch, so the game finds it however it looks for
-  controllers. The page sends the controls' state when it changes (`SetTouchGamepad`), and
-  `MainLoop` applies it on the game thread before each frame.
+  controllers. Turned on later, it's plugged in before the next frame like a controller connected
+  mid-game (whether the game picks that up is still to be seen); turned off, the controls let go
+  of everything and hide, and the pad stays connected. The page sends the controls' state when it
+  changes (`SetTouchGamepad`), and `MainLoop` applies it on the game thread before each frame.
 - Layout: a floating stick wherever the left thumb lands on the left half (it follows the thumb
-  past its rim, and rests across from the buttons on the right); Jump (A), Shoot (X) and Dodge (RB and RT both, whichever the game binds) at the
-  bottom right, sliding between them works; Back (B) and Pause (Start) at the top left.
+  past its rim, and rests across from the buttons on the right); Jump (A), Shoot (X) and Dodge (RB
+  and RT both, whichever the game binds) at the bottom right, sliding between them works; Back (B)
+  and Pause (Start) at the top left.
 - The `keys` host command (`towerfallCommand("keys")`) logs connected gamepads' state too.
 
-Untested in the game so far (this environment couldn't install the .NET SDK); the controls
-themselves are tested headless with multi-touch input. To check in the game: open with `?touch` on
+The controls and the page's handling of them are tested headless with multi-touch input; the game
+side compiles (CI) but hasn't been tried in the game yet. To check in the game: open with `?touch` on
 desktop, run `towerfallCommand("keys")`, and use the controls with the mouse; the pad should show
 as `pad0`. Then on a phone: does the game take the pad as player 1, do the menus respond, and are
 the default bindings right (jump/shoot/dodge)?
