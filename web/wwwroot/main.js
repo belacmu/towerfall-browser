@@ -354,15 +354,14 @@ function chooseDownload(missing, missingGame) {
 	});
 }
 
-// While the game runs without its music bank, the Music button stands in for the Sound button: it
-// downloads the bank (showing how big it is, then how far along), has the host start the game's
-// music, and gives the spot back to Sound.
+// While the game runs without its music bank, a Music button next to Sound downloads it (showing
+// how big it is, then how far along), has the host start the game's music, and goes away. (Sound
+// stays: it also covers the sound effects, which every import includes.)
 let pendingMusic = null;
 function offerMusic(host) {
 	const button = $("music");
 	button.textContent = `Load music (${formatMB(pendingMusic.from.size)})`;
 	button.hidden = false;
-	$("mute").hidden = true;
 	button.addEventListener("click", async () => {
 		if (button.disabled) return;
 		button.disabled = true;
@@ -370,7 +369,6 @@ function offerMusic(host) {
 			await importMusic(pendingMusic, (done, total) => (button.textContent = `Music: ${Math.floor((100 * done) / total)}%`));
 			await host.StartMusic();
 			button.hidden = true;
-			$("mute").hidden = false;
 		} catch (e) {
 			console.error("Couldn't load the music", e);
 			button.textContent = "Music failed: tap to retry";
