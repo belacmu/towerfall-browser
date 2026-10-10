@@ -1,0 +1,20 @@
+# The TF.EX-compatible matchmaking + signaling server (see worker.js and docs/MULTIPLAYER.md).
+# Deploy: cd cloudflare/tfex-server && npx wrangler deploy
+# Local, the same code in workerd: npx wrangler dev --port 3000 (or: node local.mjs, no install)
+# More allowed page origins: npx wrangler secret put ALLOWED_ORIGINS (comma-separated)
+name = "tfex-server"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "MatchmakerObject"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "SignalRoomObject"
+
+# SQLite-backed Durable Objects are the ones the Workers free plan includes.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchmakerObject", "SignalRoomObject"]

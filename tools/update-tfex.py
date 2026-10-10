@@ -7,7 +7,9 @@ updated; CI then commits and redeploys) when it's safe:
   - it was built against the ggrs-ffi release we build for the browser (TF.EX's release workflow
     bundles the newest ggrs-ffi release at the time, and the browser can't use that native code;
     tools/build-netplay.sh builds the pinned commit instead);
-  - FortRise as pinned in tools/fetch-fortrise.sh satisfies its FortRise dependency.
+  - FortRise as pinned in tools/fetch-fortrise.sh satisfies its FortRise dependency;
+  - its lobby protocol (the WebSocket message models and MatchmakingService.cs) is unchanged since
+    the TF.EX version our own server (cloudflare/tfex-server) was checked against, its TFEX_PROTOCOL.
 Otherwise it says why, for an issue. Writes `changed=true|false` and `blocked=<reason>` to
 $GITHUB_OUTPUT when set.
   tools/update-tfex.py [--check]   (--check: report only, change nothing)
@@ -18,6 +20,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FETCH_TFEX = os.path.join(ROOT, "tools", "fetch-tfex.sh")
 BUILD_NETPLAY = os.path.join(ROOT, "tools", "build-netplay.sh")
 FETCH_FORTRISE = os.path.join(ROOT, "tools", "fetch-fortrise.sh")
+SERVER_PROTOCOL = os.path.join(ROOT, "cloudflare", "tfex-server", "TFEX_PROTOCOL")
+PROTOCOL_FILES = ("src/network/TF.EX.Domain/Models/WebSocket/", "src/network/TF.EX.Domain/Services/MatchmakingService.cs")
 
 
 def api(path):
@@ -100,6 +104,17 @@ def main():
         print(f"It needs FortRise {needs}; pinned {fortrise}")
         if needs and semver(needs) > semver(fortrise):
             problems.append(f"it needs FortRise {needs}, newer than the pinned {fortrise} (tools/fetch-fortrise.sh)")
+
+    checked = open(SERVER_PROTOCOL).read().strip()
+    compare = api(f"repos/Fcornaire/TF.EX/compare/{checked}...{tag}")
+    changed = [f["filename"] for f in compare.get("files", []) if f["filename"].startswith(PROTOCOL_FILES)]
+    print(f"Lobby protocol files changed since {checked}: {', '.join(changed) or 'none'}")
+    if changed or len(compare.get("files", [])) >= 300:  # the compare API lists at most 300 files
+        problems.append(
+            f"its lobby protocol changed since {checked} ({', '.join(changed) or 'too many changes to tell'}): "
+            "update cloudflare/tfex-server to match (docs/MULTIPLAYER.md), redeploy it, then set cloudflare/tfex-server/TFEX_PROTOCOL to "
+            f"{tag}"
+        )
 
     if problems:
         reason = "; ".join(problems)

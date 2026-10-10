@@ -386,11 +386,27 @@ function offerDarkWorld() {
 	});
 }
 
+// Online play (TF.EX): the matchmaking server browser players use. TF.EX's official server turns
+// browsers away, so the site runs its own (cloudflare/tfex-server, docs/MULTIPLAYER.md) and TF.EX's
+// OFFICIAL setting means this one in the browser (web/Netplay/TfexPatches.cs). Empty: TF.EX's own
+// setting. ?tfexserver=local (ws://127.0.0.1:3000), =official, or =<wss://…> picks another.
+const TFEX_SERVER = "";
+const TFEX_SERVERS = { local: "ws://127.0.0.1:3000", official: "wss://tfex-server.balatro-vs-matchmaking.eu" };
+
+function tfexServer() {
+	const param = new URLSearchParams(location.search).get("tfexserver");
+	if (!param) return { url: TFEX_SERVER, force: false };
+	const url = TFEX_SERVERS[param.toLowerCase()] ?? param.replace(/^http/, "ws").replace(/\/+$/, "");
+	return { url, force: true };
+}
+
 async function startDotnet() {
 	status("Starting .NET runtime…");
 	const { dotnet } = await import("./_framework/dotnet.js");
 	let builder = dotnet.withConfig({});
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
+	const server = tfexServer();
+	if (server.url) builder = builder.withEnvironmentVariable("TFEX_SERVER", server.url).withEnvironmentVariable("TFEX_SERVER_FORCE", server.force ? "1" : "0");
 	// The jiterpreter (the interpreter's JIT to WebAssembly) fills its default function tables
 	// with the game plus FortRise mods; netplay needs all the speed it can get. ?runtime=a,b passes
 	// more Mono options (e.g. --jiterpreter-stats-enabled).

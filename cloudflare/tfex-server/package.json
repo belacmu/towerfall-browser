@@ -1,0 +1,9 @@
+{
+	"name": "tfex-server",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "node local.mjs",
+		"test": "node test.mjs"
+	}
+}

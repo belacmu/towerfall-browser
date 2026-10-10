@@ -4,8 +4,36 @@
     {
       "name": "towerfall",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["tools/serve.py", "8080"],
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8080"
+      ],
       "port": 8080
+    },
+    {
+      "name": "tfex-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "cloudflare/tfex-server/local.mjs",
+        "--port",
+        "3000",
+        "--verbose"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "tfex-server-workerd",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "--yes",
+        "wrangler@4",
+        "dev",
+        "-c",
+        "cloudflare/tfex-server/wrangler.toml",
+        "--port",
+        "8787"
+      ],
+      "port": 8787
     }
   ]
 }
