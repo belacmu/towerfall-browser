@@ -86,6 +86,11 @@ that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
   mid-game (whether the game picks that up is still to be seen); turned off, the controls let go
   of everything and hide, and the pad stays connected. The page sends the controls' state when it
   changes (`SetTouchGamepad`), and `MainLoop` applies it on the game thread before each frame.
+- While the controls show, the keyboard isn't a player (it was player 2 behind the pad): a
+  Harmony postfix on `PlayerInput.AssignInputs` takes it out of the player list the game builds,
+  while a gamepad is left. The menus still take keys. TF.EX's own lists in online lobbies (with
+  `KeyboardInput`s standing in for remote players) are left alone. Turning the controls on or off
+  rebuilds the list once the main menu is up; a match in progress keeps its players.
 - Layout: a stick on the left half that follows the thumb past half its radius. A faint ring
   marks where it rests, across from the buttons on the right, and a touch anywhere on the left
   half pushes it from there towards the thumb at once: tapping off centre is a press in that
