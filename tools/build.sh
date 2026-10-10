@@ -41,4 +41,31 @@ mkdir -p $WWW/mods && cp mods/catalog.json $WWW/mods/catalog.json
 # The one hosted mod: TF.EX, for online play (GPL; see tools/fetch-tfex.sh and docs/MODS.md).
 mkdir -p $WWW/hosted-mods && cp vendor/tfex/*.zip vendor/tfex/hosted.json $WWW/hosted-mods/
 grep -q TRANSFERRED_CANVAS $FW/dotnet.native.*.js || { echo "canvas transfer patch did not apply" >&2; exit 1; }
+# Cache busting. GitHub Pages lets browsers keep every file for 10 minutes, and a reload fetches the
+# page again but not the scripts it loads, so after a deploy a phone could run the new page with
+# old scripts, or an old _framework/dotnet.js naming runtime files the deploy removed. The page's
+# own modules and dotnet.js (the only unfingerprinted files in _framework) are loaded with
+# ?v=<hash of them all>, so a deploy that changes any of them changes every URL.
+python3 - "$WWW" <<'PY'
+import hashlib, os, re, sys
+root = sys.argv[1]
+modules = sorted(n for n in os.listdir(root) if n.endswith(".js") and n != "coi-serviceworker.js")
+h = hashlib.sha256()
+for rel in modules + ["_framework/dotnet.js"]:
+    h.update(open(os.path.join(root, rel), "rb").read())
+v = h.hexdigest()[:12]
+def stamp(rel, pattern, expect):
+    path = os.path.join(root, rel)
+    text, n = re.subn(pattern, lambda m: f"{m[1]}{m[2]}?v={v}{m[3]}", open(path).read())
+    if n < expect:
+        sys.exit(f"cache busting: expected {expect}+ script URLs in {rel}, found {n}")
+    open(path, "w").write(text)
+stamp("index.html", r'(<script type="module" src=")(\./main\.js)(")', 1)
+for rel in modules:
+    # import ... from "./x.js" and import("./x.js")
+    stamp(rel, r'((?:\bfrom|\bimport\s*\()\s*")(\./[^"?]+\.js)(")', 2 if rel == "main.js" else 0)
+if f'"./_framework/dotnet.js?v={v}"' not in open(os.path.join(root, "main.js")).read():
+    sys.exit("cache busting: main.js's dotnet.js import wasn't stamped")
+print(f"Script version: {v}")
+PY
 echo "Built: web/bin/Release/net10.0/publish/wwwroot"
