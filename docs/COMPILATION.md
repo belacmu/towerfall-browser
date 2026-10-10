@@ -202,8 +202,29 @@ interpreter inlining and interp↔AOT transitions. It needed:
   calls with the workload's upstream AOT compiler, which lacks the fork's
   `TypeBuilder.propagate_parent_native` ("runtime and class libraries are out of sync").
 
-**Next:** measure it, then try the JIT pack (`RUNTIME_ZIP=dotnet-jspi-jit.zip`, plus
-`WASM_ENABLE_JSPI` and `-Wl,--export=__stack_pointer` at link, as their app targets do).
+**Step 2, the JIT pack: parked (2026-10-10).** It's Chromium-only, and the current priority is
+iPhone. The `perf/wasm-jit` branch builds it (`MSBUILD_ARGS=-p:WasmJit=true`, page `?jit`;
+`tools/fetch-runtime.sh` with `RUNTIME_ZIP=dotnet-jspi-jit.zip OUT=vendor/runtime-jit`). It boots
+the game and reaches the menu, but crashes as soon as the sync test starts. What it took and what's left:
+- **`__stack_pointer` must stay exported.** The JIT's modules import it. Emscripten's meta-DCE
+  drops exported globals at `-O3` (the pack's own link has no `-O`), so the
+  `-Wl,--export=__stack_pointer` flag alone isn't enough: `patches/emsdk/4-keep-stack-pointer-export.patch`.
+- **SIMD has to be off.** The JIT has no vector support, so `Vector128.IsHardwareAccelerated` is
+  false in code it compiles and true in the interpreter. .NET's vectorized helpers then throw
+  `PlatformNotSupportedException` when an interpreted caller reaches a JIT-compiled one (first
+  hit: `string.Split` in Cecil). ikvmcraft doesn't hit this because its framework is AOT-compiled
+  and the JIT only sees the rest. SIMD off makes the interpreter ~60% slower on the sync test
+  (22–24 → 35–42 ms/frame), which the JIT would have to win back first.
+- **Detoured methods crash it.** A detour stub ends in `calli 0xF0F0F0F0`, a token only the
+  patched interpreter understands. The July JIT reads it as a signature token and asserts
+  (`metadata.c:2403`, `MONO_TABLE_STANDALONESIG`). The branch adds each detoured method to
+  `MONO_WASM_JIT_NO_METHOD`, but the July build matches bare method names only. Denying `Update`,
+  `Render`, … would exclude most game code.
+- **The fixes exist in r58playz's source, but not as a published build.** The branch has since
+  added handling for detour stubs ("body override", 2026-10-04), qualified/assembly deny lists, and
+  "fixes exposed by taking assemblies off AOT" (2026-09-30), our exact setup. No release has been
+  made since 2026-07-25 (ikvmcraft uses the same one). Picking this up means building the runtime
+  from that branch (FNA-WASM-Build's `build-dotnet.sh`, likely 1–2 h of CI per build).
 
 ## Tools for this work
 
