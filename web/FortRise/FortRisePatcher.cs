@@ -21,11 +21,12 @@ public static class FortRisePatcher
 	public const string PatchFile = "TowerFall.Patch.dll";
 
 	// Bump when BrowserFixups changes, so cached patches are redone.
-	private const int FixupsVersion = 5;
+	private const int FixupsVersion = 6;
 
 	// fortriseDir holds TowerFall.FortRise.mm.dll plus the assemblies TowerFall.exe references
 	// (FNA.dll, Steamworks.NET.dll); MonoMod resolves dependencies from the working directory.
-	public static string EnsurePatched(string exePath, string fortriseDir, string fortriseVersion, ILoggerFactory loggers)
+	// progress, if given, is told how far patching is (0 to 1) as it goes.
+	public static string EnsurePatched(string exePath, string fortriseDir, string fortriseVersion, ILoggerFactory loggers, Action<double> progress = null)
 	{
 		ILogger log = loggers.CreateLogger("FortRise");
 		string patchFile = Path.Combine(fortriseDir, PatchFile);
@@ -37,13 +38,14 @@ public static class FortRisePatcher
 			return patchFile;
 		}
 
+		log.LogInformation("Patching TowerFall.exe (once per FortRise version)...");
 		using var exe = new MemoryStream(File.ReadAllBytes(exePath));
 		string previousDir = Directory.GetCurrentDirectory();
 		Directory.SetCurrentDirectory(fortriseDir);
 		try
 		{
 			var started = System.Diagnostics.Stopwatch.StartNew();
-			TryPatch(exe, patchFile, log);
+			TryPatch(exe, patchFile, log, progress ?? (_ => { }));
 			log.LogInformation("Patched TowerFall.exe in {Seconds:0.0}s.", started.Elapsed.TotalSeconds);
 		}
 		finally
@@ -59,7 +61,10 @@ public static class FortRisePatcher
 	// CachingAssemblyResolver); the 32-bit flags cleared on the module MonoMod reads, rather than by
 	// writing and reading TowerFall.exe once more beforehand; the browser fixups applied before
 	// MonoMod writes the module, rather than reading and writing it again afterwards; no symbols.
-	private static void TryPatch(Stream exe, string patchFile, ILogger log)
+	//
+	// progress gets each step's share of the time it takes (measured in Chrome), and per method in
+	// PatchRefs, about half of it.
+	private static void TryPatch(Stream exe, string patchFile, ILogger log, Action<double> progress)
 	{
 		Environment.SetEnvironmentVariable("MONOMOD_DEPENDENCY_MISSING_THROW", "0");
 		using var modder = new FortLauncher.FortRiseMonoModder
@@ -70,16 +75,30 @@ public static class FortRisePatcher
 			AssemblyResolver = new CachingAssemblyResolver(),
 			WriterParameters = new WriterParameters { WriteSymbols = false },
 		};
+		progress(0);
 		modder.Read();
+		progress(0.03);
 		// What FortLauncher's Remove32BitFlagsPatcher does.
 		modder.Module.Attributes &= ~(ModuleAttributes.Required32Bit | ModuleAttributes.Preferred32Bit);
 		modder.Log("[Main] Scanning for TowerFall.FortRise.mm.dll.");
 		modder.ReadMod(Path.GetFullPath(PatchModule));
 		modder.MapDependencies();
+		progress(0.25);
+		// AutoPatch's PatchRefs pass hands MethodRewriter each method with a body, after the Patch
+		// pass; the post-processors run after it.
+		int methods = 0, total = 0;
+		modder.MethodRewriter += (m, method) =>
+		{
+			if (total == 0) total = Math.Max(1, m.Module.GetTypes().Sum(t => t.Methods.Count(x => x.HasBody)));
+			progress(0.36 + 0.48 * Math.Min(1, ++methods / (double)total));
+		};
+		modder.PostProcessors = (MonoMod.PostProcessor)(_ => progress(0.84)) + modder.PostProcessors;
+		modder.PostProcessors += _ => progress(0.95);
 		modder.Log("[Main] modder.AutoPatch()");
 		modder.AutoPatch();
 		BrowserFixups(modder.Module, log);
 		modder.Write();
+		progress(1);
 		modder.Log("[Main] Done.");
 	}
 
@@ -116,8 +135,11 @@ public static class FortRisePatcher
 		var platform = new MethodReference("Platform", module.TypeSystem.String, shims);
 		var location = new MethodReference("AssemblyLocation", module.TypeSystem.String, shims);
 		location.Parameters.Add(new ParameterDefinition(module.ImportReference(typeof(System.Reflection.Assembly))));
+		var loadMods = new MethodReference("LoadMods", module.TypeSystem.Void, shims);
+		loadMods.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+		loadMods.Parameters.Add(new ParameterDefinition(module.ImportReference(typeof(System.Collections.IList))));
 
-		int platforms = 0, locations = 0;
+		int platforms = 0, locations = 0, modLoads = 0;
 		foreach (TypeDefinition type in module.GetTypes())
 		{
 			foreach (MethodDefinition method in type.Methods)
@@ -143,6 +165,14 @@ public static class FortRisePatcher
 						instr.OpCode = OpCodes.Call;
 						instr.Operand = location;
 						locations++;
+					}
+					// FortRise's mod loader can load a mod twice, depending on the mods' order (see
+					// BrowserShims.LoadMods).
+					else if (called.Name == "LoadMods" && called.DeclaringType.FullName == "FortRise.ModuleManager" && method.Name != "LoadMods")
+					{
+						instr.OpCode = OpCodes.Call;
+						instr.Operand = loadMods;
+						modLoads++;
 					}
 				}
 			}
@@ -179,7 +209,7 @@ public static class FortRisePatcher
 			natives++;
 		}
 
-		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {Updaters} update checks disabled, {Natives} native loaders deferred to the app.", platforms, locations, updaters, natives);
+		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {ModLoads} mod loads ordered by it, {Updaters} update checks disabled, {Natives} native loaders deferred to the app.", platforms, locations, modLoads, updaters, natives);
 	}
 
 	private static string Sha256(string path)

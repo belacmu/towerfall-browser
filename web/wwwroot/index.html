@@ -70,6 +70,16 @@
 				width: 0;
 				background: #e8c547;
 			}
+			/* Busy, for how long unknown (see showActivity in main.js). */
+			#bar.busy > div {
+				width: 25% !important;
+				animation: busy 1.2s ease-in-out infinite alternate;
+			}
+			@keyframes busy {
+				from { transform: translateX(0); }
+				to { transform: translateX(300%); }
+			}
+			#detail { max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 			#error { color: #ff7b7b; white-space: pre-wrap; max-width: 90vw; }
 			#pick { max-width: 34em; }
 			#modsPanel { width: min(34em, 90vw); text-align: left; }
