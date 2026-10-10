@@ -1,11 +1,13 @@
 // What the server accepts: its three WebSocket endpoints, and which browser pages may open them.
 
-// Pages that may connect (browsers send Origin; desktop TF.EX sends none and is always let in).
-// More can be added with ALLOWED_ORIGINS (comma-separated; "*" allows any page).
-export const DEFAULT_ORIGINS = ["https://belacmu.github.io", "http://localhost:8080", "http://127.0.0.1:8080"];
+// Pages that may connect (browsers send Origin; desktop TF.EX sends none and is always let in):
+// the site, and dev servers on this machine (any port). More can be added with ALLOWED_ORIGINS
+// (comma-separated; "*" allows any page).
+export const DEFAULT_ORIGINS = ["https://belacmu.github.io"];
+const LOCAL = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 export function originAllowed(origin, allowed) {
-	if (!origin) return true;
+	if (!origin || LOCAL.test(origin)) return true;
 	return allowed.includes("*") || allowed.includes(origin);
 }
 

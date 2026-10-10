@@ -128,6 +128,8 @@ test("origins: desktop (none) and the site are let in, other pages aren't", asyn
 	eq(await handshake("/ws"), 101, "no Origin");
 	eq(await handshake("/ws", "https://belacmu.github.io"), 101, "the site");
 	eq(await handshake("/ws", "http://localhost:8080"), 101, "the dev server");
+	eq(await handshake("/ws", "http://127.0.0.1:8081"), 101, "another local port");
+	eq(await handshake("/ws", "http://localhost.example.com"), 403, "not local");
 	eq(await handshake(`/room/abc?peer=${uuid()}`, "https://belacmu.github.io"), 101, "room");
 	eq(await handshake("/ws", "https://example.com"), 403, "another page");
 	eq(await handshake("/nope"), 404, "unknown path");

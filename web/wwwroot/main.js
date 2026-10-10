@@ -426,7 +426,7 @@ function offerDarkWorld() {
 // browsers away, so the site runs its own (cloudflare/tfex-server, docs/MULTIPLAYER.md) and TF.EX's
 // OFFICIAL setting means this one in the browser (web/Netplay/TfexPatches.cs). Empty: TF.EX's own
 // setting. ?tfexserver=local (ws://127.0.0.1:3000), =official, or =<wss://…> picks another.
-const TFEX_SERVER = "";
+const TFEX_SERVER = "wss://tfex-server.tf-bd1030ec.workers.dev";
 const TFEX_SERVERS = { local: "ws://127.0.0.1:3000", official: "wss://tfex-server.balatro-vs-matchmaking.eu" };
 
 function tfexServer() {

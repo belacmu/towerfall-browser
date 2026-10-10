@@ -26,7 +26,8 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 
 ## Our server (`cloudflare/tfex-server`)
 
-A server implementing what TF.EX's client uses, written from TF.EX's GPL client source at
+Deployed at **`wss://tfex-server.tf-bd1030ec.workers.dev`** (2026-10-10), the site's default. A
+server implementing what TF.EX's client uses, written from TF.EX's GPL client source at
 v0.19.1 (`src/network/TF.EX.Domain/Services/MatchmakingService.cs`, the message models in
 `Models/WebSocket/`, and the menus that drive them). The official server isn't open source, so
 where the client leaves room the choices below are ours. Desktop TF.EX can use it too: set TF.EX's
@@ -40,7 +41,7 @@ SERVER option (Mod options) to its `wss://` address.
   lobby hands them out and GGRS matches seats to them) instead of being random. Without `?peer=`
   it is random, like stock matchbox. Each room is a full mesh of up to 16 peers.
 - `routes.js`: the endpoints and allowed origins. Browsers may connect from
-  `https://belacmu.github.io`, `http://localhost:8080` and `http://127.0.0.1:8080`, plus any in
+  `https://belacmu.github.io` and from `http://localhost` / `http://127.0.0.1` on any port, plus any in
   `ALLOWED_ORIGINS` (comma-separated, `*` for any page). Connections without an Origin (desktop
   TF.EX) are always accepted. Other origins get 403; a peer id that isn't a UUID gets 400.
 - `worker.js` + `wrangler.toml`: the Cloudflare deployment. A Worker routes `/ws` to one
@@ -166,7 +167,8 @@ awake for the match: about 75 GB-s for a 10-minute match, so roughly 170 such ma
 - **Two browsers played a match through our own server** (2026-10-10, after the official server
   began refusing browsers): private lobby, join by code, archer select, start, "Netplay session
   etablished" on both, with `local.mjs` and with the Durable Object version under `wrangler dev`.
-- Next: deploy the server; browser against desktop on it.
+- The server is deployed (Cloudflare) and the site uses it by default.
+- Next: browser against desktop on it; end-of-match votes, series and quick play in real browsers.
 
 ## Ways to get more speed
 
