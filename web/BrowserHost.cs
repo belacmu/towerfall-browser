@@ -188,11 +188,12 @@ public static partial class BrowserHost
 				TfexPatches.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
-			// then e.g. "test" is the base game's own command).
+			// then e.g. "test" is the base game's own command)...
 			if (!commandsReady)
 			{
 				menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
-				commandsReady = menuFrames > 300;
+				// ...and TowerFall's background loading (game data, default match settings) is done.
+				commandsReady = menuFrames > 300 && towerFall.GetType("TowerFall.TFGame")?.GetProperty("Loaded", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is true;
 			}
 			if (startMode != null) ApplyStartMode();
 			while (commandsReady && commands.TryDequeue(out string[] command))

@@ -10,7 +10,7 @@ namespace TowerFallBrowser;
 
 // Times chosen methods (inclusive, per frame) with Harmony prefixes/postfixes, for finding what's
 // slow in the browser. Turned on by the host's "profile [Type::Method ...]" command (Type::* for
-// every method of a type; with no arguments, a set covering TF.EX's per-tick work); results are
+// every method of a type, Type::Prefix* for those starting with Prefix; with no arguments, a set covering TF.EX's per-tick work); results are
 // printed with each [perf] line.
 public static class Profiler
 {
@@ -44,6 +44,7 @@ public static class Profiler
 	{
 		public string Name;
 		public long Ticks;
+		public long Bytes;
 		public int Calls;
 	}
 
@@ -61,16 +62,22 @@ public static class Profiler
 		foreach (string spec in specs.Length > 0 ? specs : Defaults)
 		{
 			string[] parts = spec.Split("::");
-			Type type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(parts[0])).FirstOrDefault(t => t != null);
-			MethodBase[] methods = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
-				.Where(m => (parts[^1] == "*" ? !m.Name.StartsWith('<') : m.Name == parts[^1]) && !m.IsAbstract && !m.ContainsGenericParameters).ToArray() ?? Array.Empty<MethodBase>();
-			if (methods.Length == 0)
+			// Namespace.* matches every type in that namespace (and below).
+			IEnumerable<Type> types = parts[0].EndsWith(".*")
+				? AppDomain.CurrentDomain.GetAssemblies().SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+					.Where(t => t.FullName != null && t.FullName.StartsWith(parts[0][..^1], StringComparison.Ordinal) && !t.IsGenericTypeDefinition)
+				: new[] { AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(parts[0])).FirstOrDefault(t => t != null) }.Where(t => t != null);
+			var found = types.SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+				.Where(m => (parts[^1].EndsWith('*') ? m.Name.StartsWith(parts[^1][..^1], StringComparison.Ordinal) && !m.Name.StartsWith('<') : m.Name == parts[^1]) && !m.IsAbstract && !m.ContainsGenericParameters)
+				.Select(m => (Type: type, Method: (MethodBase)m))).ToArray();
+			if (found.Length == 0)
 			{
 				report.Append($" {spec}: not found;");
 				continue;
 			}
-			foreach (MethodBase m in methods)
+			foreach ((Type type, MethodBase m) in found)
 			{
+				MethodBase[] methods = found.Where(f => f.Type == type).Select(f => f.Method).ToArray();
 				if (entries.ContainsKey(m)) continue;
 				try
 				{
@@ -89,16 +96,17 @@ public static class Profiler
 		return $"profiling {entries.Count} methods.{report}";
 	}
 
-	private static void Prefix(out long __state)
+	private static void Prefix(out (long Time, long Bytes) __state)
 	{
-		__state = Stopwatch.GetTimestamp();
+		__state = (Stopwatch.GetTimestamp(), GC.GetAllocatedBytesForCurrentThread());
 	}
 
-	private static void Postfix(long __state, MethodBase __originalMethod)
+	private static void Postfix((long Time, long Bytes) __state, MethodBase __originalMethod)
 	{
 		if (entries.TryGetValue(__originalMethod, out Entry e))
 		{
-			e.Ticks += Stopwatch.GetTimestamp() - __state;
+			e.Ticks += Stopwatch.GetTimestamp() - __state.Time;
+			e.Bytes += GC.GetAllocatedBytesForCurrentThread() - __state.Bytes;
 			e.Calls++;
 		}
 	}
@@ -114,12 +122,13 @@ public static class Profiler
 			StateSpeedups.GetAllTicks = 0;
 			StateSpeedups.GetAllCalls = 0;
 		}
-		foreach (Entry e in entries.Values.Where(e => e.Calls > 0).OrderByDescending(e => e.Ticks))
+		foreach (Entry e in entries.Values.Where(e => e.Calls > 0).OrderByDescending(e => Math.Max(e.Ticks / (double)Stopwatch.Frequency * 1000, e.Bytes / 1048576.0)))
 		{
 			double ms = e.Ticks * 1000.0 / Stopwatch.Frequency / frames;
 			double total = e.Ticks * 1000.0 / Stopwatch.Frequency;
-			sb.Append($"\n[profile]   {ms,7:0.00} ms/frame {e.Calls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {e.Calls,6} calls  {e.Name}");
+			sb.Append($"\n[profile]   {ms,7:0.00} ms/frame {e.Calls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {e.Calls,6} calls {e.Bytes / 1048576.0,8:0.0} MB  {e.Name}");
 			e.Ticks = 0;
+			e.Bytes = 0;
 			e.Calls = 0;
 		}
 		return sb.ToString();

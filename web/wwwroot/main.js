@@ -443,6 +443,11 @@ async function startDotnet() {
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
 	const server = tfexServer();
 	if (server.url) builder = builder.withEnvironmentVariable("TFEX_SERVER", server.url).withEnvironmentVariable("TFEX_SERVER_FORCE", server.force ? "1" : "0");
+	// ?env=NAME=value;NAME=value sets runtime environment variables (e.g. MONO_GC_PARAMS), for tuning.
+	for (const pair of (new URLSearchParams(location.search).get("env") ?? "").split(";").filter(Boolean)) {
+		const at = pair.indexOf("=");
+		if (at > 0) builder = builder.withEnvironmentVariable(pair.slice(0, at), pair.slice(at + 1));
+	}
 	// The jiterpreter (the interpreter's JIT to WebAssembly) fills its default function tables
 	// with the game plus FortRise mods; netplay needs all the speed it can get. ?runtime=a,b passes
 	// more Mono options (e.g. --jiterpreter-stats-enabled).
