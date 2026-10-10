@@ -990,10 +990,36 @@ index 83aa881..1c62d49 100644
  
    <!-- Dependencies -->
 diff --git a/src/MonoMod.Patcher/MonoModder.cs b/src/MonoMod.Patcher/MonoModder.cs
-index fb3d2e1..89736d2 100644
+index fb3d2e1..a0407a2 100644
 --- a/src/MonoMod.Patcher/MonoModder.cs
 +++ b/src/MonoMod.Patcher/MonoModder.cs
-@@ -859,12 +859,21 @@ namespace MonoMod
+@@ -91,6 +91,9 @@ namespace MonoMod
+         public Dictionary<ModuleDefinition, List<ModuleDefinition>> DependencyMap = new Dictionary<ModuleDefinition, List<ModuleDefinition>>();
+         public Dictionary<string, ModuleDefinition> DependencyCache = new Dictionary<string, ModuleDefinition>();
+         public Dictionary<ModuleDefinition, Dictionary<string, TypeReference>> ForwardedTypeCache = new Dictionary<ModuleDefinition, Dictionary<string, TypeReference>>();
++        // FindTypeDeep's lookups outside the module: the type (null if found nowhere) and whether it
++        // came from a mod's dependencies. Each miss in the module otherwise crawls every dependency.
++        public Dictionary<string, (TypeReference Type, bool FromMods)> FindTypeDeepCache = new Dictionary<string, (TypeReference Type, bool FromMods)>();
+ 
+         public Func<ICustomAttributeProvider, TypeReference, bool> ShouldCleanupAttrib;
+ 
+@@ -320,6 +323,7 @@ namespace MonoMod
+             {
+                 RelinkMapCache.Clear();
+                 RelinkModuleMapCache.Clear();
++                FindTypeDeepCache.Clear();
+             }
+         }
+ 
+@@ -459,6 +463,7 @@ namespace MonoMod
+         }
+         public virtual void MapDependency(ModuleDefinition main, string name, string fullName = null, AssemblyNameReference depRef = null)
+         {
++            FindTypeDeepCache.Clear();
+             if (!DependencyMap.TryGetValue(main, out List<ModuleDefinition> mapped))
+                 DependencyMap[main] = mapped = new List<ModuleDefinition>();
+ 
+@@ -859,12 +864,21 @@ namespace MonoMod
              if (!cap.HasCustomAttributes)
                  return;
  
@@ -1020,7 +1046,7 @@ index fb3d2e1..89736d2 100644
              }
          }
  
-@@ -904,11 +913,19 @@ namespace MonoMod
+@@ -904,11 +918,19 @@ namespace MonoMod
  
              if (PostProcessors != null)
              {
@@ -1044,6 +1070,53 @@ index fb3d2e1..89736d2 100644
                  }
              }
          }
+@@ -1149,25 +1171,36 @@ namespace MonoMod
+         }
+         public virtual TypeReference FindTypeDeep(string name)
+         {
+-            TypeReference type = FindType(name, false);
++            // The module itself isn't cached: patching adds types to it.
++            TypeReference type = Module.GetType(name, false);
+             if (type != null)
+                 return type;
+ 
++            if (!FindTypeDeepCache.TryGetValue(name, out var found))
++                FindTypeDeepCache[name] = found = FindTypeDeepOutsideModule(name);
++            type = found.Type;
++            if (type == null || !found.FromMods)
++                return type;
++
++            // Type may come from a dependency. If the assembly reference is missing, add.
++            if (type.Scope is AssemblyNameReference dllRef && !Module.AssemblyReferences.Any(n => n.Name == dllRef.Name))
++                Module.AssemblyReferences.Add(dllRef);
++            return Module.ImportReference(type);
++        }
++        private (TypeReference Type, bool FromMods) FindTypeDeepOutsideModule(string name)
++        {
++            TypeReference type = FindType(name, false);
++            if (type != null)
++                return (type, false);
++
+             // Check in the dependencies of the mod modules.
+             var crawled = new Stack<ModuleDefinition>();
+-            // Set type to null so that an actual break condition exists
+-            type = null;
+             foreach (ModuleDefinition mod in Mods)
+                 foreach (ModuleDefinition dep in DependencyMap[mod])
+                     if ((type = FindType(dep, name, crawled)) != null)
+-                    {
+-                        // Type may come from a dependency. If the assembly reference is missing, add.
+-                        if (type.Scope is AssemblyNameReference dllRef && !Module.AssemblyReferences.Any(n => n.Name == dllRef.Name))
+-                            Module.AssemblyReferences.Add(dllRef);
+-                        return Module.ImportReference(type);
+-                    }
++                        return (type, true);
+ 
+-            return null;
++            return (null, false);
+         }
+ 
+         #region Pre-Patch Pass
 diff --git a/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs b/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
 index 834e2a6..057293b 100644
 --- a/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
