@@ -493,6 +493,8 @@ async function main() {
 		const text = e.clipboardData?.getData("text");
 		if (text) exports.BrowserHost.SetClipboardText(text);
 	});
+	const startMode = new URLSearchParams(location.search).get("mode");
+	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}
