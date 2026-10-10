@@ -333,6 +333,8 @@ async function ensureGameFiles() {
 // Asks whether to download everything that's missing or all but the music; resolves to true for
 // everything. Shows the download sizes.
 function chooseDownload(missing, missingGame) {
+	// ?autoplay (automated tests) loads everything without asking.
+	if (new URLSearchParams(location.search).has("autoplay")) return Promise.resolve(true);
 	const size = (list) => formatMB(list.reduce((n, c) => n + c.from.size, 0));
 	status("Load TowerFall?");
 	$("bar").hidden = true;
