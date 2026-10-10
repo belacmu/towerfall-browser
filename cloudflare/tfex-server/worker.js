@@ -2,18 +2,21 @@
 // use WebSocket hibernation so idle connections (players sitting in menus) cost nothing.
 //  - /ws: one Matchmaker object holds every lobby, join code and quick play queue.
 //  - /room/<id>, /ping_measurement/<id>: one SignalRoom object per room.
+//  - GET /turn: ICE servers (STUN, and Cloudflare TURN credentials when configured) for browsers.
 // The logic lives in matchmaker.js and signal.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
 import { Matchmaker } from "./matchmaker.js";
 import { SignalRoom } from "./signal.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
+import { iceServers } from "./turn.js";
 
 export default {
 	async fetch(request, env) {
 		const url = new URL(request.url);
 		const route = parseRoute(url);
 		if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+			if (url.pathname === "/turn") return turn(request, env);
 			if (url.pathname === "/") {
 				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
 			}
@@ -29,6 +32,16 @@ export default {
 		return ns.get(ns.idFromName(name)).fetch(request);
 	},
 };
+
+async function turn(request, env) {
+	const origin = request.headers.get("Origin");
+	if (!originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin" };
+	if (origin) headers["Access-Control-Allow-Origin"] = origin;
+	if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "GET" } });
+	if (request.method !== "GET") return new Response("Method not allowed", { status: 405, headers });
+	return Response.json({ iceServers: await iceServers(env) }, { headers });
+}
 
 // Wraps hibernatable WebSockets as the core's connections. Each socket's state rides along as its
 // attachment (at most 2 KB), so it survives hibernation.

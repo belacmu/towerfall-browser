@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { Matchmaker } from "./matchmaker.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
+import { iceServers } from "./turn.js";
 import { SignalRoom } from "./signal.js";
 
 const args = process.argv.slice(2);
@@ -139,7 +140,14 @@ class Connection {
 	}
 }
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
+	if (new URL(req.url, "http://localhost").pathname === "/turn") {
+		// Same as the Worker's /turn; TURN_KEY_ID and TURN_KEY_API_TOKEN from the environment.
+		const origin = req.headers.origin;
+		if (!originAllowed(origin, origins)) return res.writeHead(403).end();
+		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", ...(origin && { "Access-Control-Allow-Origin": origin }) });
+		return res.end(JSON.stringify({ iceServers: await iceServers(process.env) }));
+	}
 	res.writeHead(200, { "Content-Type": "text/plain" });
 	res.end("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
 });

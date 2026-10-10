@@ -14,7 +14,8 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
   linked-in one.
 - matchbox_socket is replaced by `netplay/matchbox-browser`, which calls `netplay/tfnet.js`: the
   page's WebSocket signaling and WebRTC data channel, speaking matchbox's protocol so browser
-  players can meet desktop players.
+  players can meet desktop players. Before connecting it asks the signaling server's `/turn` for
+  ICE servers (cached for an hour); if that fails (any server but ours), it uses Google's STUN.
 - Lobbies use .NET's `ClientWebSocket` to TF.EX's server setting plus `/ws`. TF.EX's official
   server (`wss://tfex-server.balatro-vs-matchmaking.eu`) **turns browsers away**: since the TF.EX
   0.19.1 release (2026-10-10, ~08:00 UTC) a handshake carrying an `Origin` header gets 403 (by
@@ -49,8 +50,16 @@ SERVER option (Mod options) to its `wss://` address.
   global) and each signaling room to its own `SignalRoomObject`. Both use WebSocket hibernation:
   sockets stay open while the object sleeps, connection state rides along as socket attachments,
   and lobbies are stored (`room:<id>`) so they survive. A redeploy disconnects everyone.
+- `turn.js`: `GET /turn` (CORS, same origins as above) returns `{"iceServers": [...]}` for the
+  browser's peer connections: Cloudflare STUN plus TURN relay credentials valid for 6 hours,
+  generated with the Cloudflare Realtime TURN key in the `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`
+  secrets (key `tfex-server`, created 2026-10-10; `cf realtime turn keys list`). Without them, or
+  if Cloudflare's API fails, STUN only. STUN alone is enough when both players' routers allow a
+  direct path (the same network always does), but not behind stricter NATs (common on mobile
+  carriers and some ISPs): there both players sat at "waiting for other players" until TF.EX
+  gave up with a connection failure. The relay is used only when no direct path works.
 - `local.mjs`: the same code under Node (18+, no dependencies), for development or self-hosting.
-- `test.mjs`: protocol tests (16) that talk to a server the way TF.EX and matchbox do, plus
+- `test.mjs`: protocol tests (17) that talk to a server the way TF.EX and matchbox do, plus
   in-process tests of the timed flows with a simulated clock. `node test.mjs` starts `local.mjs`;
   `node test.mjs --url ws://127.0.0.1:8787` tests another (e.g. `wrangler dev`, or a deployment).
 - `TFEX_PROTOCOL`: the TF.EX version the server was checked against. The hourly TF.EX updater
@@ -121,6 +130,12 @@ change). Past a limit, requests fail until 00:00 UTC; the free plan never bills.
 matchmaker briefly. Match signaling is busy only while peers connect (the match itself is
 peer-to-peer), but matchbox clients send a keep-alive every 10 s, which keeps a room's object
 awake for the match: about 75 GB-s for a 10-minute match, so roughly 170 such matches a day fit.
+
+TURN relaying is billed per GB sent from Cloudflare to players, at $0.05/GB past 1,000 GB a month
+free (shared with the Realtime SFU, which we don't use). A relayed 10-minute two-player match
+moves tens of MB, and only matches without a direct path use it, so it stays free. The $1 budget
+alert on the account covers surprises; `/turn` hands credentials to anyone who asks (an Origin
+header is easy to fake), so a key can be deleted and replaced if they're ever abused.
 
 ## Status (2026-10-10)
 
