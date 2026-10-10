@@ -10,8 +10,8 @@ using Mono.Cecil.Cil;
 namespace TowerFallBrowser;
 
 // Produces TowerFall.Patch.dll the way the FortRise launcher does (FortLauncher/Program.cs Launch):
-// clear the 32-bit flags on TowerFall.exe, then run FortRise's own FortRiseHandler.TryPatch, which
-// MonoMods TowerFall.FortRise.mm.dll into it. The result is cached next to the patch module, keyed
+// clear the 32-bit flags on TowerFall.exe, then the steps of FortRise's FortRiseHandler.TryPatch,
+// which MonoMod TowerFall.FortRise.mm.dll into it. The result is cached next to the patch module, keyed
 // on the exact inputs, so it only reruns when the game or FortRise changes.
 //
 // Shared by the browser host and tools/FortRisePatch (the same code on desktop .NET, for testing).
@@ -37,27 +37,14 @@ public static class FortRisePatcher
 			return patchFile;
 		}
 
-		using var exe = new MemoryStream();
-		using (ModuleDefinition module = ModuleDefinition.ReadModule(exePath))
-		{
-			// What FortLauncher's Remove32BitFlagsPatcher does.
-			module.Attributes &= ~(ModuleAttributes.Required32Bit | ModuleAttributes.Preferred32Bit);
-			module.Write(exe);
-		}
-		exe.Position = 0;
-
+		using var exe = new MemoryStream(File.ReadAllBytes(exePath));
 		string previousDir = Directory.GetCurrentDirectory();
 		Directory.SetCurrentDirectory(fortriseDir);
 		try
 		{
 			var started = System.Diagnostics.Stopwatch.StartNew();
-			var handler = new FortLauncher.FortRiseHandler(fortriseDir, new List<string>(), log, loggers);
-			if (!handler.TryPatch(exe, patchFile))
-			{
-				throw new Exception("FortRise failed to patch TowerFall.exe (see the log above).");
-			}
+			TryPatch(exe, patchFile, log);
 			log.LogInformation("Patched TowerFall.exe in {Seconds:0.0}s.", started.Elapsed.TotalSeconds);
-			BrowserFixups(patchFile, log);
 		}
 		finally
 		{
@@ -67,12 +54,62 @@ public static class FortRisePatcher
 		return patchFile;
 	}
 
+	// FortLauncher.FortRiseHandler.TryPatch, step for step, with changes that save time (in the
+	// browser, about half of it): an assembly resolver that remembers failed lookups (see
+	// CachingAssemblyResolver); the 32-bit flags cleared on the module MonoMod reads, rather than by
+	// writing and reading TowerFall.exe once more beforehand; the browser fixups applied before
+	// MonoMod writes the module, rather than reading and writing it again afterwards; no symbols.
+	private static void TryPatch(Stream exe, string patchFile, ILogger log)
+	{
+		Environment.SetEnvironmentVariable("MONOMOD_DEPENDENCY_MISSING_THROW", "0");
+		using var modder = new FortLauncher.FortRiseMonoModder
+		{
+			Input = exe,
+			OutputPath = patchFile,
+			LogVerboseEnabled = false,
+			AssemblyResolver = new CachingAssemblyResolver(),
+			WriterParameters = new WriterParameters { WriteSymbols = false },
+		};
+		modder.Read();
+		// What FortLauncher's Remove32BitFlagsPatcher does.
+		modder.Module.Attributes &= ~(ModuleAttributes.Required32Bit | ModuleAttributes.Preferred32Bit);
+		modder.Log("[Main] Scanning for TowerFall.FortRise.mm.dll.");
+		modder.ReadMod(Path.GetFullPath(PatchModule));
+		modder.MapDependencies();
+		modder.Log("[Main] modder.AutoPatch()");
+		modder.AutoPatch();
+		BrowserFixups(modder.Module, log);
+		modder.Write();
+		modder.Log("[Main] Done.");
+	}
+
+	// Cecil's DefaultAssemblyResolver caches the assemblies it finds but not the ones it doesn't:
+	// every reference into a missing assembly searches the directories again and throws. MonoMod's
+	// PatchRefs pass resolves each type reference in TowerFall.exe, so on desktop .NET half of its
+	// time went to that, and far more in the browser, where file probes and exceptions are slow.
+	private sealed class CachingAssemblyResolver : DefaultAssemblyResolver
+	{
+		private readonly HashSet<string> missing = new();
+
+		public override AssemblyDefinition Resolve(AssemblyNameReference name)
+		{
+			if (missing.Contains(name.FullName)) return null;
+			try
+			{
+				return base.Resolve(name);
+			}
+			catch (AssemblyResolutionException)
+			{
+				missing.Add(name.FullName);
+				return null;
+			}
+		}
+	}
+
 	// Browser-specific changes to the patched game, applied after FortRise's MonoMod pass: calls to
 	// APIs that don't fit the browser are sent to TowerFallBrowser.BrowserShims instead.
-	private static void BrowserFixups(string patchFile, ILogger log)
+	private static void BrowserFixups(ModuleDefinition module, ILogger log)
 	{
-		byte[] bytes = File.ReadAllBytes(patchFile);
-		using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes));
 		var host = new AssemblyNameReference("TowerFallBrowser", new Version(1, 0, 0, 0));
 		module.AssemblyReferences.Add(host);
 		var shims = new TypeReference("TowerFallBrowser", "BrowserShims", module, host);
@@ -142,9 +179,6 @@ public static class FortRisePatcher
 			natives++;
 		}
 
-		module.Write(patchFile);
-		// MonoMod's symbols no longer match the rewritten module.
-		File.Delete(Path.ChangeExtension(patchFile, ".pdb"));
 		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {Updaters} update checks disabled, {Natives} native loaders deferred to the app.", platforms, locations, updaters, natives);
 	}
 

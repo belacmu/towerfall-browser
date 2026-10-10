@@ -57,7 +57,8 @@ exists, otherwise public.
   server turns browsers away.
 - **FortRise** (`web/FortRise/`, `tools/fetch-fortrise.sh`, plan in `docs/FORTRISE.md`): the site
   serves a pinned FortRise release. The host runs FortRise's own patch step on the player's
-  `TowerFall.exe` in the browser, cached until the game or FortRise changes; that takes about 20 s.
+  `TowerFall.exe` in the browser, cached until the game or FortRise changes; that takes about 12 s
+  on a fast Mac.
   It then applies a few browser fixups and starts the game the way FortRise's launcher does.
   `tools/FortRisePatch` runs the same patch code on desktop .NET for debugging.
 

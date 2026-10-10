@@ -38,8 +38,9 @@ Sources: github.com/FortRise/FortRise (MIT), the installed 5.3.5 build, and its 
 ## Milestones
 
 1. **FNA 26.10.** Done. No new native entry points compared with the prebuilt Emscripten libs.
-2. **FortRise boots.** Done. The host runs FortRise's own `TryPatch` in the browser (about 20 s,
-   cached), then browser fixups (`FortRisePatcher.BrowserFixups`):
+2. **FortRise boots.** Done. The host runs the steps of FortRise's own `TryPatch` in the browser
+   (about 12 s on a fast Mac, cached), applying browser fixups (`FortRisePatcher.BrowserFixups`)
+   before MonoMod writes the module:
    - SDL platform checks are answered "Linux" for the game only;
    - `Assembly.Location` for bundled assemblies is pointed at `/bin`;
    - FortRise's self-updater is disabled.
