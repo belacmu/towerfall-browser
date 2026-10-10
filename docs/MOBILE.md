@@ -49,7 +49,7 @@ R2 reads and Worker requests, a later visit one of each (R2: 10M reads/month fre
 
 ### What to try on each phone
 
-Open the link with `?autoplay&nointro` before the `#` (no Play tap needed, no audio), wait for the
+Open the link with `?autoplay` before the `#` (no Play tap needed, no audio), wait for the
 game files to copy, and see whether the title screen comes up.
 Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely first:
 

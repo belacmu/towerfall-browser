@@ -88,7 +88,7 @@ says which branch and commit it is. A branch made before this existed needs `mai
 (its pushes only start the Preview workflow if it has `.github/workflows/preview.yml`); or run the
 Deploy workflow by hand with the branch name (or `none`) as `preview`.
 
-URL options: `?nointro` skips the intro, `?mute` / `?unmute`, `?uncapped` ticks on every display
+URL options: `?intro` shows the intro and title screen (by default the game opens on the main menu), `?mute` / `?unmute`, `?uncapped` ticks on every display
 frame, `?autoplay` starts without the Play click (tests), `?mods=Name,Name` sets the enabled mods,
 `?allmods` also lists untested mods, `?touch` / `?notouch` override the Controls button,
 `?fortrise` / `?vanilla` force FortRise on or off, `?mode=versus|quest|darkworld|trials` goes from
