@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -181,7 +182,13 @@ public static partial class BrowserHost
 				typeof(Game).GetField("gameTimer", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(game, System.Diagnostics.Stopwatch.StartNew());
 				started = true;
 			}
+			while (commands.TryDequeue(out string[] command))
+			{
+				RunGameCommand(command);
+			}
+			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
+			frameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - frameStart;
 			ReportFrameRate();
 		}
 		catch (Exception e)
@@ -192,6 +199,48 @@ public static partial class BrowserHost
 			return Task.FromException<bool>(e);
 		}
 		return Task.FromResult((bool)runApplication.GetValue(game));
+	}
+
+	private static readonly System.Collections.Concurrent.ConcurrentQueue<string[]> commands = new();
+
+	// Runs a line in the game's dev console (Monocle Commands, where mods such as TF.EX register
+	// theirs) before the next frame; for tests, e.g. TF.EX's "test" (rollback sync test) and
+	// "online <mode> <room url>".
+	[JSExport]
+	internal static Task RunCommand(string line)
+	{
+		string[] words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+		if (words.Length > 0) commands.Enqueue(words);
+		return Task.CompletedTask;
+	}
+
+	private static void RunGameCommand(string[] words)
+	{
+		try
+		{
+			object console = game.GetType().GetProperty("Commands")?.GetValue(game);
+			if (console == null)
+			{
+				Console.WriteLine($"[command] {string.Join(' ', words)}: the game has no console");
+				return;
+			}
+			Console.WriteLine($"[command] {string.Join(' ', words)}");
+			// What the command prints goes to the console's screen buffer (newest first); echo it.
+			var output = console.GetType().GetField("drawCommands", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(console) as List<string>;
+			output?.Clear();
+			// Let exceptions through (with their stack) instead of a one-line note.
+			console.GetType().GetField("safeExecute", BindingFlags.NonPublic | BindingFlags.Instance)?.SetValue(console, false);
+			console.GetType().GetMethod("ExecuteCommand", new[] { typeof(string), typeof(string[]) })
+				.Invoke(console, new object[] { words[0].ToLowerInvariant(), words[1..] });
+			for (int i = (output?.Count ?? 0) - 1; i >= 0; i--)
+			{
+				Console.WriteLine($"[command]   {output[i]}");
+			}
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[command] {string.Join(' ', words)} failed: {e.InnerException ?? e}");
+		}
 	}
 
 	// FortRise asks for a restart (e.g. after changing mods in its in-game menu) by setting
@@ -221,6 +270,7 @@ public static partial class BrowserHost
 
 	private static readonly System.Diagnostics.Stopwatch fpsClock = System.Diagnostics.Stopwatch.StartNew();
 	private static int fpsFrames;
+	private static long frameTicks;
 
 	private static void ReportFrameRate()
 	{
@@ -228,8 +278,10 @@ public static partial class BrowserHost
 		double seconds = fpsClock.Elapsed.TotalSeconds;
 		if (seconds >= 5)
 		{
-			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s");
+			double busy = frameTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / fpsFrames;
+			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game");
 			fpsFrames = 0;
+			frameTicks = 0;
 			fpsClock.Restart();
 		}
 	}

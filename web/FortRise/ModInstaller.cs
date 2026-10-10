@@ -82,6 +82,8 @@ public static class ModInstaller
 			{
 				if (!entry.FullName.StartsWith(w.Prefix, StringComparison.Ordinal) || entry.FullName.EndsWith('/')) continue;
 				string relative = entry.FullName[w.Prefix.Length..];
+				// Native libraries can't load in the browser (the ones mods need are linked in).
+				if (relative.StartsWith("Unmanaged/", StringComparison.OrdinalIgnoreCase)) continue;
 				string dest = Path.GetFullPath(Path.Combine(target, relative));
 				if (!dest.StartsWith(Path.GetFullPath(target) + "/", StringComparison.Ordinal)) continue; // zip-slip
 				Directory.CreateDirectory(Path.GetDirectoryName(dest));

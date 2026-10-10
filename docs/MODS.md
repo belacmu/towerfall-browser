@@ -5,6 +5,11 @@ Decided with the project owner on 2026-10-09.
 - **We never host copies of mods.** Mod files always come from GameBanana, downloaded by the player's
   own browser. That keeps downloads, versions and credit with the authors. (None of the 60 TowerFall
   mods' licenses allow redistribution on other sites anyway.)
+  **The one exception is TF.EX** (online play, GPL-2.0, decided 2026-10-09): its current releases
+  are on GitHub, whose downloads can't be fetched cross-origin, and GameBanana only has an old
+  version. `tools/fetch-tfex.sh` pins a release, removes its native libraries (the browser links its
+  own build of ggrs_ffi, see `netplay/`) and publishes it under `hosted-mods/`. A hosted mod
+  replaces GameBanana's entry of the same name.
 - **We keep the catalog.** `tools/update-catalog.py` builds `mods/catalog.json` from GameBanana:
   latest file, checksums, license, the FortRise metadata inside each zip, and whether the mod
   needs Harmony or native code. A scheduled CI job keeps it current. Our own per-mod verdicts

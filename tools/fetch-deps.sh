@@ -34,3 +34,4 @@ tools/fetch-fortrise.sh
 tools/build-monomod.sh
 tools/fetch-runtime.sh
 tools/build-netplay.sh
+tools/fetch-tfex.sh

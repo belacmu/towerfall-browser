@@ -11,23 +11,32 @@ const STATE_KEY = "towerfall.mods";
 const BUILT_IN = new Set(["FortRise", "FortRise.Content"]);
 
 export async function loadCatalog() {
-	const res = await fetch("mods/catalog.json", { cache: "no-store" });
-	if (!res.ok) return [];
-	const catalog = await res.json();
-	// One entry per FortRise mod (a GameBanana file can hold several; they share the file).
-	const mods = [];
-	for (const entry of catalog.mods) {
+	const load = async (url) => {
+		try {
+			const res = await fetch(url, { cache: "no-store" });
+			return res.ok ? (await res.json()).mods : [];
+		} catch {
+			return [];
+		}
+	};
+	// GameBanana's mods, plus the one the site hosts (TF.EX, for online play; see docs/MODS.md).
+	const entries = [...(await load("hosted-mods/hosted.json")), ...(await load("mods/catalog.json"))];
+	// One entry per FortRise mod (a file can hold several; they share the file). A hosted mod
+	// replaces GameBanana's copy of the same mod (GameBanana's TF.EX is an old release).
+	const mods = new Map();
+	for (const entry of entries) {
 		for (const mod of entry.mods) {
-			mods.push({ ...mod, entry, key: mod.name });
+			if (!mods.has(mod.name)) mods.set(mod.name, { ...mod, entry, key: mod.name });
 		}
 	}
-	return mods;
+	return [...mods.values()];
 }
 
-// The mods the page offers: those known to work. ?allmods also offers untested ones (for testing).
+// The mods the page offers: those known to work, and experimental ones (online play). ?allmods also
+// offers untested ones (for testing). "dependency" mods only come along with the mod that needs them.
 export function offered(catalog) {
 	const all = new URLSearchParams(location.search).has("allmods");
-	return catalog.filter((m) => m.status === "works" || (all && m.status === "untested"));
+	return catalog.filter((m) => m.status === "works" || m.status === "experimental" || (all && m.status === "untested"));
 }
 
 // --- What's enabled -----------------------------------------------------------------------

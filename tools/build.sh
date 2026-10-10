@@ -38,5 +38,7 @@ json.dump({"version": version, "files": files}, open(os.path.join(root, "manifes
 PY
 # The mod catalog (metadata only; mod files always come from GameBanana).
 mkdir -p $WWW/mods && cp mods/catalog.json $WWW/mods/catalog.json
+# The one hosted mod: TF.EX, for online play (GPL; see tools/fetch-tfex.sh and docs/MODS.md).
+mkdir -p $WWW/hosted-mods && cp vendor/tfex/*.zip vendor/tfex/hosted.json $WWW/hosted-mods/
 grep -q TRANSFERRED_CANVAS $FW/dotnet.native.*.js || { echo "canvas transfer patch did not apply" >&2; exit 1; }
 echo "Built: web/bin/Release/net10.0/publish/wwwroot"

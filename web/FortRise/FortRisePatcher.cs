@@ -21,7 +21,7 @@ public static class FortRisePatcher
 	public const string PatchFile = "TowerFall.Patch.dll";
 
 	// Bump when BrowserFixups changes, so cached patches are redone.
-	private const int FixupsVersion = 4;
+	private const int FixupsVersion = 5;
 
 	// fortriseDir holds TowerFall.FortRise.mm.dll plus the assemblies TowerFall.exe references
 	// (FNA.dll, Steamworks.NET.dll); MonoMod resolves dependencies from the working directory.
@@ -126,10 +126,26 @@ public static class FortRisePatcher
 			updaters++;
 		}
 
+		// Mods' native libraries can't be loaded from files in the browser; the ones mods need (TF.EX's
+		// ggrs_ffi) are linked into the app, which the runtime finds when the load context declines.
+		int natives = 0;
+		TypeDefinition modContext = module.GetType("FortRise.ModAssemblyLoadContext");
+		foreach (MethodDefinition method in modContext?.Methods.Where(m => m.Name == "LoadUnmanagedDll" && m.HasBody) ?? Enumerable.Empty<MethodDefinition>())
+		{
+			method.Body.Instructions.Clear();
+			method.Body.ExceptionHandlers.Clear();
+			method.Body.Variables.Clear();
+			ILProcessor il = method.Body.GetILProcessor();
+			il.Emit(OpCodes.Ldc_I4_0);
+			il.Emit(OpCodes.Conv_I);
+			il.Emit(OpCodes.Ret);
+			natives++;
+		}
+
 		module.Write(patchFile);
 		// MonoMod's symbols no longer match the rewritten module.
 		File.Delete(Path.ChangeExtension(patchFile, ".pdb"));
-		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {Updaters} update checks disabled.", platforms, locations, updaters);
+		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {Updaters} update checks disabled, {Natives} native loaders deferred to the app.", platforms, locations, updaters, natives);
 	}
 
 	private static string Sha256(string path)

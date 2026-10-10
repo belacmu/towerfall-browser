@@ -101,7 +101,7 @@ async function renderMods() {
 		return `<label class="mod" title="${escapeHtml(m.note)}">
 			<input type="checkbox" data-mod="${escapeHtml(m.name)}" ${names.has(m.name) || viaDependency ? "checked" : ""} ${viaDependency ? "disabled" : ""}>
 			<span class="name">${escapeHtml(m.displayName)}</span>
-			<span class="by">by ${escapeHtml(m.entry.author)}${m.status === "untested" ? " · untested" : ""}${viaDependency ? " · needed by another mod" : ""}</span>
+			<span class="by">by ${escapeHtml(m.entry.author)}${m.status === "untested" ? " · untested" : m.status === "experimental" ? " · experimental" : ""}${viaDependency ? " · needed by another mod" : ""}</span>
 			<a href="${escapeHtml(m.entry.page)}" target="_blank" rel="noopener">page</a>
 		</label>`;
 	});
@@ -392,6 +392,12 @@ async function main() {
 	let behind = TICK_MS;
 	let last = performance.now();
 
+	// Dev console commands, for tests: towerfallCommand("test") from the console, or
+	// ?command=line;line (run once the game has been up for a few seconds).
+	self.towerfallCommand = (line) => exports.BrowserHost.RunCommand(line);
+	let pendingCommands = (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean);
+	let frames = 0;
+
 	const frame = async (now) => {
 		behind = Math.min(behind + (now - last), TICK_MS * 4);
 		last = now;
@@ -408,6 +414,10 @@ async function main() {
 		} catch (e) {
 			fail(e);
 			return;
+		}
+		if (pendingCommands.length && ++frames >= 300) {
+			for (const line of pendingCommands) await exports.BrowserHost.RunCommand(line);
+			pendingCommands = [];
 		}
 		// SDL creates its AudioContext lazily, so keep the mute state applied.
 		applyMute();
