@@ -166,7 +166,24 @@
 		</style>
 		<!-- Threads need cross-origin isolation. Hosts that can't send COOP/COEP headers (GitHub
 		     Pages) get them from this service worker; it does nothing when the server sends them. -->
+		<script>
+			// coi-serviceworker.js would use COEP: credentialless outside Chrome and Firefox, which Safari
+			// (so every iPhone browser) doesn't support, and the page would never be isolated. require-corp
+			// works everywhere: the page only loads same-origin and CORS-enabled resources.
+			window.coi = { coepCredentialless: () => false };
+		</script>
 		<script src="./coi-serviceworker.js"></script>
+		<script>
+			// A service worker started by an older page may still add credentialless; the script above has
+			// just told it not to, so reload once to get an isolated page.
+			try {
+				if (window.crossOriginIsolated) sessionStorage.removeItem("towerfall.coiReload");
+				else if (navigator.serviceWorker?.controller && !sessionStorage.getItem("towerfall.coiReload")) {
+					sessionStorage.setItem("towerfall.coiReload", "1");
+					location.reload();
+				}
+			} catch {}
+		</script>
 		<script type="module" src="./main.js"></script>
 	</head>
 	<body>
