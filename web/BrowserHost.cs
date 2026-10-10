@@ -285,22 +285,63 @@ public static partial class BrowserHost
 
 	private static string startMode;
 	private static int mainMenuFrames;
+	private const string QuickPlaySearch = " quickplay search"; // (not a mode anyone can type)
+	private static int quickPlayWait;
 
 	// MainMenu's FightButton, QuestButton, DarkWorldButton and TrialsButton: pick the match settings
-	// and rollcall mode, then go to the rollcall (archer select).
+	// and rollcall mode, then go to the rollcall (archer select). "online" is TF.EX's NETPLAY button;
+	// "quickplay" then picks its QUICK PLAY (the search for opponents).
 	private static void ApplyStartMode()
 	{
 		object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
 		PropertyInfo state = scene?.GetType().GetProperty("State");
-		// Wait for the menu's top level, and give it a moment to tween in.
-		if (scene?.GetType().FullName != "TowerFall.MainMenu" || state.GetValue(scene).ToString() != "Main")
+		if (startMode == QuickPlaySearch)
 		{
+			// Wait for TF.EX's netplay menu (62, after its version check) to be up for a moment, since
+			// creating it sets up netplay; then its QUICK PLAY (65). Give up after 20 s.
+			bool onNetplay = scene?.GetType().FullName == "TowerFall.MainMenu" && Convert.ToInt32(state.GetValue(scene)) == 62;
+			mainMenuFrames = onNetplay ? mainMenuFrames + 1 : 0;
+			if (onNetplay && mainMenuFrames >= 30)
+			{
+				state.SetValue(scene, Enum.ToObject(state.PropertyType, 65));
+				startMode = null;
+				Console.WriteLine("[mode] quickplay: searching");
+			}
+			else if (++quickPlayWait > 1200)
+			{
+				startMode = null;
+				Console.WriteLine("[mode] quickplay: the netplay menu didn't come up");
+			}
+			return;
+		}
+		// Wait for the menu's top level (pressing start for the player on the title screen), and give
+		// it a moment to tween in.
+		string menuState = scene?.GetType().FullName == "TowerFall.MainMenu" ? state.GetValue(scene).ToString() : null;
+		if (menuState == "PressStart" && ++mainMenuFrames >= 30)
+		{
+			state.SetValue(scene, Enum.Parse(state.PropertyType, "Main"));
 			mainMenuFrames = 0;
+			return;
+		}
+		if (menuState != "Main")
+		{
+			if (menuState != "PressStart") mainMenuFrames = 0;
 			return;
 		}
 		if (++mainMenuFrames < 30) return;
 		string mode = startMode;
 		startMode = null;
+		if (mode == "online" || mode == "quickplay")
+		{
+			string result = TfexPatches.EnterNetplay(scene);
+			Console.WriteLine($"[mode] {mode}: {result}");
+			if (mode == "quickplay" && result == TfexPatches.EnteringNetplay)
+			{
+				startMode = QuickPlaySearch;
+				mainMenuFrames = 0;
+			}
+			return;
+		}
 		string rollcall = mode switch
 		{
 			"versus" => "Versus",
@@ -311,7 +352,7 @@ public static partial class BrowserHost
 		};
 		if (rollcall == null)
 		{
-			Console.WriteLine($"[mode] unknown mode \"{mode}\" (versus, quest, darkworld or trials)");
+			Console.WriteLine($"[mode] unknown mode \"{mode}\" (versus, quest, darkworld, trials, online or quickplay)");
 			return;
 		}
 		Type menu = scene.GetType();

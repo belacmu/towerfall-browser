@@ -91,7 +91,8 @@ URL options: `?nointro` skips the intro, `?mute` / `?unmute`, `?uncapped` ticks 
 frame, `?autoplay` starts without the Play click (tests), `?mods=Name,Name` sets the enabled mods,
 `?allmods` also lists untested mods, `?touch` / `?notouch` override the Controls button,
 `?fortrise` / `?vanilla` force FortRise on or off, `?mode=versus|quest|darkworld|trials` goes from
-the main menu straight to that mode's archer select, `?tfexserver=local|official|wss://…` picks the
+the title screen straight to that mode's archer select (`online` to TF.EX's netplay menu, `quickplay`
+on to its quick play search), `?tfexserver=local|official|wss://…` picks the
 online-play server (default: the site's own, `cloudflare/tfex-server`), and `?debug` shows
 FortRise's debug log (including its Harmony patches).
 
