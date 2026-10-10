@@ -73,7 +73,7 @@
 			#error { color: #ff7b7b; white-space: pre-wrap; max-width: 90vw; }
 			#pick { max-width: 34em; }
 			#modsPanel { width: min(34em, 90vw); text-align: left; }
-			.modsHeader { margin-bottom: 6px; }
+			.modsHeader { margin-bottom: 6px; cursor: pointer; }
 			#modList { max-height: 38vh; overflow-y: auto; border: 1px solid #333; padding: 4px 8px; }
 			.mod { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
 			.mod .name { color: #eee; }
@@ -231,11 +231,13 @@
 				</p>
 			</div>
 			<div id="modsPanel" hidden>
-				<div class="modsHeader">Mods: <span id="modSummary"></span></div>
-				<div id="modList"></div>
+				<details>
+					<summary class="modsHeader">Mods: <span id="modSummary"></span></summary>
+					<div id="modList"></div>
+					<button id="addMod" class="link">Add a mod zip…</button>
+					<input id="modFile" type="file" accept=".zip,application/zip" multiple hidden>
+				</details>
 				<div id="modWarning" class="hint"></div>
-				<button id="addMod" class="link">Add a mod zip…</button>
-				<input id="modFile" type="file" accept=".zip,application/zip" multiple hidden>
 			</div>
 			<button id="play" hidden>Play</button>
 			<button id="change" class="link" hidden>Use different game files</button>
