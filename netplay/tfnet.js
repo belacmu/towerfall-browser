@@ -15,8 +15,11 @@
 // (__proxy: "sync") from whichever worker thread the game calls it on.
 
 var LibraryTFNet = {
+	// (Emscripten copies these objects into the build as source text, which turns a Map into {};
+	// the postsets create them at startup instead.)
+	$TFNet__postset: "TFNet.sockets = new Map();",
 	$TFNet: {
-		sockets: new Map(),
+		sockets: null,
 		next: 1,
 		iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
 
@@ -286,6 +289,131 @@ var LibraryTFNet = {
 		return at;
 	},
 };
+
+// Plain WebSockets for .NET's ClientWebSocket (TF.EX's lobby connection; see
+// web/Netplay/PolledWebSocket.cs). .NET's own browser WebSocket delivers its events through the
+// thread that owns the page's JS context, which deadlocks when a mod blocks that thread waiting
+// for a connection. These are polled instead, so nothing ever calls back into .NET.
+var LibraryTFWs = {
+	$TFWs__postset: "TFWs.sockets = new Map();",
+	$TFWs: { sockets: null, next: 1 },
+
+	// int tfws_open(const char* url): a handle (> 0), or 0 if the URL is invalid.
+	tfws_open__deps: ["$TFWs"],
+	tfws_open__proxy: "sync",
+	tfws_open__sig: "ip",
+	tfws_open: function (url) {
+		const s = { ws: null, state: 0, code: 0, reason: "", inbox: [] };
+		try {
+			s.ws = new WebSocket(UTF8ToString(url));
+		} catch {
+			return 0;
+		}
+		s.ws.binaryType = "arraybuffer";
+		s.ws.onopen = () => (s.state = 1);
+		s.ws.onmessage = (e) =>
+			s.inbox.push(typeof e.data === "string" ? [1, new TextEncoder().encode(e.data)] : [2, new Uint8Array(e.data)]);
+		s.ws.onclose = (e) => {
+			s.state = 3;
+			s.code = e.code;
+			s.reason = e.reason;
+		};
+		const h = TFWs.next++;
+		TFWs.sockets.set(h, s);
+		return h;
+	},
+
+	// int tfws_state(int h): 0 connecting, 1 open, 2 closing, 3 closed (received messages may
+	// still be waiting).
+	tfws_state__deps: ["$TFWs"],
+	tfws_state__proxy: "sync",
+	tfws_state__sig: "ii",
+	tfws_state: function (h) {
+		const s = TFWs.sockets.get(h);
+		if (!s) return 3;
+		return s.state === 1 && s.ws.readyState === 2 ? 2 : s.state;
+	},
+
+	// int tfws_close_info(int h, char* reason, size_t cap): the close code (0 if not closed).
+	tfws_close_info__deps: ["$TFWs"],
+	tfws_close_info__proxy: "sync",
+	tfws_close_info__sig: "iipp",
+	tfws_close_info: function (h, reason, cap) {
+		const s = TFWs.sockets.get(h);
+		if (!s) return 1006;
+		if (cap > 0) stringToUTF8(s.reason, reason, cap);
+		return s.code;
+	},
+
+	// int tfws_send(int h, const uint8_t* data, size_t len, int text): 0 sent, -1 not open.
+	tfws_send__deps: ["$TFWs"],
+	tfws_send__proxy: "sync",
+	tfws_send__sig: "iippi",
+	tfws_send: function (h, data, len, text) {
+		const s = TFWs.sockets.get(h);
+		if (!s || s.ws.readyState !== 1) return -1;
+		const bytes = HEAPU8.slice(data, data + len);
+		s.ws.send(text ? new TextDecoder().decode(bytes) : bytes);
+		return 0;
+	},
+
+	// int tfws_peek(int h, int* type): the next message's length (and type: 1 text, 2 binary),
+	// or -1 if none has arrived.
+	tfws_peek__deps: ["$TFWs"],
+	tfws_peek__proxy: "sync",
+	tfws_peek__sig: "iip",
+	tfws_peek: function (h, type) {
+		const m = TFWs.sockets.get(h)?.inbox[0];
+		if (!m) return -1;
+		HEAP32[type >> 2] = m[0];
+		return m[1].length;
+	},
+
+	// void tfws_take(int h, uint8_t* buf): copies the next message (sized by tfws_peek) and drops it.
+	tfws_take__deps: ["$TFWs"],
+	tfws_take__proxy: "sync",
+	tfws_take__sig: "vip",
+	tfws_take: function (h, buf) {
+		const m = TFWs.sockets.get(h)?.inbox.shift();
+		if (m) HEAPU8.set(m[1], buf);
+	},
+
+	// void tfws_close(int h, int code, const char* reason): starts the closing handshake.
+	tfws_close__deps: ["$TFWs"],
+	tfws_close__proxy: "sync",
+	tfws_close__sig: "viip",
+	tfws_close: function (h, code, reason) {
+		const s = TFWs.sockets.get(h);
+		if (!s) return;
+		try {
+			s.ws.close(code || 1000, reason ? UTF8ToString(reason) : undefined);
+		} catch {
+			s.ws.close();
+		}
+	},
+
+	// void tfws_free(int h)
+	tfws_free__deps: ["$TFWs"],
+	tfws_free__proxy: "sync",
+	tfws_free__sig: "vi",
+	tfws_free: function (h) {
+		const s = TFWs.sockets.get(h);
+		if (!s) return;
+		if (s.ws.readyState < 2) s.ws.close();
+		TFWs.sockets.delete(h);
+	},
+};
+
+// void tfclip_write(const char* text): puts text on the system clipboard (SDL's clipboard is
+// internal to the page in the browser). Pasting goes the other way through main.js.
+LibraryTFWs.tfclip_write__proxy = "sync";
+LibraryTFWs.tfclip_write__sig = "vp";
+LibraryTFWs.tfclip_write = function (text) {
+	navigator.clipboard?.writeText(UTF8ToString(text)).catch((e) => console.warn("[clipboard] couldn't copy:", e));
+};
+
+autoAddDeps(LibraryTFWs, "$TFWs");
+mergeInto(LibraryManager.library, LibraryTFWs);
 
 autoAddDeps(LibraryTFNet, "$TFNet");
 mergeInto(LibraryManager.library, LibraryTFNet);

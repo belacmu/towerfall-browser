@@ -401,6 +401,11 @@ async function main() {
 	// Dev console commands, for tests: towerfallCommand("test") from the console, or
 	// ?command=line;line (the host runs them once the main menu is up).
 	self.towerfallCommand = (line) => exports.BrowserHost.RunCommand(line);
+	// Pasting (Ctrl+V) hands the text to the game's clipboard, e.g. for TF.EX lobby codes.
+	document.addEventListener("paste", (e) => {
+		const text = e.clipboardData?.getData("text");
+		if (text) exports.BrowserHost.SetClipboardText(text);
+	});
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}

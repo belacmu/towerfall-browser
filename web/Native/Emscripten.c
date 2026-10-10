@@ -6,6 +6,8 @@
 #include <assert.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <pthread.h>
 
 // OPFS (the page's private file storage) at /libsdl: game files, FortRise, saves.
 int mount_opfs() {
@@ -55,4 +57,39 @@ double _emscripten_get_now(void) {
 int close(int fd);
 int _close(int fd) {
 	return close(fd);
+}
+
+// Page events (keyboard, mouse, focus...) reach SDL's thread, our game thread, through this.
+// Emscripten 3.1.56's version proxies synchronously: the page's main thread waits until the game
+// thread has run the callback, so any mod that blocks the game thread (TF.EX does while it
+// connects to its server or to other players) freezes the page at the next event. It also never
+// frees the event data the html5 library allocates for the call. Later Emscripten versions proxy
+// asynchronously and free it, as this replacement does (SDL ignores the callbacks' return value
+// on other threads anyway).
+typedef EM_BOOL (*html5_event_callback)(int event_type, void* event_data, void* user_data);
+
+typedef struct {
+	html5_event_callback callback;
+	int event_type;
+	void* event_data;
+	void* user_data;
+} html5_callback_args;
+
+static void run_html5_callback(void* p) {
+	html5_callback_args* args = p;
+	args->callback(args->event_type, args->event_data, args->user_data);
+	free(args->event_data);
+	free(args);
+}
+
+void _emscripten_run_callback_on_thread(pthread_t t, html5_event_callback f, int event_type, void* event_data, void* user_data) {
+	html5_callback_args* args = malloc(sizeof(html5_callback_args));
+	args->callback = f;
+	args->event_type = event_type;
+	args->event_data = event_data;
+	args->user_data = user_data;
+	if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), t, run_html5_callback, args)) {
+		free(event_data);
+		free(args);
+	}
 }

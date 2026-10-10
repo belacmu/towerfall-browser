@@ -5,6 +5,7 @@
 //   curl 'localhost:9400/A/type?t=ABCD'          type text, one key at a time
 //   curl 'localhost:9400/A/shot' -o a.png        screenshot
 //   curl 'localhost:9400/A/log?from=0'           in-page log lines from that index
+//   curl 'localhost:9400/A/console?from=0'       console output of all threads (works while hung)
 //   curl 'localhost:9400/A/eval' --data 'js'     evaluate in the page
 //   curl 'localhost:9400/quit'
 // Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400]
@@ -60,7 +61,43 @@ async function launch(name, debugPort) {
 			ws.addEventListener("message", onMessage);
 			ws.send(JSON.stringify({ id, method, params }));
 		});
-	return { name, send };
+	// Console output from every thread (the page and its workers), captured by DevTools so it's
+	// readable even when the page's main thread hangs.
+	const consoleLines = [];
+	const pausedWaiters = [];
+	ws.addEventListener("message", (m) => {
+		const d = JSON.parse(m.data);
+		if (d.method === "Target.attachedToTarget") {
+			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.enable" }));
+			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.runIfWaitingForDebugger" }));
+		} else if (d.method === "Debugger.paused") {
+			pausedWaiters.splice(0).forEach((w) => w({ session: d.sessionId ?? "page", frames: d.params.callFrames.map((f) => `${f.functionName || "(anonymous)"} ${f.url.split("/").pop()}:${f.location.lineNumber}`) }));
+		} else if (d.method?.startsWith("Network.webSocket")) {
+			const q = d.params;
+			consoleLines.push(`network ${d.method.slice(8)}: ${q.url ?? ""}${q.response ? ` ${q.response.status}` : ""}${q.errorMessage ? ` ${q.errorMessage}` : ""}`);
+		} else if (d.method === "Runtime.consoleAPICalled") {
+			const text = d.params.args.map((a) => a.value ?? a.description ?? "").join(" ");
+			consoleLines.push(`${d.sessionId ? "worker" : "page"} ${d.params.type}: ${text}`);
+			if (consoleLines.length > 20000) consoleLines.splice(0, 5000);
+		}
+	});
+	await send("Runtime.enable");
+	await send("Network.enable");
+	await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+	// The page main thread's stack right now (for hangs): pause, read, resume.
+	const stack = async () => {
+		await send("Debugger.enable");
+		const paused = new Promise((r) => {
+			pausedWaiters.push(r);
+			setTimeout(() => r({ error: "didn't pause within 10 s" }), 10_000);
+		});
+		await send("Debugger.pause");
+		const result = await paused;
+		await send("Debugger.resume");
+		await send("Debugger.disable");
+		return result;
+	};
+	return { name, send, consoleLines, stack };
 }
 
 // Key events as the game sees them (SDL reads DOM keydown/keyup on the canvas' document).
@@ -109,6 +146,11 @@ http.createServer(async (req, res) => {
 			const r = await p.send("Runtime.evaluate", { expression: `JSON.stringify((self.consoleLog ?? []).slice(${from}))`, returnByValue: true });
 			const lines = JSON.parse(r.result?.value ?? "[]");
 			res.end(lines.map((l, i) => `${from + i}: ${l}`).join("\n") + "\n");
+		} else if (action === "stack") {
+			res.end(JSON.stringify(await p.stack(), null, 1) + "\n");
+		} else if (action === "console") {
+			const from = Number(u.searchParams.get("from") ?? 0);
+			res.end(p.consoleLines.slice(from).map((l, i) => `${from + i}: ${l}`).join("\n") + "\n");
 		} else if (action === "eval") {
 			const r = await p.send("Runtime.evaluate", { expression: body, returnByValue: true, awaitPromise: true });
 			res.end(JSON.stringify(r.result?.value ?? r) + "\n");

@@ -43,8 +43,26 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 - (Early estimates of 2.6 ms per tick came from instant-replay rebuild timings, which include a
   state load and save per frame.)
 - Measured on a machine also running heavy antivirus scans.
-- Next: a real lobby between two browsers (`tools/netplay-driver.mjs`), then browser against
-  desktop.
+- **Two browsers meet on the official server** (2026-10-10). Browser A created a private lobby
+  and browser B joined it with the code. TF.EX's ping measurement then connected the two peers
+  directly over WebRTC (through `netplay/tfnet.js`). A match itself hasn't been started yet.
+- Getting there took these browser fixes:
+  - TF.EX's update check reads GitHub's API (its release redirect can't be read cross-origin, and
+    the official server needs the check to pass); its self-update is turned off
+    (`web/Netplay/TfexPatches.cs`).
+  - Emscripten 3.1.56 hands page events (keys, mouse) to SDL's thread, our game thread,
+    *synchronously*. TF.EX blocks the game thread while it connects to the server or to peers,
+    so the page froze at the next key-up. `_emscripten_run_callback_on_thread` is replaced with
+    an asynchronous version (`web/Native/Emscripten.c`), as in later Emscripten. That also fixes
+    a leak of every event's data.
+  - .NET's browser WebSocket completes on the thread owning the page's JS context (the game
+    thread), so a blocked game thread could never see its connection open. ClientWebSocket now
+    runs over a polled page WebSocket (`web/Netplay/PolledWebSocket.cs`, `tfws_*` in tfnet.js).
+  - Emscripten copies JS library objects into the build as source text, which turned
+    `new Map()` into `{}` and broke tfnet.js; the maps are now created at startup.
+  - SDL's clipboard is internal to the page, so lobby codes TF.EX copies also go on the system
+    clipboard, and pasting on the page feeds SDL's clipboard.
+- Next: start a match between two browsers, then browser against desktop.
 
 ## Ways to get more speed
 
@@ -70,6 +88,9 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 - `tools/probe-page.mjs`: one headless browser; streams the in-page log.
 - `tools/netplay-driver.mjs`: several headless browsers (separate profiles), controlled over HTTP
   (keys, screenshots, log, eval), for lobby tests.
+- Host commands, alongside the game's own: `profile [Type::Method ...]`, `keys` (log pressed
+  keys for 10 s), `menustate N` (jump the main menu to a state, e.g. TF.EX's 63 private, 64 join
+  code).
 - `?command=line;line` or `towerfallCommand("line")` runs dev-console commands (TF.EX: `test`
   for the sync test). `[perf]` log lines report frame rate and milliseconds per frame spent in
   the game.

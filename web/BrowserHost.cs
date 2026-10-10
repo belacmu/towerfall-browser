@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.JavaScript;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xna.Framework;
@@ -119,6 +120,8 @@ public static partial class BrowserHost
 				// The provider decides what's shown (see PlainConsoleLoggerProvider); don't filter before it.
 				ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
 				ModInstaller.Apply(FortRiseDir, loggers.CreateLogger("Mods"));
+				// TF.EX's lobby connection would deadlock .NET's browser WebSocket (see PolledWebSocket).
+				PolledWebSocket.Install();
 				game = FortRiseLauncher.Start(GameAssembly, FortRiseDir, fortriseVersion, noIntro, loggers);
 				towerFall = game.GetType().Assembly;
 			}
@@ -181,14 +184,28 @@ public static partial class BrowserHost
 				Invoke("BeforeLoop");
 				typeof(Game).GetField("gameTimer", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(game, System.Diagnostics.Stopwatch.StartNew());
 				started = true;
+				TfexPatches.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
 			// then e.g. "test" is the base game's own command).
 			menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
+			// (Set on the game thread, which SDL belongs to.)
+			if (Interlocked.Exchange(ref pastedText, null) is string pasted)
+			{
+				SDL3.SDL.SDL_SetClipboardText(pasted);
+			}
 			while ((menuFrames > 300 || commandsRan) && commands.TryDequeue(out string[] command))
 			{
 				commandsRan = true;
 				RunGameCommand(command);
+			}
+			if (keysFrames > 0)
+			{
+				keysFrames--;
+				var down = Microsoft.Xna.Framework.Input.Keyboard.GetState().GetPressedKeys();
+				string now = string.Join(",", down);
+				if (now != lastKeys) Console.WriteLine($"[keys] {(now.Length > 0 ? now : "(none)")}");
+				lastKeys = now;
 			}
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
@@ -205,6 +222,17 @@ public static partial class BrowserHost
 		return Task.FromResult((bool)runApplication.GetValue(game));
 	}
 
+	// Text the player pasted on the page (Ctrl+V), for the game's clipboard: SDL's is internal to
+	// the page in the browser. Mods like TF.EX read it to paste lobby codes.
+	[JSExport]
+	internal static Task SetClipboardText(string text)
+	{
+		pastedText = text;
+		return Task.CompletedTask;
+	}
+
+	private static string pastedText;
+
 	private static readonly System.Collections.Concurrent.ConcurrentQueue<string[]> commands = new();
 
 	// Runs a line in the game's dev console (Monocle Commands, where mods such as TF.EX register
@@ -219,12 +247,36 @@ public static partial class BrowserHost
 	}
 
 	private static int menuFrames;
+	private static int keysFrames;
+	private static string lastKeys = "";
 	private static bool commandsRan;
 
 	private static void RunGameCommand(string[] words)
 	{
 		try
 		{
+			if (words[0] == "keys")
+			{
+				// Logs the keys FNA reports as down, for the next 10 seconds (input debugging).
+				keysFrames = 600;
+				Console.WriteLine("[command] keys: logging pressed keys for 10 s");
+				return;
+			}
+			if (words[0] == "menustate" && words.Length > 1)
+			{
+				// Jumps the main menu to a state (TowerFall's MainMenu.MenuState; mods add their
+				// own, e.g. TF.EX's 62 netplay, 63 private, 64 join code), for scripted tests.
+				object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
+				PropertyInfo state = scene?.GetType().GetProperty("State");
+				if (scene?.GetType().FullName != "TowerFall.MainMenu" || state == null)
+				{
+					Console.WriteLine("[command] menustate: not on the main menu");
+					return;
+				}
+				state.SetValue(scene, Enum.ToObject(state.PropertyType, int.Parse(words[1])));
+				Console.WriteLine($"[command] menustate {words[1]}");
+				return;
+			}
 			if (words[0] == "profile")
 			{
 				Console.WriteLine($"[command] profile: {Profiler.Start(words[1..])}");
