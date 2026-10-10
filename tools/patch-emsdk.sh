@@ -12,20 +12,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source tools/emenv.sh
-DIR=${PATCHED_EMSDK:-$HOME/.towerfall-browser/tools/emsdk-patched}
 want="$(cat patches/emsdk/*.patch | shasum -a 256 | cut -c1-16) $(cat "$EMSDK_TOOLS/emscripten/emscripten-version.txt")"
+# One copy per patch set and Emscripten version, so worktrees on different branches (and builds
+# running at the same time) never rebuild a copy another build is using. Each is made in a
+# temporary folder and renamed into place when complete.
+DIR=${PATCHED_EMSDK:-$HOME/.towerfall-browser/tools/emsdk-patched-$(echo "$want" | shasum -a 256 | cut -c1-12)}
 if [ "$(cat "$DIR/.stamp" 2>/dev/null)" != "$want" ]; then
-	rm -rf "$DIR" && mkdir -p "$DIR"
-	cp -R "$EMSDK_TOOLS/emscripten" "$DIR/emscripten"
-	cp -R "$EM_CACHE" "$DIR/cache"
+	tmp=$(mktemp -d "$DIR.tmp.XXXXXX")
+	trap 'rm -rf "$tmp"' EXIT
+	cp -R "$EMSDK_TOOLS/emscripten" "$tmp/emscripten"
+	cp -R "$EM_CACHE" "$tmp/cache"
 	for p in patches/emsdk/*.patch; do
-		patch -d "$DIR/emscripten" -p1 --forward -s < "$p"
+		patch -d "$tmp/emscripten" -p1 --forward -s < "$p"
 	done
 	# Rebuild the system libraries the patches touch, into the copy's cache.
 	(
-		export EM_CACHE="$DIR/cache" EM_FROZEN_CACHE=0
-		"$DIR/emscripten/embuilder" build libhtml5 libwasmfs-mt --force >/dev/null
+		export EM_CACHE="$tmp/cache" EM_FROZEN_CACHE=0
+		"$tmp/emscripten/embuilder" build libhtml5 libwasmfs-mt --force >/dev/null
 	)
-	echo "$want" > "$DIR/.stamp"
+	echo "$want" > "$tmp/.stamp"
+	# Another build may have finished the same copy meanwhile; then keep that one.
+	if [ "$(cat "$DIR/.stamp" 2>/dev/null)" != "$want" ]; then
+		rm -rf "$DIR"
+		mv "$tmp" "$DIR"
+	fi
 fi
 echo "$DIR"
