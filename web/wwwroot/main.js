@@ -399,10 +399,11 @@ async function main() {
 	let last = performance.now();
 
 	// Dev console commands, for tests: towerfallCommand("test") from the console, or
-	// ?command=line;line (run once the game has been up for a few seconds).
+	// ?command=line;line (the host runs them once the main menu is up).
 	self.towerfallCommand = (line) => exports.BrowserHost.RunCommand(line);
-	let pendingCommands = (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean);
-	let frames = 0;
+	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
+		await exports.BrowserHost.RunCommand(line);
+	}
 
 	const frame = async (now) => {
 		behind = Math.min(behind + (now - last), TICK_MS * 4);
@@ -420,10 +421,6 @@ async function main() {
 		} catch (e) {
 			fail(e);
 			return;
-		}
-		if (pendingCommands.length && ++frames >= 300) {
-			for (const line of pendingCommands) await exports.BrowserHost.RunCommand(line);
-			pendingCommands = [];
 		}
 		// SDL creates its AudioContext lazily, so keep the mute state applied.
 		applyMute();

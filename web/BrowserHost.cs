@@ -182,8 +182,12 @@ public static partial class BrowserHost
 				typeof(Game).GetField("gameTimer", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(game, System.Diagnostics.Stopwatch.StartNew());
 				started = true;
 			}
-			while (commands.TryDequeue(out string[] command))
+			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
+			// then e.g. "test" is the base game's own command).
+			menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
+			while ((menuFrames > 300 || commandsRan) && commands.TryDequeue(out string[] command))
 			{
+				commandsRan = true;
 				RunGameCommand(command);
 			}
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -214,10 +218,18 @@ public static partial class BrowserHost
 		return Task.CompletedTask;
 	}
 
+	private static int menuFrames;
+	private static bool commandsRan;
+
 	private static void RunGameCommand(string[] words)
 	{
 		try
 		{
+			if (words[0] == "profile")
+			{
+				Console.WriteLine($"[command] profile: {Profiler.Start(words[1..])}");
+				return;
+			}
 			object console = game.GetType().GetProperty("Commands")?.GetValue(game);
 			if (console == null)
 			{
@@ -279,7 +291,7 @@ public static partial class BrowserHost
 		if (seconds >= 5)
 		{
 			double busy = frameTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / fpsFrames;
-			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game");
+			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
 			fpsFrames = 0;
 			frameTicks = 0;
 			fpsClock.Restart();

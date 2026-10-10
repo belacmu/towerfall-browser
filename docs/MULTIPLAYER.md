@@ -24,36 +24,46 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 
 - TF.EX 0.19.0 (with TF.State, TF.Replay, TF.InputDisplayer) loads under FortRise 5.5.0-beta.3,
   and the title screen runs at 60 fps.
-- The rollback sync test (`?command=test`) runs, but **too slowly**. TF.EX runs online sessions
-  at a fixed 240 ticks/s (`Constants.NETPLAY_FPS`, the same for every player, so the browser
-  can't lower it). That leaves 4.17 ms per tick. In the browser's interpreter:
-  - one simulation tick (instant-replay rebuilds: 210 ticks in 500–650 ms) costs ~2.6 ms;
-  - sync test (save, load and two resimulations per tick) costs ~6 ms per tick, about 23 ms per
-    60 Hz frame.
+- The rollback sync test (`?command=profile;test`) runs. TF.EX runs online sessions at a fixed
+  240 ticks/s (`Constants.NETPLAY_FPS`, the same for every player), so there are 4.17 ms per tick.
+  The profiler (Harmony timers; `profile` command) shows where the time goes in the browser:
 
-  TF.EX catches up on missed ticks against the real-time clock. When ticks cost more than real
-  time, every frame owes more ticks than the last (a spiral of death): the game keeps
-  simulating but frames stop finishing. Real matches roll back less than the sync test, but
-  with ~3 ms per tick before state saves and rollbacks there's no headroom.
-- Measured on a machine also running heavy antivirus scans, so the numbers are rough; still,
-  the gap is about 2×, not 10%.
-- Not yet tried: a real lobby between two browsers (`tools/netplay-driver.mjs` drives two
-  headless players), or browser against desktop.
+  | per call | ms |
+  |---|---|
+  | `Level.Update` (one simulation tick) | 0.26 |
+  | `TfStateApi.CaptureGameState` (save; `GetState` 0.48 of it, MessagePack + LZ4 the rest) | 0.64 |
+  | `TfStateApi.RestoreGameStateBytes` (rollback load; `LoadState` 0.86 of it) | 1.05 |
+  | `Level.Render` (once per 60 Hz frame) | 0.6 |
 
-## Ways to get the speed
+  The simulation is cheap; TF.State's state copying dominates. A real match saves state every tick
+  and rolls back only on mispredicted input: about 0.9 ms per tick plus about 1 ms plus 0.9 ms per
+  resimulated tick per rollback, which fits. The sync test rolls back every tick (about 3 ms per
+  tick). It mostly holds 40–45 fps but falls into long catch-up frames after hitches (TF.EX
+  catches up missed ticks against the real-time clock).
+- (Early estimates of 2.6 ms per tick came from instant-replay rebuild timings, which include a
+  state load and save per frame.)
+- Measured on a machine also running heavy antivirus scans.
+- Next: a real lobby between two browsers (`tools/netplay-driver.mjs`), then browser against
+  desktop.
 
-1. **Profile TF.EX's per-tick work** in the interpreter: reflection (`DynamicData`), state capture
-   and serialization, logging. These may cost more in the browser than on desktop and could be
-   cut down with browser-side patches.
-2. **Tune the jiterpreter** (the interpreter's JIT to WebAssembly). The larger table size made no
-   difference; trace stats would show what isn't being compiled. `?runtime=` passes Mono
-   options.
-3. **Ahead-of-time compilation**, the big lever (several times faster). The public site can't
-   ship it for game code, since the patched game is built in the player's browser. A private
-   build that hosts the game files could, but runtime patches by Harmony mods don't apply to
-   AOT-compiled methods. TF.EX itself uses Harmony.
-4. **A lower tick rate for browser-only matches.** This would need TF.EX changes and wouldn't
-   interoperate with desktop players.
+## Ways to get more speed
+
+1. **TF.State's `GetState`/`LoadState`.** Browser-side patches could copy state with less
+   reflection and fewer allocations. Saved states stay local (GGRS only exchanges inputs), but
+   any checksums compared between players must stay identical.
+2. **Jiterpreter tuning.** A larger table made no difference. Trace stats
+   (`?runtime=--jiterpreter-stats-enabled`) would show what isn't being compiled. Its `jit-call`
+   and `interp-entry` features are unavailable in multithreaded builds.
+3. **Compiling game code in the player's browser** (research, 2026-10-10). Two options:
+   - Mono's AOT compiler plus LLVM/wasm-ld running in the browser, relinking the runtime with the
+     game's code: 2–4× on hot code, 40–100 MB of toolchain, nobody has done it. Harmony-patched
+     methods would have to stay interpreted.
+   - Extending the jiterpreter to whole methods: novel compiler work.
+
+   Dead ends: NativeAOT-LLVM (can't share Mono's heap or detour); decompiling and recompiling
+   (still interpreted); CheerpX. CoreCLR on wasm won't be ready before .NET 12 (late 2027).
+   Comparable ports (celeste-wasm, terraria-wasm) stayed on the interpreter plus jiterpreter to
+   keep mods. Not needed while real matches fit the budget.
 
 ## Testing tools
 
