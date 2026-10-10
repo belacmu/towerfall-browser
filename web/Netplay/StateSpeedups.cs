@@ -131,10 +131,16 @@ public static class StateSpeedups
 
 	private static IEnumerable<T> GetAllCore<T>(object level)
 	{
-		if (!capturing || snapshotLevel != level)
+		// Outside a save (loading a state adds and removes entities while it works), keep the
+		// original's lazy semantics: entities are read when the result is enumerated.
+		if (!capturing)
+		{
+			return Lazy<T>(level);
+		}
+		if (snapshotLevel != level)
 		{
 			TakeSnapshot(level);
-			snapshotLevel = capturing ? level : null;
+			snapshotLevel = level;
 		}
 		var result = new List<T>();
 		object[] all = snapshot;
@@ -142,12 +148,20 @@ public static class StateSpeedups
 		{
 			if (all[i] is T entity) result.Add(entity);
 		}
-		if (!capturing)
-		{
-			Array.Clear(snapshot, 0, snapshotCount);
-			snapshotCount = 0;
-		}
 		return result;
+	}
+
+	private static IEnumerable<T> Lazy<T>(object level)
+	{
+		layersProperty ??= level.GetType().GetProperty("Layers");
+		foreach (DictionaryEntry layer in (IDictionary)layersProperty.GetValue(level))
+		{
+			entitiesProperty ??= layer.Value.GetType().GetProperty("Entities");
+			foreach (object entity in (IEnumerable)entitiesProperty.GetValue(layer.Value))
+			{
+				if (entity is T t) yield return t;
+			}
+		}
 	}
 
 	private static void TakeSnapshot(object level)

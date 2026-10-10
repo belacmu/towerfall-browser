@@ -380,6 +380,17 @@ public static partial class BrowserHost
 				return;
 			}
 			Console.WriteLine($"[command] {string.Join(' ', words)}");
+			// TF.EX's "test" reads the Versus settings, which only exist once the Versus menu has
+			// been opened; give it the defaults (scripted tests go straight from the title).
+			if (words[0] == "test")
+			{
+				Type mainMenu = towerFall.GetType("TowerFall.MainMenu");
+				FieldInfo versus = mainMenu?.GetField("VersusMatchSettings", BindingFlags.Public | BindingFlags.Static);
+				if (versus != null && versus.GetValue(null) == null)
+				{
+					versus.SetValue(null, towerFall.GetType("TowerFall.MatchSettings")?.GetMethod("GetDefaultVersus", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null));
+				}
+			}
 			// What the command prints goes to the console's screen buffer (newest first); echo it.
 			var output = console.GetType().GetField("drawCommands", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(console) as List<string>;
 			output?.Clear();
