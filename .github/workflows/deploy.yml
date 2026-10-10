@@ -7,6 +7,13 @@
 #     which puts that branch in preview/. The last branch pushed wins.
 # Deploys always run from main's copy of this workflow (workflow_run runs the default branch's), the
 # branch GitHub Pages lets deploy. The site contains no game files: players supply their own.
+#
+# Speed: every built site is cached by its git tree (the build depends only on the files), so the
+# side of the deploy that didn't change (the preview on a push to main, main on a branch push) is
+# restored instead of rebuilt, and merging an up-to-date branch rebuilds nothing. A preview that's
+# already merged into main shows main's build. What does need building builds in parallel jobs,
+# each with its own vendor/, and every cache is saved as soon as it's filled, so a run cancelled by
+# a newer push still leaves its work for the next one.
 name: Deploy
 
 on:
@@ -32,42 +39,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  plan:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
-      preview: ${{ steps.preview.outputs.branch }}
-      preview-built: ${{ steps.preview-build.outcome }}
+      targets: ${{ steps.plan.outputs.targets }}
+      main-tree: ${{ steps.plan.outputs.main-tree }}
+      preview: ${{ steps.plan.outputs.branch }}
+      preview-sha: ${{ steps.plan.outputs.sha }}
+      preview-tree: ${{ steps.plan.outputs.preview-tree }}
+      preview-merged: ${{ steps.plan.outputs.merged }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache .NET SDK and wasm-tools workload
-        uses: actions/cache@v4
-        with:
-          path: ~/.towerfall-browser/tools
-          key: sdk-${{ runner.os }}-${{ hashFiles('tools/install-sdk.sh', 'web/**/*.csproj') }}
-
-      - name: Cache FNA, native libs and FAudio
-        uses: actions/cache@v4
-        with:
-          path: vendor
-          key: vendor-${{ runner.os }}-${{ hashFiles('patches/**', 'tools/fetch-deps.sh', 'tools/build-faudio.sh', 'tools/emenv.sh', 'tools/fetch-fortrise.sh', 'tools/fetch-runtime.sh', 'tools/build-monomod.sh', 'tools/build-netplay.sh', 'tools/fetch-tfex.sh', 'netplay/**', 'tools/AnyCpu/**') }}
-
-      - name: Cache Rust toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.towerfall-browser/rust
-          key: rust-${{ runner.os }}-${{ hashFiles('tools/install-rust.sh', 'tools/build-netplay.sh') }}
-
-      - name: Pick the preview branch
-        id: preview
+      - name: Pick the preview branch and what needs building
+        id: plan
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MAIN_SHA: ${{ github.sha }}
           EVENT: ${{ github.event_name }}
           RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           INPUT: ${{ inputs.preview }}
           SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
+          tree() { gh api "repos/$REPO/commits/$1" --jq .commit.tree.sha; }
           branch="" sha=""
           case "$EVENT" in
             workflow_run) branch="$RUN_BRANCH" sha="$RUN_SHA" ;;
@@ -78,63 +73,185 @@ jobs:
           if [ "$branch" = none ] || [ "$branch" = main ]; then branch=""; fi
           if [ -n "$branch" ] && [ -z "$sha" ]; then
             # Its latest commit; a branch that's gone (merged and deleted) leaves preview/ empty.
-            sha=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+            sha=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha 2>/dev/null) || sha=""
             [ -n "$sha" ] || { echo "Branch $branch is gone; no preview."; branch=""; }
           fi
-          echo "Preview: ${branch:-(none)} ${sha}"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      # The preview is built first, in this same checkout (vendor/ and the SDK are shared and
-      # re-fetched only where the branch pins something else), so vendor/ ends up as main's for
-      # the cache. A failed preview doesn't stop main's deploy; the preview job below reports it.
-      - name: Build the preview
-        id: preview-build
-        if: steps.preview.outputs.branch != ''
-        continue-on-error: true
-        env:
-          BRANCH: ${{ steps.preview.outputs.branch }}
-          SHA: ${{ steps.preview.outputs.sha }}
-        run: |
-          git fetch --depth 1 origin "$SHA"
-          git checkout --detach FETCH_HEAD
-          tools/install-sdk.sh
-          tools/install-rust.sh
-          tools/fetch-deps.sh
-          tools/build.sh
-          mkdir -p "$RUNNER_TEMP/preview"
-          mv web/bin/Release/net10.0/publish/wwwroot "$RUNNER_TEMP/preview/site"
-          # The page shows what it is (main.js).
-          jq -n --arg branch "$BRANCH" --arg sha "$SHA" --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{branch: $branch, sha: $sha, built: $built}' > "$RUNNER_TEMP/preview/site/preview.json"
+          main_tree=$(tree "$MAIN_SHA")
+          targets=$(jq -cn --arg sha "$MAIN_SHA" --arg tree "$main_tree" '[{target: "main", sha: $sha, tree: $tree}]')
+          preview_tree="" merged=false
+          if [ -n "$branch" ]; then
+            preview_tree=$(tree "$sha")
+            # Already in main (main is ahead of it or the same): main's build covers it.
+            status=$(gh api "repos/$REPO/compare/$sha...$MAIN_SHA" --jq .status) || status=
+            if [ "$preview_tree" = "$main_tree" ] || [ "$status" = ahead ] || [ "$status" = identical ]; then
+              merged=true preview_tree="$main_tree"
+            else
+              targets=$(jq -c --arg sha "$sha" --arg tree "$preview_tree" '. + [{target: "preview", sha: $sha, tree: $tree}]' <<<"$targets")
+            fi
+          fi
+          echo "Main: $MAIN_SHA (tree $main_tree)"
+          echo "Preview: ${branch:-(none)} ${sha} ${preview_tree:+(tree $preview_tree)}$([ "$merged" = true ] && echo ', merged into main: shows main')"
+          {
+            echo "targets=$targets"
+            echo "main-tree=$main_tree"
+            echo "branch=$branch"
+            echo "sha=$sha"
+            echo "preview-tree=$preview_tree"
+            echo "merged=$merged"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Back to main
-        if: steps.preview.outputs.branch != ''
-        run: git checkout --detach "$GITHUB_SHA"
+  build:
+    needs: plan
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.targets) }}
+    # A failed preview doesn't stop main's deploy; the preview job below reports it.
+    continue-on-error: ${{ matrix.target == 'preview' }}
+    steps:
+      - name: Built before?
+        id: site
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/sites/${{ matrix.tree }}
+          key: site-v1-${{ matrix.tree }}
+          lookup-only: true
+
+      - if: steps.site.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+
+      - name: Restore .NET SDK, wasm-tools workload and NuGet packages
+        id: sdk
+        if: steps.site.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.towerfall-browser/tools
+          key: sdk-${{ runner.os }}-${{ hashFiles('tools/install-sdk.sh', 'web/**/*.csproj') }}
+
+      # Any earlier vendor/ will do: each dependency has a stamp of its pin and build inputs, and
+      # tools/fetch-deps.sh redoes just the ones whose stamp doesn't match.
+      - name: Restore FNA, native libs and FAudio
+        id: vendor
+        if: steps.site.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor
+          key: vendor-${{ runner.os }}-${{ hashFiles('patches/**', 'tools/fetch-deps.sh', 'tools/build-faudio.sh', 'tools/emenv.sh', 'tools/fetch-fortrise.sh', 'tools/fetch-runtime.sh', 'tools/build-monomod.sh', 'tools/build-netplay.sh', 'tools/fetch-tfex.sh', 'netplay/**', 'tools/AnyCpu/**') }}
+          restore-keys: vendor-${{ runner.os }}-
+
+      - name: Restore Rust toolchain
+        id: rust
+        if: steps.site.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.towerfall-browser/rust
+          key: rust-${{ runner.os }}-${{ hashFiles('tools/install-rust.sh', 'tools/build-netplay.sh') }}
+          restore-keys: rust-${{ runner.os }}-
 
       - name: Install SDK
+        if: steps.site.outputs.cache-hit != 'true'
         run: tools/install-sdk.sh
 
       - name: Install Rust
+        if: steps.site.outputs.cache-hit != 'true'
         run: tools/install-rust.sh
 
       - name: Fetch dependencies
+        if: steps.site.outputs.cache-hit != 'true'
         run: tools/fetch-deps.sh
 
+      - name: Save vendor/
+        if: steps.site.outputs.cache-hit != 'true' && steps.vendor.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor
+          key: ${{ steps.vendor.outputs.cache-primary-key }}
+
+      - name: Save Rust toolchain
+        if: steps.site.outputs.cache-hit != 'true' && steps.rust.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.towerfall-browser/rust
+          key: ${{ steps.rust.outputs.cache-primary-key }}
+
       - name: Build
-        run: tools/build.sh
+        if: steps.site.outputs.cache-hit != 'true'
+        env:
+          SITE_DIR: ${{ runner.temp }}/sites/${{ matrix.tree }}
+        run: |
+          tools/build.sh
+          mkdir -p "$(dirname "$SITE_DIR")"
+          mv web/bin/Release/net10.0/publish/wwwroot "$SITE_DIR"
+
+      - name: Save the site
+        if: steps.site.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/sites/${{ matrix.tree }}
+          key: site-v1-${{ matrix.tree }}
+
+      # After the build, which restores the NuGet packages that live in here too.
+      - name: Save SDK
+        if: steps.site.outputs.cache-hit != 'true' && steps.sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.towerfall-browser/tools
+          key: ${{ steps.sdk.outputs.cache-primary-key }}
+
+  assemble:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    outputs:
+      preview-built: ${{ steps.together.outputs.preview-built }}
+    steps:
+      - name: Main's build
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/sites/${{ needs.plan.outputs.main-tree }}
+          key: site-v1-${{ needs.plan.outputs.main-tree }}
+          fail-on-cache-miss: true
+
+      - name: The preview's build
+        if: needs.plan.outputs.preview != '' && needs.plan.outputs.preview-merged != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/sites/${{ needs.plan.outputs.preview-tree }}
+          key: site-v1-${{ needs.plan.outputs.preview-tree }}
 
       - name: Put the site together
+        id: together
+        env:
+          MAIN_TREE: ${{ needs.plan.outputs.main-tree }}
+          BRANCH: ${{ needs.plan.outputs.preview }}
+          SHA: ${{ needs.plan.outputs.preview-sha }}
+          PREVIEW_TREE: ${{ needs.plan.outputs.preview-tree }}
+          MERGED: ${{ needs.plan.outputs.preview-merged }}
         run: |
-          mv web/bin/Release/net10.0/publish/wwwroot "$RUNNER_TEMP/site"
-          if [ -d "$RUNNER_TEMP/preview/site" ]; then mv "$RUNNER_TEMP/preview/site" "$RUNNER_TEMP/site/preview"; fi
+          sites="$RUNNER_TEMP/sites" site="$RUNNER_TEMP/site"
+          mv "$sites/$MAIN_TREE" "$site"
+          built=false
+          # A merged preview is a copy of main; otherwise its own build, if it built.
+          if [ -n "$BRANCH" ] && [ -d "$sites/$PREVIEW_TREE" -o "$MERGED" = true ]; then
+            if [ "$MERGED" = true ]; then cp -R "$site" "$RUNNER_TEMP/preview"; else mv "$sites/$PREVIEW_TREE" "$RUNNER_TEMP/preview"; fi
+            mv "$RUNNER_TEMP/preview" "$site/preview"
+            # The page shows what it is (main.js).
+            jq -n --arg branch "$BRANCH" --arg sha "$SHA" --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson merged "$MERGED" \
+              '{branch: $branch, sha: $sha, built: $built, merged: $merged}' > "$site/preview/preview.json"
+            built=true
+          fi
+          echo "preview-built=$built" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ runner.temp }}/site
 
   deploy:
-    needs: build
+    needs: assemble
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -145,17 +262,19 @@ jobs:
 
   # Main deployed either way; a branch that was meant for preview/ but didn't build shows up red.
   preview:
-    needs: [build, deploy]
-    if: needs.build.outputs.preview != ''
+    needs: [plan, assemble, deploy]
+    if: needs.plan.outputs.preview != ''
     runs-on: ubuntu-latest
     steps:
       - env:
-          BRANCH: ${{ needs.build.outputs.preview }}
-          BUILT: ${{ needs.build.outputs.preview-built }}
+          BRANCH: ${{ needs.plan.outputs.preview }}
+          BUILT: ${{ needs.assemble.outputs.preview-built }}
+          MERGED: ${{ needs.plan.outputs.preview-merged }}
           SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
-          if [ "$BUILT" != success ]; then
-            echo "::error::The preview of $BRANCH didn't build (see the build job's \"Build the preview\" step); preview/ was left out."
+          if [ "$BUILT" != true ]; then
+            echo "::error::The preview of $BRANCH didn't build (see its build job); preview/ was left out."
             exit 1
           fi
-          echo "::notice::Preview of $BRANCH: $SITE/preview/"
+          [ "$MERGED" = true ] && note=" (already merged into main, so it shows main's build)" || note=""
+          echo "::notice::Preview of $BRANCH: $SITE/preview/$note"

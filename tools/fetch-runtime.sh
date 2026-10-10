@@ -7,12 +7,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 RELEASE=eb111fb8-7474-4f75-a1b7-848fc6293aa5
 OUT=vendor/runtime
-[ "$(cat $OUT/.stamp 2>/dev/null)" = "$RELEASE" ] && exit 0
+want="$RELEASE $(shasum -a 256 tools/fetch-runtime.sh | cut -c1-16)"
+[ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
 rm -rf "$OUT" && mkdir -p "$OUT"
 base=https://github.com/r58Playz/FNA-WASM-Build/releases/download/$RELEASE
 curl -sSLf -o "$OUT/dotnet.zip" "$base/dotnet.zip"
 curl -sSLf -o "$OUT/liba.o" "$base/liba.o"
 curl -sSLf -o "$OUT/hot_reload_detour.o" "$base/hot_reload_detour.o"
 unzip -q "$OUT/dotnet.zip" -d "$OUT/dotnet" && rm "$OUT/dotnet.zip"
-echo "$RELEASE" > "$OUT/.stamp"
+echo "$want" > "$OUT/.stamp"
 echo "Runtime pack: $(grep -o 'Version="[^"]*"' $OUT/dotnet/data/RuntimeList.xml | head -1)"

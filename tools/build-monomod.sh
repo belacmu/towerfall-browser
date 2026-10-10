@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 MONOMOD_COMMIT=69fdc9debfcdf99cf6481047801b03b4eba947fe
 SRC=vendor/MonoMod
-want="$MONOMOD_COMMIT $(shasum -a 256 patches/MonoMod.patch | cut -c1-16)"
+want="$MONOMOD_COMMIT $(cat patches/MonoMod.patch tools/build-monomod.sh | shasum -a 256 | cut -c1-16)"
 if [ "$(cat $SRC/.stamp 2>/dev/null)" != "$want" ]; then
 	rm -rf $SRC
 	git init -q $SRC

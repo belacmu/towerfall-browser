@@ -13,7 +13,8 @@ ZIPS="
 DShad.TF.EX:156de4ddc032474ad972688f3a254c6afe161648737bfff89cf30ae48e90833d
 "
 OUT=vendor/tfex
-[ "$(cat $OUT/.stamp 2>/dev/null)" = "$TFEX_VERSION" ] && exit 0
+want="$TFEX_VERSION $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
+[ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
 
 rm -rf $OUT && mkdir -p $OUT
 tmp=$(mktemp -d)
@@ -62,4 +63,4 @@ for f in sorted(os.listdir(out)):
 json.dump({"source": "hosted", "mods": entries}, open(os.path.join(out, "hosted.json"), "w"), indent=1)
 print(f"TF.EX {version}: " + ", ".join(f"{e['file']['name']} ({e['file']['size'] // 1024} KB: {', '.join(m['name'] for m in e['mods'])})" for e in entries))
 PY
-echo "$TFEX_VERSION" > $OUT/.stamp
+echo "$want" > $OUT/.stamp

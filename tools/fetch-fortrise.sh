@@ -13,7 +13,8 @@ FORTRISE_VERSION=5.5.0-beta.3
 FORTRISE_SHA256=e7fa8b534cf3ebe2ce6bdb5e25933a531461f817a184b7cbb37c64b9c6e0d681
 
 OUT=vendor/fortrise
-[ "$(cat $OUT/.stamp 2>/dev/null)" = "$FORTRISE_VERSION" ] && exit 0
+want="$FORTRISE_VERSION $(cat tools/fetch-fortrise.sh tools/AnyCpu/*.cs* | shasum -a 256 | cut -c1-16)"
+[ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -41,5 +42,5 @@ for m in "$src"/Internals/*/; do
 done
 find "$OUT/data" -name '*.pdb' -delete
 echo "$FORTRISE_VERSION" > "$OUT/version.txt"
-echo "$FORTRISE_VERSION" > "$OUT/.stamp"
+echo "$want" > "$OUT/.stamp"
 echo "FortRise $FORTRISE_VERSION: $(ls "$OUT/lib" | wc -l | tr -d ' ') libs, $(find "$OUT/data" -type f | wc -l | tr -d ' ') data files"
