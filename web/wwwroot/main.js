@@ -75,9 +75,14 @@ let muted = (() => {
 })();
 
 // Muting zeroes a gain node between SDL's output and the speakers instead of suspending the
-// AudioContext, so the game's audio keeps running (and stays in sync) while silent.
+// AudioContext, so the game's audio keeps running (and stays in sync) while silent. On iPhone the
+// audio session follows the Sound button (Safari 17+): with sound on, "playback", like a media app,
+// so the silent switch doesn't mute the game (the Sound button does); with sound off, "ambient",
+// which mixes with other apps' audio. As "playback", the running (silent) game stopped music or
+// podcasts playing in other apps.
 function applyMute() {
 	$("mute").textContent = muted ? "Sound: off" : "Sound: on";
+	if (navigator.audioSession) navigator.audioSession.type = muted ? "ambient" : "playback";
 	const SDL3 = self.wasm?.Module?.SDL3;
 	const ctx = SDL3?.audioContext;
 	const node = SDL3?.audio_playback?.scriptProcessorNode;
@@ -122,9 +127,6 @@ function unlockAudio() {
 for (const type of ["pointerup", "touchend", "click", "keydown"]) {
 	document.addEventListener(type, unlockAudio, { capture: true, passive: true });
 }
-// iPhone's silent switch mutes web audio unless the page plays like a media app; the Sound button
-// is the control here.
-if (navigator.audioSession) navigator.audioSession.type = "playback";
 
 // The mouse cursor shows over the game while it moves and hides after a few seconds still (the
 // game itself hides it for good; see canvas.canvas in index.html).

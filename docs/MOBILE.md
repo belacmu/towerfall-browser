@@ -67,8 +67,10 @@ Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely fi
   Safari only starts audio from inside a tap, click or key press, and SDL created its AudioContext
   after Play and resumed it from a timer (fine in Chrome), so iPhone was silent. The page now
   creates SDL's context during the Play click and resumes it on later taps when it isn't running
-  (`unlockAudio` in `main.js`). It also sets `navigator.audioSession.type = "playback"` (Safari 17+)
-  so the silent switch doesn't mute the game; the Sound button does that.
+  (`unlockAudio` in `main.js`). With sound on it sets `navigator.audioSession.type = "playback"`
+  (Safari 17+) so the silent switch doesn't mute the game; the Sound button does that. With sound
+  off it's `"ambient"`, which mixes with other apps' audio: as "playback", the silently running
+  game stopped music playing in other apps.
 
 ## Step 2: touch controls (virtual gamepad)
 
