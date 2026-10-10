@@ -20,8 +20,7 @@ export async function iceServers(env) {
 		});
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		const { iceServers } = await res.json();
-		// Browsers block port 53, and tfnet.js waits for ICE gathering to finish before sending its
-		// offer, so a port-53 server would only add a timeout.
+		// Browsers block port 53, so a port-53 server would only hold up ICE gathering.
 		return iceServers.map((s) => ({ ...s, urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)) }));
 	} catch (e) {
 		console.error("[turn] couldn't get credentials:", e);
