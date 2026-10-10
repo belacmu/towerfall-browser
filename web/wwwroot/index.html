@@ -98,8 +98,19 @@
 				display: flex;
 				gap: 8px;
 			}
-			#corner button { opacity: 0.6; }
-			#corner button:hover { opacity: 1; }
+			/* Styled like the on-screen controls' Back and Pause buttons (#touch .back, below). */
+			#corner button {
+				height: calc(min(19vmin, 88px) * 0.45 + 4px); /* + the borders, which .tbutton adds outside */
+				padding: 0 12px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(255, 255, 255, 0.08);
+				color: rgba(255, 255, 255, 0.6);
+				font-size: 10px;
+				text-transform: uppercase;
+			}
+			#corner button:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
+			#corner button:disabled { cursor: default; }
 			/* On-screen controls (touch.js). */
 			#touch {
 				position: fixed;
