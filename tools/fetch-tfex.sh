@@ -7,10 +7,10 @@
 # vendor/tfex/hosted.json, which the page lists alongside the GameBanana catalog.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-TFEX_VERSION=v0.19.0
+TFEX_VERSION=v0.19.1
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:e65fe844a56329c7616ae05e73c3cc127d486c40efb06966821f0c036d742452
+DShad.TF.EX:156de4ddc032474ad972688f3a254c6afe161648737bfff89cf30ae48e90833d
 "
 OUT=vendor/tfex
 [ "$(cat $OUT/.stamp 2>/dev/null)" = "$TFEX_VERSION" ] && exit 0

@@ -18,6 +18,9 @@ public static class Bench
 #pragma warning restore CS0414, CS0169
 	}
 
+	[System.Runtime.InteropServices.DllImport("Emscripten")]
+	private static extern int tfnet_state(int h);
+
 	public static void Run()
 	{
 		var sample = new Sample();
@@ -34,6 +37,8 @@ public static class Bench
 		Time("MonoMod FastInvoker", n, () => { for (int i = 0; i < n; i++) sink += (float)fast(sample); });
 		Func<object, object> emitted = EmitGetter(field);
 		Time("DynamicMethod getter", n, () => { for (int i = 0; i < n; i++) sink += (float)emitted(sample); });
+		// A call proxied synchronously to the page's main thread (what the netcode transport does).
+		Time("call proxied to the page (tfnet_state)", 2000, () => { for (int i = 0; i < 2000; i++) sink += tfnet_state(0); });
 		Console.WriteLine($"[bench] done ({sink > 0})");
 	}
 

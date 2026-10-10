@@ -71,6 +71,9 @@ extern "C" {
 }
 
 const RECV_BUFFER: usize = 256 * 1024;
+// A buffer with more room than this left after a receive was drained (WebRTC data channel
+// messages are at most 64 KiB here).
+const RECV_SLACK: usize = 64 * 1024 + 20;
 
 pub struct WebRtcSocket {
 	handle: i32,
@@ -110,7 +113,7 @@ impl WebRtcSocket {
 		let url = room_url.into();
 		let handle = unsafe { tfnet_open(url.as_ptr(), url.len()) };
 		(
-			WebRtcSocket { handle, peers: HashSet::new(), channel: Some(WebRtcChannel { handle }), closed: false },
+			WebRtcSocket { handle, peers: HashSet::new(), channel: Some(WebRtcChannel { handle, buf: Vec::new() }), closed: false },
 			MessageLoopFuture { handle },
 		)
 	}
@@ -184,6 +187,8 @@ impl Drop for WebRtcSocket {
 /// A data channel to all peers of a socket.
 pub struct WebRtcChannel {
 	handle: i32,
+	// Reused for every receive (it's called every tick).
+	buf: Vec<u8>,
 }
 
 impl WebRtcChannel {
@@ -198,12 +203,12 @@ impl WebRtcChannel {
 
 	pub fn receive(&mut self) -> Vec<(PeerId, Packet)> {
 		let mut out = Vec::new();
-		let mut buf = vec![0u8; RECV_BUFFER];
+		if self.buf.len() != RECV_BUFFER {
+			self.buf = vec![0u8; RECV_BUFFER];
+		}
+		let buf = &mut self.buf;
 		loop {
 			let written = unsafe { tfnet_recv_all(self.handle, buf.as_mut_ptr(), buf.len()) }.max(0) as usize;
-			if written == 0 {
-				return out;
-			}
 			let mut at = 0;
 			while at + 20 <= written {
 				let peer = PeerId(Uuid::from_bytes(buf[at..at + 16].try_into().unwrap()));
@@ -211,6 +216,12 @@ impl WebRtcChannel {
 				let end = (at + 20 + len).min(written);
 				out.push((peer, buf[at + 20..end].to_vec().into_boxed_slice()));
 				at = end;
+			}
+			// tfnet_recv_all stops early only when the next packet doesn't fit; with this much
+			// room left, everything waiting was read (packets are far smaller), so skip asking
+			// again (each call is a round trip to the page's main thread).
+			if written == 0 || RECV_BUFFER - written > RECV_SLACK {
+				return out;
 			}
 		}
 	}

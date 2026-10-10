@@ -191,6 +191,8 @@ var LibraryTFNet = {
 	tfnet_open__proxy: "sync",
 	tfnet_open__sig: "ipp",
 	tfnet_open: function (url, len) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_open = (globalThis.tfnetCalls.tfnet_open | 0) + 1; // calls proxied to the page (for diagnostics)
 		const h = TFNet.next++;
 		TFNet.sockets.set(h, TFNet.open(UTF8ToString(url, len)));
 		return h;
@@ -201,6 +203,8 @@ var LibraryTFNet = {
 	tfnet_close__proxy: "sync",
 	tfnet_close__sig: "vi",
 	tfnet_close: function (h) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_close = (globalThis.tfnetCalls.tfnet_close | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFNet.sockets.get(h);
 		if (!s) return;
 		if (s.state === 0) s.state = 1;
@@ -213,6 +217,8 @@ var LibraryTFNet = {
 	tfnet_state__proxy: "sync",
 	tfnet_state__sig: "ii",
 	tfnet_state: function (h) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_state = (globalThis.tfnetCalls.tfnet_state | 0) + 1; // calls proxied to the page (for diagnostics)
 		return TFNet.sockets.get(h)?.state ?? 1;
 	},
 
@@ -221,6 +227,8 @@ var LibraryTFNet = {
 	tfnet_error__proxy: "sync",
 	tfnet_error__sig: "iipp",
 	tfnet_error: function (h, buf, cap) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_error = (globalThis.tfnetCalls.tfnet_error | 0) + 1; // calls proxied to the page (for diagnostics)
 		return stringToUTF8(TFNet.sockets.get(h)?.error ?? "", buf, cap);
 	},
 
@@ -229,6 +237,8 @@ var LibraryTFNet = {
 	tfnet_id__proxy: "sync",
 	tfnet_id__sig: "iip",
 	tfnet_id: function (h, out) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_id = (globalThis.tfnetCalls.tfnet_id | 0) + 1; // calls proxied to the page (for diagnostics)
 		const id = TFNet.sockets.get(h)?.id;
 		if (!id) return 0;
 		TFNet.uuidToBytes(id, out);
@@ -240,6 +250,8 @@ var LibraryTFNet = {
 	tfnet_next_event__proxy: "sync",
 	tfnet_next_event__sig: "iip",
 	tfnet_next_event: function (h, peer) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_next_event = (globalThis.tfnetCalls.tfnet_next_event | 0) + 1; // calls proxied to the page (for diagnostics)
 		const e = TFNet.sockets.get(h)?.events.shift();
 		if (!e) return 0;
 		TFNet.uuidToBytes(e[0], peer);
@@ -252,6 +264,8 @@ var LibraryTFNet = {
 	tfnet_send__proxy: "sync",
 	tfnet_send__sig: "iippp",
 	tfnet_send: function (h, peer, data, len) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_send = (globalThis.tfnetCalls.tfnet_send | 0) + 1; // calls proxied to the page (for diagnostics)
 		const p = TFNet.sockets.get(h)?.peers.get(TFNet.bytesToUuid(peer));
 		if (!p || !p.connected) return -1;
 		try {
@@ -268,6 +282,8 @@ var LibraryTFNet = {
 	tfnet_recv_all__proxy: "sync",
 	tfnet_recv_all__sig: "iipp",
 	tfnet_recv_all: function (h, buf, cap) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfnet_recv_all = (globalThis.tfnetCalls.tfnet_recv_all | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFNet.sockets.get(h);
 		if (!s) return 0;
 		let at = 0;
@@ -303,6 +319,8 @@ var LibraryTFWs = {
 	tfws_open__proxy: "sync",
 	tfws_open__sig: "ip",
 	tfws_open: function (url) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_open = (globalThis.tfnetCalls.tfws_open | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = { ws: null, state: 0, code: 0, reason: "", inbox: [] };
 		try {
 			s.ws = new WebSocket(UTF8ToString(url));
@@ -329,6 +347,8 @@ var LibraryTFWs = {
 	tfws_state__proxy: "sync",
 	tfws_state__sig: "ii",
 	tfws_state: function (h) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_state = (globalThis.tfnetCalls.tfws_state | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFWs.sockets.get(h);
 		if (!s) return 3;
 		return s.state === 1 && s.ws.readyState === 2 ? 2 : s.state;
@@ -339,6 +359,8 @@ var LibraryTFWs = {
 	tfws_close_info__proxy: "sync",
 	tfws_close_info__sig: "iipp",
 	tfws_close_info: function (h, reason, cap) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_close_info = (globalThis.tfnetCalls.tfws_close_info | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFWs.sockets.get(h);
 		if (!s) return 1006;
 		if (cap > 0) stringToUTF8(s.reason, reason, cap);
@@ -350,6 +372,8 @@ var LibraryTFWs = {
 	tfws_send__proxy: "sync",
 	tfws_send__sig: "iippi",
 	tfws_send: function (h, data, len, text) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_send = (globalThis.tfnetCalls.tfws_send | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFWs.sockets.get(h);
 		if (!s || s.ws.readyState !== 1) return -1;
 		const bytes = HEAPU8.slice(data, data + len);
@@ -363,6 +387,8 @@ var LibraryTFWs = {
 	tfws_peek__proxy: "sync",
 	tfws_peek__sig: "iip",
 	tfws_peek: function (h, type) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_peek = (globalThis.tfnetCalls.tfws_peek | 0) + 1; // calls proxied to the page (for diagnostics)
 		const m = TFWs.sockets.get(h)?.inbox[0];
 		if (!m) return -1;
 		HEAP32[type >> 2] = m[0];
@@ -374,6 +400,8 @@ var LibraryTFWs = {
 	tfws_take__proxy: "sync",
 	tfws_take__sig: "vip",
 	tfws_take: function (h, buf) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_take = (globalThis.tfnetCalls.tfws_take | 0) + 1; // calls proxied to the page (for diagnostics)
 		const m = TFWs.sockets.get(h)?.inbox.shift();
 		if (m) HEAPU8.set(m[1], buf);
 	},
@@ -383,6 +411,8 @@ var LibraryTFWs = {
 	tfws_close__proxy: "sync",
 	tfws_close__sig: "viip",
 	tfws_close: function (h, code, reason) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_close = (globalThis.tfnetCalls.tfws_close | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFWs.sockets.get(h);
 		if (!s) return;
 		try {
@@ -397,6 +427,8 @@ var LibraryTFWs = {
 	tfws_free__proxy: "sync",
 	tfws_free__sig: "vi",
 	tfws_free: function (h) {
+		globalThis.tfnetCalls ??= {};
+		globalThis.tfnetCalls.tfws_free = (globalThis.tfnetCalls.tfws_free | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFWs.sockets.get(h);
 		if (!s) return;
 		if (s.ws.readyState < 2) s.ws.close();

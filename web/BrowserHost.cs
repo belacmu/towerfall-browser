@@ -373,6 +373,9 @@ public static partial class BrowserHost
 	private static readonly System.Diagnostics.Stopwatch fpsClock = System.Diagnostics.Stopwatch.StartNew();
 	private static int fpsFrames;
 	private static long frameTicks;
+	private static int lastGen0, lastGen1, lastGen2;
+	private static TimeSpan lastPaused;
+	private static double lastAllocatedMb;
 
 	private static void ReportFrameRate()
 	{
@@ -381,7 +384,11 @@ public static partial class BrowserHost
 		if (seconds >= 5)
 		{
 			double busy = frameTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / fpsFrames;
-			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
+			int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
+			TimeSpan paused = GC.GetTotalPauseDuration();
+			string gc = $", GC {gen0 - lastGen0}/{gen1 - lastGen1}/{gen2 - lastGen2} (gen 0/1/2), {(paused - lastPaused).TotalMilliseconds:0} ms paused, {GC.GetTotalAllocatedBytes() / 1048576.0 - lastAllocatedMb:0} MB allocated";
+			(lastGen0, lastGen1, lastGen2, lastPaused, lastAllocatedMb) = (gen0, gen1, gen2, paused, GC.GetTotalAllocatedBytes() / 1048576.0);
+			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{gc}{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
 			fpsFrames = 0;
 			frameTicks = 0;
 			fpsClock.Restart();
