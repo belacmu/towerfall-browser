@@ -134,8 +134,26 @@ export function createTouchControls(send) {
 		[78, [70, 90]],
 		[90, [90, 90]],
 	];
+	// The thumb's direction, held until it turns more than STEADY degrees away. A thumb on glass
+	// never keeps still, and online every change the game sees is a new input the opponent's game
+	// mispredicted and rolls back for: a scripted wobbling thumb made its opponent roll back about 45
+	// times a second (a quarter of that with this). STEADY is well below the game's 45 degree aim
+	// rounding, so it only costs free aiming a few degrees of resolution.
+	const STEADY = 8;
+	let steady = null; // degrees, or null while the stick isn't pushed
+	function steadyDirection(v) {
+		const a = Math.atan2(v.y, v.x) / DEG;
+		const turned = steady === null ? Infinity : Math.abs(((a - steady + 540) % 360) - 180);
+		if (turned > STEADY) steady = a;
+		return { x: Math.cos(steady * DEG), y: Math.sin(steady * DEG) };
+	}
+
 	function stickOutput(v) {
-		if (Math.hypot(v.x, v.y) < DEADZONE) return { x: 0, y: 0 };
+		if (Math.hypot(v.x, v.y) < DEADZONE) {
+			steady = null;
+			return { x: 0, y: 0 };
+		}
+		v = steadyDirection(v);
 		const a = Math.atan2(Math.abs(v.y), Math.abs(v.x)) / DEG;
 		let from = 0;
 		let out = 90;
@@ -220,6 +238,7 @@ export function createTouchControls(send) {
 			let buttons = 0;
 			let x = 0;
 			let y = 0;
+			if (![...pointers.values()].some((p) => p.kind === "stick")) steady = null;
 			for (const p of pointers.values()) {
 				if (p.kind === "button" && p.el) buttons |= Number(p.el.dataset.bits);
 				if (p.kind === "stick") {
