@@ -15,8 +15,12 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 - matchbox_socket is replaced by `netplay/matchbox-browser`, which calls `netplay/tfnet.js`: the
   page's WebSocket signaling and WebRTC data channel, speaking matchbox's protocol so browser
   players can meet desktop players.
-- Lobbies use .NET's `ClientWebSocket` to `wss://tfex-server.balatro-vs-matchmaking.eu/ws`. The
-  server accepts browser origins (checked 2026-10-10). Match signaling is
+- Lobbies use .NET's `ClientWebSocket` to `wss://tfex-server.balatro-vs-matchmaking.eu/ws`.
+  **Since about 08:00 UTC on 2026-10-10 (around the TF.EX 0.19.1 release), the server answers
+  403 to any handshake with a browser `Origin`** (no Origin: 101). Earlier that day it accepted
+  them, and two browsers met and played there. Browsers can't omit Origin, and we shouldn't route
+  around the check, so online play from the site needs the server's operator to allow our
+  origins (or a server of our own). Match signaling is
   `/room/<id>?peer=<id>` with peer ids handed out by the lobby, so a generic matchbox server
   can't stand in for it. The server isn't open source.
 
