@@ -28,7 +28,26 @@ function fail(err) {
 	status("Something went wrong");
 	// ManagedError's stack getter calls back into C#, which isn't allowed on this thread.
 	$("error").textContent = String(err?.message ?? err) + "\n\n(See the browser console for details.)";
+	showOverlay();
+}
+
+// While the game runs (body.playing), touches only play. iOS Safari otherwise selects text, shows
+// its magnifier and long-press menus, bounces the page and zooms on touch drags and taps, whatever
+// the CSS says (see body.playing in index.html), unless the touch events' defaults are cancelled.
+// Touches that start on a button keep their start, so a tap still clicks it. The overlay (before
+// Play, or after an error) behaves normally, so the mod list scrolls and error text can be copied.
+function hideOverlay() {
+	$("overlay").classList.add("hidden");
+	document.body.classList.add("playing");
+}
+function showOverlay() {
 	$("overlay").classList.remove("hidden");
+	document.body.classList.remove("playing");
+}
+const playing = () => document.body.classList.contains("playing");
+document.addEventListener("touchstart", (e) => playing() && !e.target.closest?.("button") && e.preventDefault(), { passive: false });
+for (const type of ["touchmove", "selectstart", "contextmenu", "gesturestart", "dblclick"]) {
+	document.addEventListener(type, (e) => playing() && e.preventDefault(), { passive: false });
 }
 
 // Mute is remembered per browser. ?mute / ?unmute in the URL override it.
@@ -454,7 +473,7 @@ async function main() {
 	} else {
 		await exports.BrowserHost.Init(noIntro, null, null, null);
 	}
-	$("overlay").classList.add("hidden");
+	hideOverlay();
 	$("canvas").focus();
 	host = exports.BrowserHost;
 	await applyTouch();
@@ -504,7 +523,7 @@ async function main() {
 			location.reload();
 		} else {
 			status("TowerFall has exited. Reload to play again.");
-			$("overlay").classList.remove("hidden");
+			showOverlay();
 		}
 	};
 	requestAnimationFrame(frame);

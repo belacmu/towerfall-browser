@@ -103,6 +103,9 @@ the play area. Things to look at with one:
   unzip it with `DecompressionStream("deflate-raw")` into the same entry list `locateGame()` takes.
 - **Page**: fullscreen and a landscape lock on Android; a web app manifest for "Add to Home
   Screen" on iPhone, which has no element fullscreen. (Done: `viewport-fit=cover`, `100dvh`, and
-  no scrolling, zooming, selection or long-press menu on the controls.)
+  while the game runs no text selection, magnifier, long-press menu, scrolling or zooming from
+  touches anywhere on the page: iOS Safari ignores the CSS for some of these, so `main.js` also
+  cancels the touch events' defaults. Safari's own edge swipes, like back, can't be blocked from a
+  page.)
 - **Bluetooth controllers** may already work through SDL's Gamepad API backend; if not, the same
   virtual-gamepad bridge can forward them from the page.

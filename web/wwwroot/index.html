@@ -12,6 +12,16 @@
 				color: #ddd;
 				font: 14px/1.4 ui-monospace, Menlo, monospace;
 				overflow: hidden;
+				overscroll-behavior: none;
+			}
+			/* While the game runs, touches only play: no text selection, long-press menus, tap
+			   highlight, scrolling or zooming (main.js also cancels touch defaults, which iOS needs). */
+			body.playing, body.playing * {
+				-webkit-user-select: none;
+				user-select: none;
+				-webkit-touch-callout: none;
+				-webkit-tap-highlight-color: transparent;
+				touch-action: none;
 			}
 			#stage {
 				position: fixed;
@@ -102,6 +112,8 @@
 				--size: min(19vmin, 88px);
 				--edge: max(16px, env(safe-area-inset-right), env(safe-area-inset-left));
 			}
+			/* Only over the running game, not over the overlay (e.g. an error after a crash). */
+			body:not(.playing) #touch { display: none; }
 			#touch .tbutton {
 				position: absolute;
 				width: var(--size);
