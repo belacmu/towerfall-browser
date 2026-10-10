@@ -10,6 +10,11 @@
 
 const MARKER = ".imported.json";
 
+// The game's music bank: most of the game's bytes (218 MB of 354), and the game runs fine without it
+// (no music). Imports from a file host leave it out so the first load is quicker and a phone only
+// downloads it when asked to (the page's Music button, then importMusic()).
+export const MUSIC = "Content/Music/Win/MusicWaveBank.xwb";
+
 // --- Sources ---------------------------------------------------------------------------------
 
 export async function fromServer(base = "") {
@@ -201,6 +206,17 @@ export async function importGame(located, source, onProgress) {
 	return info;
 }
 
+// The located music bank if it isn't (completely) in browser storage yet, else null.
+export async function missingMusic(located) {
+	const music = located.content.find((c) => c.to === MUSIC);
+	if (!music) return null;
+	return (await existingSize(await gameRoot(true), MUSIC)) === music.from.size ? null : music;
+}
+
+export async function importMusic(music, onProgress) {
+	await copyFiles(await gameRoot(true), [music], onProgress);
+}
+
 // Adds Dark World to the already imported game.
 export async function addDarkWorld(located, onProgress) {
 	const info = await importedGame();
@@ -227,6 +243,10 @@ async function copyFiles(root, content, onProgress) {
 		else todo.push(c);
 	}
 	onProgress(done, total);
+	// Biggest first: the music bank alone is most of the bytes, so it starts right away while the
+	// many small files share the other connections. Over the network each file costs a round trip
+	// (~0.2 s to the private host), so keep plenty in flight.
+	todo.sort((a, b) => b.from.size - a.from.size);
 
 	let next = 0;
 	const worker = async () => {
@@ -248,7 +268,7 @@ async function copyFiles(root, content, onProgress) {
 			await writable.close();
 		}
 	};
-	await Promise.all(Array.from({ length: 6 }, worker));
+	await Promise.all(Array.from({ length: 16 }, worker));
 }
 
 // --- FortRise -----------------------------------------------------------------------------

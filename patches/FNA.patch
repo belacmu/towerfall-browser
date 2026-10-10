@@ -106,3 +106,21 @@ index 32e070b..99041ed 100644
  			SDL.SDL_DisplayMode *mode = (SDL.SDL_DisplayMode*) SDL.SDL_GetCurrentDisplayMode(displayIds[adapterIndex]);
  
  			// FIXME: iOS needs to factor in the DPI!
+diff --git a/src/Audio/WaveBank.cs b/src/Audio/WaveBank.cs
+--- a/src/Audio/WaveBank.cs
++++ b/src/Audio/WaveBank.cs
+@@ -188,6 +188,14 @@
+ 
+ 		protected virtual void Dispose(bool disposing)
+ 		{
++			/* A constructor that threw (e.g. the file is missing) never set
++			 * engine, and the finalizer still runs: nothing to dispose. Without
++			 * this, the finalizer thread's NullReferenceException kills the game.
++			 */
++			if (engine == null)
++			{
++				return;
++			}
+ 			lock (engine.gcSync)
+ 			{
+ 				if (!IsDisposed)

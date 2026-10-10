@@ -35,6 +35,12 @@ itself still hosts no game files.
 4. **Link.** On each device, open
    `https://belacmu.github.io/towerfall-browser/#gamefiles=https://towerfall-private.<subdomain>.workers.dev/<KEY>/`.
 
+The music bank (`Content/Music/Win/MusicWaveBank.xwb`, 218 MB of the game's 354) is left out of
+that first import: the game starts without music, and a "Load music (208 MB)" button in place of
+Sound downloads it and starts the music (`BrowserHost.StartMusic`). Once it's stored, later visits
+have music from the start. (Starting without it needed an FNA fix: a `WaveBank` whose constructor
+threw crashed the game from its finalizer; see `patches/FNA.patch`.)
+
 Costs: this fits Cloudflare's free tiers for one player. A first import on a device is about 1,600
 R2 reads and Worker requests, a later visit one of each (R2: 10M reads/month free; Workers free plan:
 100k requests/day).

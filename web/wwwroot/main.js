@@ -2,7 +2,7 @@
 //  1. Get the player's game files into OPFS (see gamefiles.js), which .NET mounts at /libsdl.
 //  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
 
-import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, locateDarkWorld, locateGame, syncFortRise } from "./gamefiles.js";
+import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 
@@ -309,7 +309,10 @@ async function ensureGameFiles() {
 	status("Checking game files…");
 	const server = await fromServer(gameFilesHost());
 	if (server) {
-		await copyIn(locateGame(server), "server");
+		const located = locateGame(server);
+		// The music waits for the Music button (see MUSIC in gamefiles.js).
+		await copyIn({ ...located, content: located.content.filter((c) => c.to !== MUSIC) }, "server");
+		pendingMusic = await missingMusic(located);
 		return;
 	}
 	if (await importedGame()) {
@@ -318,6 +321,32 @@ async function ensureGameFiles() {
 		await askForGame();
 	}
 	if (!(await importedGame()).darkWorld) offerDarkWorld();
+}
+
+// While the game runs without its music bank, the Music button stands in for the Sound button: it
+// downloads the bank (showing how big it is, then how far along), has the host start the game's
+// music, and gives the spot back to Sound.
+let pendingMusic = null;
+function offerMusic(host) {
+	const button = $("music");
+	button.textContent = `Load music (${formatMB(pendingMusic.from.size)})`;
+	button.hidden = false;
+	$("mute").hidden = true;
+	button.addEventListener("click", async () => {
+		if (button.disabled) return;
+		button.disabled = true;
+		try {
+			await importMusic(pendingMusic, (done, total) => (button.textContent = `Music: ${Math.floor((100 * done) / total)}%`));
+			await host.StartMusic();
+			button.hidden = true;
+			$("mute").hidden = false;
+		} catch (e) {
+			console.error("Couldn't load the music", e);
+			button.textContent = "Music failed: tap to retry";
+			button.disabled = false;
+		}
+		$("canvas").focus();
+	});
 }
 
 function showProgress(done, total) {
@@ -533,6 +562,7 @@ async function main() {
 	hideOverlay();
 	$("canvas").focus();
 	host = exports.BrowserHost;
+	if (pendingMusic) offerMusic(host);
 	await applyTouch();
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames

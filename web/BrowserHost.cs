@@ -201,6 +201,18 @@ public static partial class BrowserHost
 				RunGameCommand(command);
 			}
 			// (Set on the game thread, which SDL belongs to.)
+			if (startMusic)
+			{
+				startMusic = false;
+				try
+				{
+					StartMusicNow();
+				}
+				catch (Exception e)
+				{
+					Console.WriteLine($"[music] {e}");
+				}
+			}
 			if (Interlocked.Exchange(ref pastedText, null) is string pasted)
 			{
 				SDL3.SDL.SDL_SetClipboardText(pasted);
@@ -244,6 +256,38 @@ public static partial class BrowserHost
 	}
 
 	private static string pastedText;
+
+	// The page's Music button: the music bank arrived after the game started (imports from a file
+	// host leave it out at first), so start the game's music now, on the game thread.
+	[JSExport]
+	internal static Task StartMusic()
+	{
+		startMusic = true;
+		return Task.CompletedTask;
+	}
+
+	private static bool startMusic;
+
+	// Monocle.Music.Initialize() loads the music bank, or leaves music off (all null) if it can't; the
+	// game calls it once at startup, when the bank wasn't there yet. The menu's music request back then
+	// was dropped, so ask again on the main menu; elsewhere music starts with the next song.
+	private static void StartMusicNow()
+	{
+		Assembly tf = game.GetType().Assembly;
+		Type music = tf.GetType("Monocle.Music");
+		music.GetMethod("Initialize", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null);
+		if (music.GetField("audioEngine", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null) == null)
+		{
+			Console.WriteLine("[music] couldn't load the music bank");
+			return;
+		}
+		Console.WriteLine("[music] on");
+		object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
+		if (scene?.GetType().FullName == "TowerFall.MainMenu")
+		{
+			tf.GetType("TowerFall.MainMenu").GetMethod("PlayMenuMusic").Invoke(null, new object[] { false, false });
+		}
+	}
 
 	// On-screen controls (wwwroot/touch.js): a virtual gamepad, plugged in by Init() when enabled
 	// before it, or before the next frame when enabled later.
