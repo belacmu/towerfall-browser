@@ -26,10 +26,13 @@ const TOUCH_KEY = "towerfall.touch";
 
 // How the game reads the stick (TowerFall's XGamepadInput, through FNA's default deadzone): FNA
 // drops 7849/32768 off each axis and rescales the rest to 0..1; then the game runs at |x| >= 0.5,
-// ducks or looks up at |y| >= 0.8, and aims at the stick's angle rounded to 45 degrees (or exactly,
-// with the free aiming variant). A thumb on glass has no rim to push against, so the stick here is
-// about direction, not distance: past a small deadzone it sends a full push, shaped so that the
-// game sees the direction meant (see stickOutput).
+// ducks or looks up at |y| >= 0.8, aims at the stick's angle rounded to 45 degrees, dodges in one
+// of 8 directions, and slides when a dodge on the ground points down at all. So it tells apart 9
+// stick positions, and that's all the stick here sends: centred or one of 8 directions, pushed all
+// the way (see stickOutput). Online, TF.EX sends the stick's exact value, and every change is an
+// input the opponent's game mispredicted and rolls back for; a thumb on glass never keeps still.
+// What this gives up: the free aiming variant aims in 45 degree steps, and Dark World ghosts fly in
+// 8 directions at full speed, as they do on a keyboard.
 const FNA_DEADZONE = 7849 / 32768;
 const DEG = Math.PI / 180;
 
@@ -117,37 +120,29 @@ export function createTouchControls(send) {
 		return { x: dx / r, y: dy / r };
 	}
 
-	// What the stick sends for a finger offset: nothing inside the deadzone, else a full push in 8
-	// even sectors, each doing what that direction does on a pad pushed all the way. Left/right
-	// (within 22.5 degrees of level) run and aim level; the diagonals run and aim diagonally without
-	// ducking (their angle is squeezed below the game's duck threshold); up/down duck or look up and
-	// aim straight. Each sector's angles are squeezed a little clear of the game's 45 degree rounding
-	// so free aiming still follows the thumb, and near the middle of the level and upright sectors
-	// the stick sends exactly level or upright, as a pad's deadzone would, so a wobbly thumb doesn't
-	// aim off or turn a dodge into a slide. Then each axis gets FNA's deadzone added back, so the
-	// game sees this direction rather than one pulled towards the axes.
-	const SECTORS = [
-		// [thumb angle from level, up to], [sent angle from, to], in degrees
-		[12, [0, 0]],
-		[22.5, [0, 20]],
-		[67.5, [25, 52]],
-		[78, [70, 90]],
-		[90, [90, 90]],
-	];
-	function stickOutput(v) {
-		if (Math.hypot(v.x, v.y) < DEADZONE) return { x: 0, y: 0 };
-		const a = Math.atan2(Math.abs(v.y), Math.abs(v.x)) / DEG;
-		let from = 0;
-		let out = 90;
-		for (const [to, [lo, hi]] of SECTORS) {
-			if (a <= to) {
-				out = lo + ((hi - lo) * (a - from)) / (to - from);
-				break;
-			}
-			from = to;
-		}
-		const axis = (g, sign) => (g < 1e-6 ? 0 : sign * Math.min(1, FNA_DEADZONE + g * (1 - FNA_DEADZONE)));
-		return { x: axis(Math.cos(out * DEG), Math.sign(v.x)), y: axis(Math.sin(out * DEG), Math.sign(v.y)) };
+	// Which of the 8 directions the thumb is pushing (0 = right, then clockwise in 45 degree steps), or
+	// -1 for none. Past the deadzone the 8 directions split the circle evenly; a direction holds until
+	// the thumb is HOLD_DEG past its edge, and the push until the thumb is back inside RELEASE of
+	// the deadzone, so a thumb resting on a boundary doesn't flicker between two.
+	const HOLD_DEG = 8;
+	const RELEASE = 0.75;
+	let direction = -1;
+	function stickDirection(v) {
+		const d = Math.hypot(v.x, v.y);
+		if (d < DEADZONE * (direction < 0 ? 1 : RELEASE)) return (direction = -1);
+		const a = Math.atan2(v.y, v.x) / DEG;
+		if (direction >= 0 && Math.abs(((a - direction * 45 + 540) % 360) - 180) <= 22.5 + HOLD_DEG) return direction;
+		return (direction = (Math.round(a / 45) + 8) % 8);
+	}
+
+	// What the stick sends in a direction: a full push, so left/right run and aim level, the
+	// diagonals run and aim diagonally without ducking (at 45 degrees y is 0.71, under the game's
+	// 0.8), and up/down duck or look up and aim straight. Each axis gets FNA's deadzone added back,
+	// so the game sees exactly this.
+	function stickOutput(dir) {
+		if (dir < 0) return { x: 0, y: 0 };
+		const axis = (g) => (Math.abs(g) < 1e-6 ? 0 : Math.sign(g) * (FNA_DEADZONE + Math.abs(g) * (1 - FNA_DEADZONE)));
+		return { x: axis(Math.cos(dir * 45 * DEG)), y: axis(Math.sin(dir * 45 * DEG)) };
 	}
 
 	function render() {
@@ -157,11 +152,16 @@ export function createTouchControls(send) {
 		const p = [...pointers.values()].find((q) => q.kind === "stick");
 		stick.classList.toggle("active", !!p);
 		if (p) {
-			// The knob reaches the rim where the stick starts dragging along.
+			// The knob reaches the rim where the stick starts dragging along, and once pushed points the
+			// way the stick sends.
 			const v = stickValue(p);
+			const dir = stickDirection(v);
 			const r = radius();
+			const d = (Math.hypot(v.x, v.y) / LEASH) * r;
+			const kx = dir < 0 ? (v.x / LEASH) * r : d * Math.cos(dir * 45 * DEG);
+			const ky = dir < 0 ? (v.y / LEASH) * r : d * Math.sin(dir * 45 * DEG);
 			stick.style.cssText = `left:${p.ox}px;top:${p.oy}px;width:${2 * r}px;height:${2 * r}px`;
-			knob.style.transform = `translate(${(v.x / LEASH) * r}px, ${(v.y / LEASH) * r}px)`;
+			knob.style.transform = `translate(${kx}px, ${ky}px)`;
 		} else {
 			stick.style.cssText = "";
 			knob.style.transform = "";
@@ -185,6 +185,7 @@ export function createTouchControls(send) {
 			const cy = (b.top + b.bottom) / 2;
 			if (e.clientX < innerWidth / 2 || Math.hypot(e.clientX - cx, e.clientY - cy) <= radius()) {
 				pointers.set(e.pointerId, { kind: "stick", ox: cx, oy: cy, x: e.clientX, y: e.clientY });
+				direction = -1;
 			}
 		}
 		render();
@@ -220,10 +221,11 @@ export function createTouchControls(send) {
 			let buttons = 0;
 			let x = 0;
 			let y = 0;
+			if (![...pointers.values()].some((p) => p.kind === "stick")) direction = -1;
 			for (const p of pointers.values()) {
 				if (p.kind === "button" && p.el) buttons |= Number(p.el.dataset.bits);
 				if (p.kind === "stick") {
-					const v = stickOutput(stickValue(p));
+					const v = stickOutput(stickDirection(stickValue(p)));
 					x = Math.round(v.x * 32767);
 					y = Math.round(v.y * 32767);
 				}
