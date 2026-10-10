@@ -309,6 +309,12 @@ async function startDotnet() {
 	const { dotnet } = await import("./_framework/dotnet.js");
 	let builder = dotnet.withConfig({});
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
+	// The jiterpreter (the interpreter's JIT to WebAssembly) fills its default function tables
+	// with the game plus FortRise mods; netplay needs all the speed it can get. ?runtime=a,b passes
+	// more Mono options (e.g. --jiterpreter-stats-enabled).
+	const runtimeOptions = ["--jiterpreter-table-size=32768"];
+	for (const o of (new URLSearchParams(location.search).get("runtime") ?? "").split(",").filter(Boolean)) runtimeOptions.push(o);
+	builder = builder.withRuntimeOptions(runtimeOptions);
 	const runtime = await builder.create();
 	const config = runtime.getConfig();
 	const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
