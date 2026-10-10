@@ -33,6 +33,18 @@
       }
     },
     {
+      "name": "towerfall-variant",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8083"
+      ],
+      "port": 8083,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/variant-publish/wwwroot"
+      }
+    },
+    {
       "name": "tfex-server",
       "runtimeExecutable": "node",
       "runtimeArgs": [

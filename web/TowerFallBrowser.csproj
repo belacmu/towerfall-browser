@@ -14,6 +14,8 @@
 		<CompressionEnabled>false</CompressionEnabled>
 		<PublishTrimmed>false</PublishTrimmed>
 		<RunAOTCompilation Condition="'$(RunAOTCompilation)' == ''">false</RunAOTCompilation>
+		<!-- The patched runtime pack (tools/fetch-runtime.sh); -p:RuntimeDir=... builds against another. -->
+		<RuntimeDir Condition="'$(RuntimeDir)' == ''">$(MSBuildProjectDirectory)\..\vendor\runtime</RuntimeDir>
 
 		<NoWarn>IL2026,IL2046,IL2057,IL2062,IL2065,IL2067,IL2070,IL2072,IL2075,IL2087,IL2090</NoWarn>
 		<NoWarn>$(NoWarn),SYSLIB0011,SYSLIB0050,SYSLIB0051,CS0169,CS0219,CS0414,CS0618,CS0649,CS0162,CS0168,CS8981,CA2022,CA1416,CS0108,CS0114</NoWarn>
@@ -48,8 +50,8 @@
 		<NativeFileReference Include="Native\Emscripten.c" />
 		<!-- MonoMod's WebAssembly detours: interpreter hooks (liba) and a hot-reload component that
 		     serves detoured method bodies (hot_reload_detour); both from tools/fetch-runtime.sh. -->
-		<NativeFileReference Include="..\vendor\runtime\liba.o" Condition="Exists('..\vendor\runtime\liba.o')" />
-		<NativeFileReference Include="..\vendor\runtime\hot_reload_detour.o" Condition="Exists('..\vendor\runtime\hot_reload_detour.o')" />
+		<NativeFileReference Include="$(RuntimeDir)\liba.o" Condition="Exists('$(RuntimeDir)\liba.o')" />
+		<NativeFileReference Include="$(RuntimeDir)\hot_reload_detour.o" Condition="Exists('$(RuntimeDir)\hot_reload_detour.o')" />
 		<!-- Netplay: ggrs_ffi (TF.EX's native library, built by tools/build-netplay.sh) and its
 		     browser WebRTC transport. The archive name is the P/Invoke library name. -->
 		<NativeFileReference Include="..\vendor\netplay\ggrs_ffi.a" Condition="Exists('..\vendor\netplay\ggrs_ffi.a')" />
@@ -63,11 +65,20 @@
 	</ItemGroup>
 	<!-- Patched Mono runtime pack (tools/fetch-runtime.sh): MonoMod's WebAssembly detours, which
 	     Harmony-based FortRise mods need, rely on its interpreter changes. -->
-	<PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)\..\vendor\runtime\dotnet')">
-		<MicrosoftNetCoreAppRuntimePackDir>$(MSBuildProjectDirectory)\..\vendor\runtime\dotnet</MicrosoftNetCoreAppRuntimePackDir>
+	<PropertyGroup Condition="Exists('$(RuntimeDir)\dotnet')">
+		<MicrosoftNetCoreAppRuntimePackDir>$(RuntimeDir)\dotnet</MicrosoftNetCoreAppRuntimePackDir>
 		<MicrosoftNetCoreAppRuntimePackRidDir>$(MicrosoftNetCoreAppRuntimePackDir)\runtimes\browser-wasm</MicrosoftNetCoreAppRuntimePackRidDir>
 		<ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
 	</PropertyGroup>
+	<!-- The wasm build lists the runtime's internal calls by running the workload's AOT compiler
+	     (upstream 10.0.x), which doesn't know the ones r58playz's runtime adds; supply the runtime's
+	     own list instead (patches/runtime/, regenerate when the runtime pack changes). -->
+	<PropertyGroup>
+		<RuntimeIcallTable Condition="'$(RuntimeIcallTable)' == ''">$(MSBuildProjectDirectory)\..\patches\runtime\icall-table-r58playz-wasm-10.0.3.json</RuntimeIcallTable>
+	</PropertyGroup>
+	<Target Name="UseRuntimeIcallTable" AfterTargets="_PrepareForBrowserWasmBuildNative" BeforeTargets="_GenerateManagedToNative" Condition="Exists('$(RuntimeIcallTable)')">
+		<Copy SourceFiles="$(RuntimeIcallTable)" DestinationFiles="$(_WasmRuntimeICallTablePath)" SkipUnchangedFiles="true" />
+	</Target>
 	<Target Name="UsePatchedRuntimePack" AfterTargets="ResolveFrameworkReferences" Condition="'$(MicrosoftNetCoreAppRuntimePackDir)' != ''">
 		<ItemGroup>
 			<ResolvedRuntimePack PackageDirectory="$(MicrosoftNetCoreAppRuntimePackDir)"

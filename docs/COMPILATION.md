@@ -181,6 +181,30 @@ nearly all hot code, the frozen patches included, is compiled together. C keeps 
 the interpreter's own compiled code and avoids those transitions, which makes it the more
 promising of the two.
 
+## Option C: r58playz's runtime JIT (2026-10-10)
+
+r58playz (who maintains the runtime fork we use) is building a JIT for Mono on WebAssembly: the
+`wasm-jspi-jit-10.0.3` branch of r58playz/dotnet-runtime compiles hot methods to a WebAssembly
+module each, at run time, and was last updated 2026-10-07.
+- A prebuilt pack (`dotnet-jspi-jit.zip`) is in r58Playz/FNA-WASM-Build release 5ecb4294
+  (2026-07-25).
+- It's configured with `MONO_WASM_JIT_*` environment variables (r58Playz/ikvmcraft's
+  `frontend/src/dotnet/index.ts` has a working set).
+- It's Chromium-only (JSPI).
+
+**Step 1, done: the same release's non-JIT runtime is now our default.** It has their newer
+interpreter inlining and interp↔AOT transitions. It needed:
+- **their Emscripten fixes** (`tools/patch-emsdk.sh` makes a patched copy that the build uses):
+  async html5 callbacks, a WASMFS proxy-worker race that deadlocked FortRise's first patch, and
+  faster OPFS access;
+- **the runtime's own internal-call list**
+  (`patches/runtime/icall-table-r58playz-wasm-10.0.3.json`). The build otherwise lists internal
+  calls with the workload's upstream AOT compiler, which lacks the fork's
+  `TypeBuilder.propagate_parent_native` ("runtime and class libraries are out of sync").
+
+**Next:** measure it, then try the JIT pack (`RUNTIME_ZIP=dotnet-jspi-jit.zip`, plus
+`WASM_ENABLE_JSPI` and `-Wl,--export=__stack_pointer` at link, as their app targets do).
+
 ## Tools for this work
 
 - `patches` host command: the run-time patched methods and their owners.
