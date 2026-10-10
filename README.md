@@ -18,7 +18,9 @@ Next: online multiplayer.
   TowerFall folder, copies the game files into the browser's storage (OPFS), and runs them. Nothing
   is uploaded anywhere. Suitable for GitHub Pages.
 - **Private**: the server also hosts a TowerFall install under `gamefiles/` (with a `manifest.json`),
-  and the page imports it automatically. `tools/stage-gamefiles.sh` sets this up for the dev server.
+  and the page imports it automatically. `tools/stage-gamefiles.sh` sets this up for the dev server;
+  `cloudflare/` does it on Cloudflare (R2 + a Worker behind Access), e.g. for phones
+  (`docs/MOBILE.md`).
 
 The page picks the mode at runtime: private if `gamefiles/manifest.json` exists, otherwise public.
 
