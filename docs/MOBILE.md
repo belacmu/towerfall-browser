@@ -98,9 +98,13 @@ that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
 - The stick is tuned to how TowerFall reads a pad (`XGamepadInput`, after FNA's default
   independent-axes deadzone): it runs at |x| >= 0.5, ducks or looks up at |y| >= 0.8 and rounds aim
   to 45 degrees, which on a linear touch stick meant dragging ~60% of the radius to start running.
-  Instead, past a small deadzone the stick sends a full push in 8 even sectors (left/right run,
-  diagonals run and aim diagonally without ducking, up/down duck or look up), with FNA's deadzone
-  added back so the game sees the angle meant; free aiming still follows the thumb within a sector.
+  Instead, past a small deadzone the stick sends a full push in one of 8 directions (left/right
+  run, diagonals run and aim diagonally without ducking, up/down duck or look up), with FNA's
+  deadzone added back so the game sees exactly level, 45 degrees or upright. That's every stick
+  position the game tells apart; online, TF.EX sends the stick's exact value, and each change is a
+  rollback for the opponent, so the stick sends nothing finer. A direction holds until the thumb is
+  8 degrees past its edge, and the knob shows the direction being sent. Given up: the free aiming
+  variant aims in 45 degree steps, and Dark World ghosts fly in 8 directions at full speed.
 - The `keys` host command (`towerfallCommand("keys")`) logs connected gamepads' state too.
 
 The controls and the page's handling of them are tested headless with multi-touch input; the game
