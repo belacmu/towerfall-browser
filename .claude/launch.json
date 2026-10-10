@@ -68,6 +68,41 @@
         "8787"
       ],
       "port": 8787
+    },
+    {
+      "name": "towerfall-webkit",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8086",
+        "--diag"
+      ],
+      "port": 8086
+    },
+    {
+      "name": "towerfall-variant-webkit",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8087",
+        "--diag"
+      ],
+      "port": 8087,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/variant-publish/wwwroot"
+      }
+    },
+    {
+      "name": "towerfall-baseline",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8084"
+      ],
+      "port": 8084,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/baseline-publish/wwwroot"
+      }
     }
   ]
 }
