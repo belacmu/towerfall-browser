@@ -74,10 +74,20 @@ tools/stage-gamefiles.sh --clear  # back to public mode
 
 The published site is `web/bin/Release/net10.0/publish/wwwroot`.
 
+**Branch previews.** GitHub Pages serves `main` at the root and one other branch at
+[`preview/`](https://belacmu.github.io/towerfall-browser/preview/), for trying a branch (on a phone
+too) before merging it. Pushing a branch puts it there (the last branch pushed wins; about 5
+minutes), and pushes to `main` keep it. It's the same origin as the main site, so it shares its
+browser storage: imported game files, the game file host link, settings and saves. Its start screen
+says which branch and commit it is. A branch made before this existed needs `main` merged in first
+(its pushes only start the Preview workflow if it has `.github/workflows/preview.yml`); or run the
+Deploy workflow by hand with the branch name (or `none`) as `preview`.
+
 URL options: `?nointro` skips the intro, `?mute` / `?unmute`, `?uncapped` ticks on every display
 frame, `?autoplay` starts without the Play click (tests), `?mods=Name,Name` sets the enabled mods,
 `?allmods` also lists untested mods, `?touch` / `?notouch` override the Controls button,
-`?fortrise` / `?vanilla` force FortRise on or off, and `?debug` shows FortRise's debug log
+`?fortrise` / `?vanilla` force FortRise on or off, `?mode=versus|quest|darkworld|trials` goes from
+the main menu straight to that mode's archer select, and `?debug` shows FortRise's debug log
 (including its Harmony patches).
 
 Keyboard: arrows move/aim, C jump/confirm, X shoot/cancel, Shift dodge/catch (rebindable in Options).
