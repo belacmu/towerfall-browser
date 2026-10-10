@@ -184,5 +184,8 @@ in the Simulator with `xcrun simctl openurl booted "http://localhost:8081/?mute&
   touches anywhere on the page: iOS Safari ignores the CSS for some of these, so `main.js` also
   cancels the touch events' defaults. Safari's own edge swipes, like back, can't be blocked from a
   page.)
+- **Stick design**: the stick looks like an analog stick, but it's an 8-way switch with hysteresis
+  (step 2); only the knob snapping between directions hints at that. A redesign could show how it
+  works: e.g. a ring with 8 marked directions that light up as they're sent, or a d-pad look.
 - **Bluetooth controllers** may already work through SDL's Gamepad API backend; if not, the same
   virtual-gamepad bridge can forward them from the page.
