@@ -95,7 +95,10 @@ public static class TfexPatches
 		return false;
 	}
 
-	// What TF.EX's NETPLAY button does (version check, then the netplay menu), for scripted tests.
+	public const string EnteringNetplay = "entering netplay";
+
+	// What TF.EX's NETPLAY button does (version check, then the netplay menu), for scripted tests
+	// and ?mode=online / quickplay.
 	public static string EnterNetplay(object mainMenu)
 	{
 		Assembly patches = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetType("TF.EX.Patchs.Engine.TFGamePatch") != null);
@@ -108,7 +111,7 @@ public static class TfexPatches
 			requested.SetValue(null, true);
 			state.SetValue(mainMenu, Enum.ToObject(state.PropertyType, 62)); // TF.EX's MenuState.NetplaySelect
 		}) });
-		return "entering netplay";
+		return EnteringNetplay;
 	}
 
 	private static bool FetchLatestVersion(ref Task<Version> __result)
