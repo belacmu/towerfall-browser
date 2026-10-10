@@ -50,6 +50,17 @@ for (const type of ["touchmove", "selectstart", "contextmenu", "gesturestart", "
 	document.addEventListener(type, (e) => playing() && e.preventDefault(), { passive: false });
 }
 
+// Branch previews (deploy.yml) are served under preview/ with a preview.json saying what they are.
+fetch("preview.json", { cache: "no-store" })
+	.then((r) => (r.ok ? r.json() : null))
+	.then((p) => {
+		if (!p?.branch) return;
+		$("previewNote").textContent = `Preview of branch ${p.branch} (${p.sha.slice(0, 7)}), not the main site`;
+		$("previewNote").hidden = false;
+		document.title = `TowerFall (preview: ${p.branch})`;
+	})
+	.catch(() => {});
+
 // Mute is remembered per browser. ?mute / ?unmute in the URL override it.
 const MUTE_KEY = "towerfall.muted";
 let muted = (() => {
