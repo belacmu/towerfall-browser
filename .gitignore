@@ -7,3 +7,4 @@ gamefiles/
 *.DS_Store
 reference/
 msbuild.binlog
+.wrangler/

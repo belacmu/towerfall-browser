@@ -212,11 +212,35 @@ function formatMB(bytes) {
 	return `${(bytes / 1048576).toFixed(0)} MB`;
 }
 
-// Private deployments host the game files (and the server's copy always wins); otherwise use
-// what the player imported before, or ask them for their TowerFall folder.
+// A private file host (cloudflare/, see docs/MOBILE.md) is given once as #gamefiles=<base URL>
+// and remembered per browser; #gamefiles= forgets it. In the fragment, it never reaches this
+// site's server.
+const HOST_KEY = "towerfall.gamefilesHost";
+function gameFilesHost() {
+	const given = location.hash.match(/[#&]gamefiles=([^&]*)/);
+	if (given) {
+		let host = decodeURIComponent(given[1]);
+		if (host && !host.endsWith("/")) host += "/";
+		try {
+			if (host) localStorage.setItem(HOST_KEY, host);
+			else localStorage.removeItem(HOST_KEY);
+		} catch {}
+		history.replaceState(null, "", location.pathname + location.search);
+		return host;
+	}
+	try {
+		return localStorage.getItem(HOST_KEY) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+// Servers that host the game files (a private file host, or this one in private mode) win;
+// otherwise use what the player imported before, or ask them for their TowerFall folder. An
+// unreachable file host falls back to the copy already imported from it.
 async function ensureGameFiles() {
 	status("Checking game files…");
-	const server = await fromServer();
+	const server = await fromServer(gameFilesHost());
 	if (server) {
 		await copyIn(locateGame(server), "server");
 		return;
