@@ -14,6 +14,10 @@ namespace TowerFallBrowser;
 //  - It can't update itself in the browser: the site pins TF.EX and ships updates
 //    (tools/fetch-tfex.sh), so applying an update fails with a note saying so.
 //  - Lobby codes it copies also go on the system clipboard (SDL's is internal to the page).
+//  - Its server: the official one turns browsers away, so the page names ours (TFEX_SERVER, see
+//    main.js) and TF.EX's OFFICIAL setting (its default, and RESET in its options) means that one
+//    here, shown as BROWSER. LOCAL and CUSTOM choices stand. ?tfexserver= (TFEX_SERVER_FORCE) picks
+//    the server for the visit whatever is saved, until it's changed in the options.
 public static class TfexPatches
 {
 	private const string LatestRelease = "https://api.github.com/repos/Fcornaire/TF.EX/releases/latest";
@@ -40,7 +44,55 @@ public static class TfexPatches
 				postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(ClipboardSet), all)));
 		}
 		StateSpeedups.Patch(harmony);
+		PatchServer(harmony);
 		Console.WriteLine("[netplay] TF.EX patched for the browser (update check via the GitHub API, no self-update).");
+	}
+
+	private const string BrowserLabel = "BROWSER";
+	private static string browserServer;
+	private static FieldInfo preferencesServer;
+	private static string officialServer;
+
+	private static void PatchServer(Harmony harmony)
+	{
+		browserServer = Environment.GetEnvironmentVariable("TFEX_SERVER");
+		if (string.IsNullOrEmpty(browserServer)) return;
+		Type preferences = FindType("TF.EX.Domain.Models.NetplayPreferences");
+		Type settings = FindType("TF.EX.NetplaySettings");
+		preferencesServer = preferences?.GetField("Server", BindingFlags.Public | BindingFlags.Static);
+		officialServer = preferences?.GetField("OfficialServer", BindingFlags.Public | BindingFlags.Static)?.GetRawConstantValue() as string;
+		if (preferencesServer == null || officialServer == null || settings == null)
+		{
+			Console.WriteLine("[netplay] couldn't find TF.EX's server setting; leaving it alone");
+			return;
+		}
+		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+		harmony.Patch(settings.GetMethod("Apply", all),
+			postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(SettingsApplied), all)));
+		MethodInfo display = FindType("TF.EX.ServerOptionsButton")?.GetMethod("Display", all);
+		if (display != null)
+		{
+			harmony.Patch(display, prefix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(DisplayServer), all)));
+		}
+		if (Environment.GetEnvironmentVariable("TFEX_SERVER_FORCE") == "1") preferencesServer.SetValue(null, browserServer);
+		else SettingsApplied();
+		Console.WriteLine($"[netplay] TF.EX server: {preferencesServer.GetValue(null)}");
+	}
+
+	private static Type FindType(string name) =>
+		AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(name)).FirstOrDefault(t => t != null);
+
+	// TF.EX copies its saved settings into NetplayPreferences here; OFFICIAL becomes ours.
+	private static void SettingsApplied()
+	{
+		if ((string)preferencesServer.GetValue(null) == officialServer) preferencesServer.SetValue(null, browserServer);
+	}
+
+	private static bool DisplayServer(string server, ref string __result)
+	{
+		if (server != browserServer) return true;
+		__result = BrowserLabel;
+		return false;
 	}
 
 	// What TF.EX's NETPLAY button does (version check, then the netplay menu), for scripted tests.

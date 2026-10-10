@@ -1,0 +1,23 @@
+# Protocol tests for our TF.EX-compatible server (cloudflare/tfex-server, docs/MULTIPLAYER.md).
+name: TF.EX server
+
+on:
+  push:
+    branches: [main]
+    paths: ["cloudflare/tfex-server/**"]
+  pull_request:
+    paths: ["cloudflare/tfex-server/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node cloudflare/tfex-server/test.mjs
