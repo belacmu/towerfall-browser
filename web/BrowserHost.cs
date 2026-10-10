@@ -265,6 +265,11 @@ public static partial class BrowserHost
 				Console.WriteLine("[command] keys: logging pressed keys for 10 s");
 				return;
 			}
+			if (words[0] == "bench")
+			{
+				Bench.Run();
+				return;
+			}
 			if (words[0] == "netplay")
 			{
 				object menu = game.GetType().GetProperty("Scene")?.GetValue(game);

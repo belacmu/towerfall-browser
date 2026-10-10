@@ -107,6 +107,13 @@ public static class Profiler
 	public static string Report(int frames)
 	{
 		var sb = new StringBuilder();
+		if (StateSpeedups.GetAllCalls > 0)
+		{
+			double total = StateSpeedups.GetAllTicks * 1000.0 / Stopwatch.Frequency;
+			sb.Append($"\n[profile]   {total / frames,7:0.00} ms/frame {StateSpeedups.GetAllCalls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {StateSpeedups.GetAllCalls,6} calls  StateSpeedups.GetAll");
+			StateSpeedups.GetAllTicks = 0;
+			StateSpeedups.GetAllCalls = 0;
+		}
 		foreach (Entry e in entries.Values.Where(e => e.Calls > 0).OrderByDescending(e => e.Ticks))
 		{
 			double ms = e.Ticks * 1000.0 / Stopwatch.Frequency / frames;

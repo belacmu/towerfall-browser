@@ -1,5 +1,5 @@
 diff --git a/global.json b/global.json
-index 27925aa2..fbe71f5d 100644
+index 27925aa..fbe71f5 100644
 --- a/global.json
 +++ b/global.json
 @@ -1,7 +1,7 @@
@@ -12,7 +12,7 @@ index 27925aa2..fbe71f5d 100644
    },
    "msbuild-sdks": {
 diff --git a/src/MonoMod.Core/IDetourFactory.cs b/src/MonoMod.Core/IDetourFactory.cs
-index 9fcc4aac..34d46f4a 100644
+index 9fcc4aa..34d46f4 100644
 --- a/src/MonoMod.Core/IDetourFactory.cs
 +++ b/src/MonoMod.Core/IDetourFactory.cs
 @@ -94,12 +94,12 @@ namespace MonoMod.Core
@@ -31,7 +31,7 @@ index 9fcc4aac..34d46f4a 100644
          private static IDetourFactory? lazyCurrent;
          /// <summary>
 diff --git a/src/MonoMod.Core/Interop/Unix.cs b/src/MonoMod.Core/Interop/Unix.cs
-index 92f3adbe..987ef0d9 100644
+index 92f3adb..987ef0d 100644
 --- a/src/MonoMod.Core/Interop/Unix.cs
 +++ b/src/MonoMod.Core/Interop/Unix.cs
 @@ -6,37 +6,37 @@ namespace MonoMod.Core.Interop
@@ -84,7 +84,7 @@ index 92f3adbe..987ef0d9 100644
  
          [DllImport(LibC, CallingConvention = CallingConvention.Cdecl, EntryPoint = "__errno_location")]
 diff --git a/src/MonoMod.Core/Platforms/PlatformTriple.cs b/src/MonoMod.Core/Platforms/PlatformTriple.cs
-index c2713384..a839e0b2 100644
+index c271338..a839e0b 100644
 --- a/src/MonoMod.Core/Platforms/PlatformTriple.cs
 +++ b/src/MonoMod.Core/Platforms/PlatformTriple.cs
 @@ -70,6 +70,8 @@ namespace MonoMod.Core.Platforms
@@ -113,7 +113,7 @@ index c2713384..a839e0b2 100644
              // TODO: check that `from` and `to` are actually argument- and return-compatible.
              // When we use this method internally, all the necessary checks are already performed
 diff --git a/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs b/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs
-index f72c399e..13ddffee 100644
+index f72c399..13ddffe 100644
 --- a/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs
 +++ b/src/MonoMod.Core/Platforms/Runtimes/MonoRuntime.cs
 @@ -211,7 +211,9 @@ namespace MonoMod.Core.Platforms.Runtimes
@@ -129,7 +129,7 @@ index f72c399e..13ddffee 100644
          {
 diff --git a/src/MonoMod.Core/Platforms/Systems/EmscriptenSystem.cs b/src/MonoMod.Core/Platforms/Systems/EmscriptenSystem.cs
 new file mode 100644
-index 00000000..1039cb7a
+index 0000000..1039cb7
 --- /dev/null
 +++ b/src/MonoMod.Core/Platforms/Systems/EmscriptenSystem.cs
 @@ -0,0 +1,392 @@
@@ -527,7 +527,7 @@ index 00000000..1039cb7a
 +}
 diff --git a/src/MonoMod.Core/Platforms/WasmDetourFactory.cs b/src/MonoMod.Core/Platforms/WasmDetourFactory.cs
 new file mode 100644
-index 00000000..743cd420
+index 0000000..743cd42
 --- /dev/null
 +++ b/src/MonoMod.Core/Platforms/WasmDetourFactory.cs
 @@ -0,0 +1,358 @@
@@ -890,7 +890,7 @@ index 00000000..743cd420
 +    }
 +}
 diff --git a/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs b/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs
-index b87a1a69..cdb05696 100644
+index b87a1a6..cdb0569 100644
 --- a/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs
 +++ b/src/MonoMod.Patcher/InlineRT/MonoModRulesManager.cs
 @@ -13,6 +13,8 @@ namespace MonoMod.InlineRT
@@ -976,7 +976,7 @@ index b87a1a69..cdb05696 100644
              return rules;
          }
 diff --git a/src/MonoMod.Patcher/MonoMod.Patcher.csproj b/src/MonoMod.Patcher/MonoMod.Patcher.csproj
-index 83aa8816..1c62d49b 100644
+index 83aa881..1c62d49 100644
 --- a/src/MonoMod.Patcher/MonoMod.Patcher.csproj
 +++ b/src/MonoMod.Patcher/MonoMod.Patcher.csproj
 @@ -16,6 +16,9 @@
@@ -990,7 +990,7 @@ index 83aa8816..1c62d49b 100644
  
    <!-- Dependencies -->
 diff --git a/src/MonoMod.Patcher/MonoModder.cs b/src/MonoMod.Patcher/MonoModder.cs
-index fb3d2e17..89736d26 100644
+index fb3d2e1..89736d2 100644
 --- a/src/MonoMod.Patcher/MonoModder.cs
 +++ b/src/MonoMod.Patcher/MonoModder.cs
 @@ -859,12 +859,21 @@ namespace MonoMod
@@ -1045,7 +1045,7 @@ index fb3d2e17..89736d26 100644
              }
          }
 diff --git a/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs b/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
-index 834e2a62..057293b6 100644
+index 834e2a6..057293b 100644
 --- a/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
 +++ b/src/MonoMod.RuntimeDetour/DetourManager.Managed.cs
 @@ -460,7 +460,7 @@ namespace MonoMod.RuntimeDetour
@@ -1066,7 +1066,7 @@ index 834e2a62..057293b6 100644
                          throw;
                      }
 diff --git a/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs b/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs
-index cd39d995..2c0994a5 100644
+index cd39d99..2c0994a 100644
 --- a/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs
 +++ b/src/MonoMod.RuntimeDetour/DetourManager.Shared.cs
 @@ -309,7 +309,7 @@ namespace MonoMod.RuntimeDetour
@@ -1079,7 +1079,7 @@ index cd39d995..2c0994a5 100644
          }
  
 diff --git a/src/MonoMod.Utils/ArchitectureKind.cs b/src/MonoMod.Utils/ArchitectureKind.cs
-index bf4c5520..69c2de44 100644
+index bf4c552..69c2de4 100644
 --- a/src/MonoMod.Utils/ArchitectureKind.cs
 +++ b/src/MonoMod.Utils/ArchitectureKind.cs
 @@ -41,5 +41,9 @@ namespace MonoMod.Utils
@@ -1093,7 +1093,7 @@ index bf4c5520..69c2de44 100644
      }
  }
 diff --git a/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs b/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs
-index 74e7dffa..aebb8b7d 100644
+index 74e7dff..aebb8b7 100644
 --- a/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs
 +++ b/src/MonoMod.Utils/DMDGenerators/DMDEmit.cs
 @@ -108,6 +108,7 @@ namespace MonoMod.Utils
@@ -1228,8 +1228,170 @@ index 74e7dffa..aebb8b7d 100644
                  continue;
              }
          }
+diff --git a/src/MonoMod.Utils/DirectAccessors.cs b/src/MonoMod.Utils/DirectAccessors.cs
+new file mode 100644
+index 0000000..e7ef7c3
+--- /dev/null
++++ b/src/MonoMod.Utils/DirectAccessors.cs
+@@ -0,0 +1,52 @@
++using System;
++using System.Reflection;
++using System.Reflection.Emit;
++
++namespace MonoMod.Utils
++{
++    // TowerFall browser: field getters/setters as tiny dynamic methods (ldfld/stfld), for DynamicData.
++    internal static class DirectAccessors
++    {
++        public static Func<object?, object?> Getter(FieldInfo field)
++        {
++            var owner = field.DeclaringType!;
++            if (field.FieldType.IsPointer || field.FieldType.IsByRef || field.FieldType.IsByRefLike)
++                throw new NotSupportedException();
++            var method = new DynamicMethod("DynamicData_get_" + field.Name, typeof(object), new[] { typeof(object) }, owner, skipVisibility: true);
++            var il = method.GetILGenerator();
++            if (field.IsStatic)
++            {
++                il.Emit(OpCodes.Ldsfld, field);
++            }
++            else
++            {
++                il.Emit(OpCodes.Ldarg_0);
++                il.Emit(owner.IsValueType ? OpCodes.Unbox : OpCodes.Castclass, owner);
++                il.Emit(OpCodes.Ldfld, field);
++            }
++            if (field.FieldType.IsValueType)
++                il.Emit(OpCodes.Box, field.FieldType);
++            il.Emit(OpCodes.Ret);
++            return (Func<object?, object?>)method.CreateDelegate(typeof(Func<object?, object?>));
++        }
++
++        public static Action<object?, object?> Setter(FieldInfo field)
++        {
++            var owner = field.DeclaringType!;
++            if (field.IsInitOnly || field.IsLiteral || field.FieldType.IsPointer || field.FieldType.IsByRef || field.FieldType.IsByRefLike)
++                throw new NotSupportedException();
++            var method = new DynamicMethod("DynamicData_set_" + field.Name, null, new[] { typeof(object), typeof(object) }, owner, skipVisibility: true);
++            var il = method.GetILGenerator();
++            if (!field.IsStatic)
++            {
++                il.Emit(OpCodes.Ldarg_0);
++                il.Emit(owner.IsValueType ? OpCodes.Unbox : OpCodes.Castclass, owner);
++            }
++            il.Emit(OpCodes.Ldarg_1);
++            il.Emit(OpCodes.Unbox_Any, field.FieldType);
++            il.Emit(field.IsStatic ? OpCodes.Stsfld : OpCodes.Stfld, field);
++            il.Emit(OpCodes.Ret);
++            return (Action<object?, object?>)method.CreateDelegate(typeof(Action<object?, object?>));
++        }
++    }
++}
+diff --git a/src/MonoMod.Utils/DynamicData.cs b/src/MonoMod.Utils/DynamicData.cs
+index e4bd323..8ff2add 100644
+--- a/src/MonoMod.Utils/DynamicData.cs
++++ b/src/MonoMod.Utils/DynamicData.cs
+@@ -47,15 +47,25 @@ namespace MonoMod.Utils
+                         {
+                             try
+                             {
+-                                var fastInvoker = field.GetFastInvoker();
+-                                Getters[name] = (obj) => fastInvoker(obj);
+-                                Setters[name] = (obj, value) => fastInvoker(obj, value);
++                                // TowerFall browser: direct accessors (one small method each) are an
++                                // order of magnitude faster than fast invokers under Mono's interpreter.
++                                Getters[name] = DirectAccessors.Getter(field);
++                                Setters[name] = DirectAccessors.Setter(field);
+                             }
+                             catch
+                             {
+-                                // eat the exception and fall back to pure reflection
+-                                Getters[name] = field.GetValue;
+-                                Setters[name] = field.SetValue;
++                                try
++                                {
++                                    var fastInvoker = field.GetFastInvoker();
++                                    Getters[name] = (obj) => fastInvoker(obj);
++                                    Setters[name] = (obj, value) => fastInvoker(obj, value);
++                                }
++                                catch
++                                {
++                                    // eat the exception and fall back to pure reflection
++                                    Getters[name] = field.GetValue;
++                                    Setters[name] = field.SetValue;
++                                }
+                             }
+                         }
+                     }
+@@ -158,7 +168,7 @@ namespace MonoMod.Utils
+         public Dictionary<string, object?> Data => _Data.Data;
+ 
+         public bool IsAlive => Weak == null || Weak.SafeGetIsAlive();
+-        public object? Target => Weak?.SafeGetTarget();
++        public object? Target => KeepAlive ?? Weak?.SafeGetTarget();
+         public Type TargetType { get; private set; }
+ 
+         public DynamicData(Type type)
+@@ -223,7 +233,21 @@ namespace MonoMod.Utils
+             OnInitialize?.Invoke(this, type, obj);
+         }
+ 
++        // TowerFall browser: callers read many members of one object in a row.
++        [ThreadStatic] private static object? _LastForObj;
++        [ThreadStatic] private static DynamicData? _LastForData;
++
+         public static DynamicData For(object obj)
++        {
++            if (obj != null && ReferenceEquals(obj, _LastForObj) && _LastForData != null)
++                return _LastForData;
++            var result = ForSlow(obj!);
++            _LastForObj = obj;
++            _LastForData = result;
++            return result;
++        }
++
++        private static DynamicData ForSlow(object obj)
+         {
+             lock (_DynamicDataMap)
+             {
+@@ -318,8 +342,10 @@ namespace MonoMod.Utils
+         public bool TryGet(string name, out object? value)
+         {
+             var target = Target;
++            Func<object?, object?>? cb;
+ 
+-            if (_Data.Getters.TryGetValue(name, out var cb))
++            // TowerFall browser: the per-object tables are almost always empty; skip their lookups.
++            if (_Data.Getters.Count != 0 && _Data.Getters.TryGetValue(name, out cb))
+             {
+                 value = cb(target);
+                 return true;
+@@ -331,11 +357,12 @@ namespace MonoMod.Utils
+                 return true;
+             }
+ 
+-            if (_Data.Data.TryGetValue(name, out value))
++            if (_Data.Data.Count != 0 && _Data.Data.TryGetValue(name, out value))
+             {
+                 return true;
+             }
+ 
++            value = null;
+             return false;
+         }
+ 
+@@ -354,8 +381,9 @@ namespace MonoMod.Utils
+         public void Set(string name, object? value)
+         {
+             var target = Target;
++            Action<object?, object?>? cb;
+ 
+-            if (_Data.Setters.TryGetValue(name, out var cb))
++            if (_Data.Setters.Count != 0 && _Data.Setters.TryGetValue(name, out cb))
+             {
+                 cb(target, value);
+                 return;
 diff --git a/src/MonoMod.Utils/DynamicMethodDefinition.cs b/src/MonoMod.Utils/DynamicMethodDefinition.cs
-index 668ae990..5472783d 100644
+index 668ae99..5472783 100644
 --- a/src/MonoMod.Utils/DynamicMethodDefinition.cs
 +++ b/src/MonoMod.Utils/DynamicMethodDefinition.cs
 @@ -211,7 +211,9 @@ namespace MonoMod.Utils
@@ -1244,7 +1406,7 @@ index 668ae990..5472783d 100644
              if (dmdType is not null)
              {
 diff --git a/src/MonoMod.Utils/Interop/Unix.cs b/src/MonoMod.Utils/Interop/Unix.cs
-index 4aaff10a..e1d5867f 100644
+index 4aaff10..e1d5867 100644
 --- a/src/MonoMod.Utils/Interop/Unix.cs
 +++ b/src/MonoMod.Utils/Interop/Unix.cs
 @@ -11,19 +11,14 @@ namespace MonoMod.Utils.Interop
@@ -1294,7 +1456,7 @@ index 4aaff10a..e1d5867f 100644
              throw new PlatformNotSupportedException("Could not find the library containing dynamic linker functions");
          }
 diff --git a/src/MonoMod.Utils/Logs/DebugLog.cs b/src/MonoMod.Utils/Logs/DebugLog.cs
-index 278132ac..175f9761 100644
+index 278132a..175f976 100644
 --- a/src/MonoMod.Utils/Logs/DebugLog.cs
 +++ b/src/MonoMod.Utils/Logs/DebugLog.cs
 @@ -181,6 +181,8 @@ namespace MonoMod.Logs
@@ -1307,7 +1469,7 @@ index 278132ac..175f9761 100644
              if (Debugger.IsAttached)
              {
 diff --git a/src/MonoMod.Utils/OSKind.cs b/src/MonoMod.Utils/OSKind.cs
-index e5aedd6a..3a8c37a7 100644
+index e5aedd6..3a8c37a 100644
 --- a/src/MonoMod.Utils/OSKind.cs
 +++ b/src/MonoMod.Utils/OSKind.cs
 @@ -47,6 +47,14 @@
@@ -1326,7 +1488,7 @@ index e5aedd6a..3a8c37a7 100644
          /// <summary>
          /// A Windows kernel.
 diff --git a/src/MonoMod.Utils/PlatformDetection.cs b/src/MonoMod.Utils/PlatformDetection.cs
-index 0fdd8f6b..927ae69a 100644
+index 0fdd8f6..927ae69 100644
 --- a/src/MonoMod.Utils/PlatformDetection.cs
 +++ b/src/MonoMod.Utils/PlatformDetection.cs
 @@ -123,6 +123,11 @@ namespace MonoMod.Utils
@@ -1364,7 +1526,7 @@ index 0fdd8f6b..927ae69a 100644
  
                  MMDbgLog.Trace($"uname() detected architecture info: {os} {arch}");
 diff --git a/src/MonoMod.Utils/ReflectionHelper.cs b/src/MonoMod.Utils/ReflectionHelper.cs
-index 66e975bc..e3d2865d 100644
+index 66e975b..e3d2865 100644
 --- a/src/MonoMod.Utils/ReflectionHelper.cs
 +++ b/src/MonoMod.Utils/ReflectionHelper.cs
 @@ -44,6 +44,114 @@ namespace MonoMod.Utils

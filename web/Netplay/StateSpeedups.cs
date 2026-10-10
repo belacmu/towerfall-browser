@@ -108,7 +108,28 @@ public static class StateSpeedups
 	}
 
 	// LevelExtensions.GetAll<T>(level): level.Layers.SelectMany(l => l.Value.Entities).Where(e => e is T).
+	// Time spent in GetAll and its calls, reported by the profiler.
+	public static long GetAllTicks;
+	public static int GetAllCalls;
+
 	public static IEnumerable<T> GetAll<T>(object level)
+	{
+		long started = Profiler.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+		try
+		{
+			return GetAllCore<T>(level);
+		}
+		finally
+		{
+			if (started != 0)
+			{
+				GetAllTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
+				GetAllCalls++;
+			}
+		}
+	}
+
+	private static IEnumerable<T> GetAllCore<T>(object level)
 	{
 		if (!capturing || snapshotLevel != level)
 		{
