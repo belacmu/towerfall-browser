@@ -101,6 +101,31 @@ $("mute").addEventListener("click", () => {
 });
 applyMute();
 
+// Safari (iPhone especially) only starts audio from inside a tap, click or key press: an
+// AudioContext created or resumed anywhere else stays suspended. SDL creates its own after Play and
+// retries resume() from a timer, which Chrome allows and Safari doesn't, so the game was silent.
+// Instead, the Play click creates SDL's context (SDL uses Module.SDL3.audioContext when it's there),
+// and any later tap resumes it whenever it isn't running (iOS also suspends it on interruptions,
+// such as a call).
+function unlockAudio() {
+	const Module = self.wasm?.Module;
+	if (!Module || typeof AudioContext === "undefined") return;
+	Module.SDL3 ??= {};
+	try {
+		Module.SDL3.audioContext ??= new AudioContext();
+	} catch (e) {
+		console.warn("Couldn't create an AudioContext", e);
+		return;
+	}
+	if (Module.SDL3.audioContext.state !== "running") Module.SDL3.audioContext.resume().catch(() => {});
+}
+for (const type of ["pointerup", "touchend", "click", "keydown"]) {
+	document.addEventListener(type, unlockAudio, { capture: true, passive: true });
+}
+// iPhone's silent switch mutes web audio unless the page plays like a media app; the Sound button
+// is the control here.
+if (navigator.audioSession) navigator.audioSession.type = "playback";
+
 // The mouse cursor shows over the game while it moves and hides after a few seconds still (the
 // game itself hides it for good; see canvas.canvas in index.html).
 const CURSOR_IDLE_MS = 3000;
