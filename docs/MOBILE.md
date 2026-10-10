@@ -71,6 +71,12 @@ Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely fi
   (Safari 17+) so the silent switch doesn't mute the game; the Sound button does that. With sound
   off it's `"ambient"`, which mixes with other apps' audio: as "playback", the silently running
   game stopped music playing in other apps.
+- **Sound: effects** (the Sound button steps off → effects → on) is for playing over your own
+  music: the game's sound effects without its music (`GameMusic.cs` holds the XACT "Music"
+  category at zero), as `"ambient"`. Ambient audio obeys the silent switch, and no session type
+  avoids that while mixing: in WebKit (`DOMAudioSession.cpp`, `AudioSessionIOS.mm`) `ambient` and
+  `transient` are AVAudioSession's Ambient, `transient-solo` SoloAmbient, `playback` Playback and
+  `play-and-record` PlayAndRecord, and none gets `MixWithOthers`. Only a native app could have both.
 
 ## Step 2: touch controls (virtual gamepad)
 

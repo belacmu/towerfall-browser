@@ -127,6 +127,7 @@ public static partial class BrowserHost
 				towerFall = game.GetType().Assembly;
 			}
 			TouchGamepad.Init(game);
+			GameMusic.Init(game);
 
 			// The constructor's GameData.CheckForDLC() also requires Steam to report the DLC as
 			// installed. In the browser, having the Dark World content is enough.
@@ -232,6 +233,7 @@ public static partial class BrowserHost
 				lastKeys = now;
 			}
 			TouchGamepad.Update();
+			GameMusic.Update();
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
 			frameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - frameStart;
@@ -288,6 +290,15 @@ public static partial class BrowserHost
 		{
 			tf.GetType("TowerFall.MainMenu").GetMethod("PlayMenuMusic").Invoke(null, new object[] { false, false });
 		}
+	}
+
+	// The game's music on or off (the page's "Effects" sound setting: sound effects only), see
+	// GameMusic. Before Init() it applies from the start.
+	[JSExport]
+	internal static Task SetGameMusic(bool on)
+	{
+		GameMusic.SetOn(on);
+		return Task.CompletedTask;
 	}
 
 	// On-screen controls (wwwroot/touch.js) shown or hidden: a virtual gamepad, plugged in by Init()

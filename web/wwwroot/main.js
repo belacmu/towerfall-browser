@@ -61,28 +61,41 @@ fetch("preview.json", { cache: "no-store" })
 	})
 	.catch(() => {});
 
-// Mute is remembered per browser. ?mute / ?unmute in the URL override it.
-const MUTE_KEY = "towerfall.muted";
-let muted = (() => {
+// The Sound button steps through off, effects and on, remembered per browser; ?mute, ?effects and
+// ?unmute in the URL override it. "Effects" is the game's sound effects without its music, to play
+// over music from another app (GameMusic.cs turns the game's music off).
+const SOUND_KEY = "towerfall.sound";
+const SOUNDS = ["off", "effects", "on"];
+let sound = (() => {
 	const params = new URLSearchParams(location.search);
-	if (params.has("mute")) return true;
-	if (params.has("unmute")) return false;
+	if (params.has("mute")) return "off";
+	if (params.has("effects")) return "effects";
+	if (params.has("unmute")) return "on";
 	try {
-		return localStorage.getItem(MUTE_KEY) !== "0";
-	} catch {
-		return true;
-	}
+		const saved = localStorage.getItem(SOUND_KEY);
+		if (SOUNDS.includes(saved)) return saved;
+		// Before "effects", the button was on/off.
+		if (localStorage.getItem("towerfall.muted") === "0") return "on";
+	} catch {}
+	return "off";
 })();
 
-// Muting zeroes a gain node between SDL's output and the speakers instead of suspending the
+// Sound off zeroes a gain node between SDL's output and the speakers instead of suspending the
 // AudioContext, so the game's audio keeps running (and stays in sync) while silent. On iPhone the
-// audio session follows the Sound button (Safari 17+): with sound on, "playback", like a media app,
-// so the silent switch doesn't mute the game (the Sound button does); with sound off, "ambient",
-// which mixes with other apps' audio. As "playback", the running (silent) game stopped music or
-// podcasts playing in other apps.
-function applyMute() {
-	$("mute").textContent = muted ? "Sound: off" : "Sound: on";
-	if (navigator.audioSession) navigator.audioSession.type = muted ? "ambient" : "playback";
+// audio session follows the setting (Safari 17+): with sound on, "playback", like a media app, so
+// the silent switch doesn't mute the game (the Sound button does); otherwise "ambient", which mixes
+// with other apps' audio (as "playback", the game stopped music playing in other apps, even while
+// silent). Ambient sound obeys the silent switch, so "effects" is silent on a phone set to silent:
+// Safari has no session type that both mixes and ignores the switch.
+function applySound() {
+	const button = $("mute");
+	button.textContent = { off: "Sound: off", effects: "Sound: effects", on: "Sound: on" }[sound];
+	button.title = {
+		off: "Sound is off",
+		effects: "Sound effects only, without the game's music, mixed with audio from other apps (on iPhone, the silent switch mutes them)",
+		on: "Sound and music are on",
+	}[sound];
+	if (navigator.audioSession) navigator.audioSession.type = sound === "on" ? "playback" : "ambient";
 	const SDL3 = self.wasm?.Module?.SDL3;
 	const ctx = SDL3?.audioContext;
 	const node = SDL3?.audio_playback?.scriptProcessorNode;
@@ -93,18 +106,19 @@ function applyMute() {
 		node.disconnect();
 		node.connect(node.muteGain);
 	}
-	node.muteGain.gain.value = muted ? 0 : 1;
+	node.muteGain.gain.value = sound === "off" ? 0 : 1;
 }
 
 $("mute").addEventListener("click", () => {
-	muted = !muted;
+	sound = SOUNDS[(SOUNDS.indexOf(sound) + 1) % SOUNDS.length];
 	try {
-		localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+		localStorage.setItem(SOUND_KEY, sound);
 	} catch {}
-	applyMute();
+	applySound();
+	host?.SetGameMusic(sound !== "effects").catch(console.error);
 	$("canvas").focus();
 });
-applyMute();
+applySound();
 
 // Safari (iPhone especially) only starts audio from inside a tap, click or key press: an
 // AudioContext created or resumed anywhere else stays suspended. SDL creates its own after Play and
@@ -583,8 +597,10 @@ async function main() {
 	$("dw").hidden = true;
 	stopDarkWorldOffer();
 
-	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch.
+	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch; with sound
+	// set to effects, the game's music stays off from the start.
 	await exports.BrowserHost.ShowTouchControls(touchOn);
+	await exports.BrowserHost.SetGameMusic(sound !== "effects");
 
 	if (useFortRise()) {
 		status("Getting FortRise…");
@@ -643,8 +659,8 @@ async function main() {
 			fail(e);
 			return;
 		}
-		// SDL creates its AudioContext lazily, so keep the mute state applied.
-		applyMute();
+		// SDL creates its AudioContext lazily, so keep the sound setting applied.
+		applySound();
 		if (keepRunning) {
 			requestAnimationFrame(frame);
 		} else if (await exports.BrowserHost.WantsRestart()) {
