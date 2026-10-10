@@ -126,7 +126,7 @@ public static partial class BrowserHost
 				game = FortRiseLauncher.Start(GameAssembly, FortRiseDir, fortriseVersion, noIntro, loggers);
 				towerFall = game.GetType().Assembly;
 			}
-			TouchGamepad.AttachIfEnabled();
+			TouchGamepad.Init(game);
 
 			// The constructor's GameData.CheckForDLC() also requires Steam to report the DLC as
 			// installed. In the browser, having the Dark World content is enough.
@@ -290,12 +290,12 @@ public static partial class BrowserHost
 		}
 	}
 
-	// On-screen controls (wwwroot/touch.js): a virtual gamepad, plugged in by Init() when enabled
-	// before it, or before the next frame when enabled later.
+	// On-screen controls (wwwroot/touch.js) shown or hidden: a virtual gamepad, plugged in by Init()
+	// when shown before it, or before the next frame when shown later (see TouchGamepad).
 	[JSExport]
-	internal static Task EnableTouchGamepad()
+	internal static Task ShowTouchControls(bool shown)
 	{
-		TouchGamepad.Enabled = true;
+		TouchGamepad.Show(shown);
 		return Task.CompletedTask;
 	}
 
@@ -424,9 +424,14 @@ public static partial class BrowserHost
 		{
 			if (words[0] == "keys")
 			{
-				// Logs the keys (and gamepad state) FNA reports, for the next 10 seconds (input debugging).
+				// Logs the keys (and gamepad state) FNA reports, for the next 10 seconds (input debugging),
+				// and the game's players' inputs.
 				keysFrames = 600;
 				Console.WriteLine("[command] keys: logging pressed keys and gamepads for 10 s");
+				if (towerFall.GetType("TowerFall.TFGame").GetField("PlayerInputs")?.GetValue(null) is Array players)
+				{
+					Console.WriteLine($"[keys] players: {string.Join(", ", players.Cast<object>().Select(p => p?.GetType().Name ?? "-"))}");
+				}
 				return;
 			}
 			if (words[0] == "patches")
