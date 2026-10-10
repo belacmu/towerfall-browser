@@ -101,6 +101,8 @@ public static partial class BrowserHost
 				}
 			}
 			Directory.SetCurrentDirectory("/");
+			// Before the game reads its sprite XML (see XmlSnapshotLists).
+			XmlSnapshotLists.Install();
 
 			if (fortriseVersion == null)
 			{
