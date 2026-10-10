@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 		<title>TowerFall</title>
 		<style>
 			html, body {
@@ -26,6 +26,8 @@
 			canvas.canvas {
 				width: 100vw !important;
 				height: 100vh !important;
+				/* Phones: the visible height, without the browser's toolbars. */
+				height: 100dvh !important;
 				object-fit: contain;
 				image-rendering: pixelated;
 				outline: none;
@@ -81,6 +83,71 @@
 				opacity: 0.6;
 			}
 			#mute:hover { opacity: 1; }
+			/* On-screen controls (touch.js). */
+			#touch {
+				position: fixed;
+				inset: 0;
+				z-index: 5;
+				touch-action: none;
+				user-select: none;
+				-webkit-user-select: none;
+				-webkit-touch-callout: none;
+				--size: min(19vmin, 88px);
+				--edge: max(16px, env(safe-area-inset-right), env(safe-area-inset-left));
+			}
+			#touch .tbutton {
+				position: absolute;
+				width: var(--size);
+				height: var(--size);
+				border-radius: 50%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(255, 255, 255, 0.08);
+				color: rgba(255, 255, 255, 0.6);
+				font-size: 12px;
+				text-transform: uppercase;
+			}
+			#touch .tbutton.down { background: rgba(232, 197, 71, 0.45); border-color: #e8c547; color: #fff; }
+			#touch .jump { right: var(--edge); bottom: 16px; }
+			#touch .shoot { right: calc(var(--edge) + var(--size) * 1.15); bottom: calc(16px + var(--size) * 0.35); }
+			#touch .dodge { right: calc(var(--edge) + var(--size) * 0.35); bottom: calc(16px + var(--size) * 1.15); }
+			#touch .back, #touch .pause {
+				top: max(8px, env(safe-area-inset-top));
+				width: calc(var(--size) * 0.75);
+				height: calc(var(--size) * 0.45);
+				border-radius: 8px;
+				font-size: 10px;
+			}
+			#touch .back { left: var(--edge); }
+			#touch .pause { left: calc(var(--edge) + var(--size) * 0.9); }
+			/* The stick appears where the left thumb lands; until then a faint one marks its spot,
+			   where the left thumb rests: across from the middle of the buttons on the right, a little
+			   lower. Its radius (0.8 * --size) is also in touch.js. */
+			#touch .stick {
+				position: absolute;
+				left: calc(var(--edge) + var(--size));
+				top: calc(100% - 16px - var(--size) * 0.9);
+				width: calc(var(--size) * 1.6);
+				height: calc(var(--size) * 1.6);
+				transform: translate(-50%, -50%);
+				box-sizing: border-box;
+				border-radius: 50%;
+				border: 2px solid rgba(255, 255, 255, 0.2);
+				pointer-events: none;
+			}
+			#touch .stick.active { border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.05); }
+			#touch .knob {
+				position: absolute;
+				left: 50%;
+				top: 50%;
+				width: 44%;
+				height: 44%;
+				margin: -22% 0 0 -22%;
+				border-radius: 50%;
+				background: rgba(255, 255, 255, 0.25);
+			}
 			button {
 				font: inherit;
 				background: #222;
