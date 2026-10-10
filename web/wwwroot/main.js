@@ -622,6 +622,14 @@ async function main() {
 		await exports.BrowserHost.RunCommand(line);
 	}
 
+	// A thread that finishes leaves its worker parked for reuse, and loading (FortRise, content)
+	// uses many threads, so idle workers pile up. In Safari each costs about 8 MB of the tab's
+	// memory (iOS reloads tabs that use too much): keep two spare; a new thread gets a fresh one.
+	setInterval(() => {
+		const idle = self.wasm.Module.PThread?.unusedWorkers;
+		while (idle?.length > 2) idle.pop().terminate();
+	}, 10000);
+
 	const frame = async (now) => {
 		behind = Math.min(behind + (now - last), TICK_MS * 4);
 		last = now;

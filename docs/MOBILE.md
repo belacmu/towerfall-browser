@@ -130,7 +130,7 @@ the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process
 |---|---|
 | page loaded, .NET started, before Play | ~450 MB |
 | vanilla, title screen | ~910 MB |
-| TF.EX, title screen | ~1,150–1,230 MB → **~800 MB** (music streamed, see below) |
+| TF.EX, title screen | ~1,150–1,230 MB → ~770–830 MB (music streamed) → **~730 MB** (idle workers trimmed) |
 | TF.EX, first launch (import, FortRise patch) | ~1,600 MB |
 | an instant replay | +70 MB for a moment (and ~90 MB in WebKit's GPU process) |
 
@@ -149,10 +149,19 @@ the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process
   block ahead, which would delay every sound by a block. Checked with `--diag`'s gap count (blocks
   with runs of exact silence): 0 in Safari (Simulator) and Chrome, music playing, 60 fps. The
   main thread also no longer does the mixing work.
-- The WebAssembly heap is 540–630 MB at the TF.EX title; WebKit adds roughly 400–600 MB on top
-  (JavaScript, workers). Chrome holds the same title in about 850 MB in total.
-- The jiterpreter (`?runtime=--no-jiterpreter-traces-enabled` turns it off) costs about
-  150–200 MB in WebKit: its thousands of small compiled modules. Off, netplay would be much slower.
+- **Where the rest goes** (Safari in the Simulator, TF.EX title, 2026-10-10): the WebAssembly heap
+  is 512 MB reserved; WebKit adds roughly 300 MB on top:
+  - **Worker threads, ~7–8 MB each** (measured by starting 10 idle ones: +76 MB). Each is its own
+    JavaScript engine with the runtime's scripts. The title runs 11–12 threads; online play 15.
+    Threads that finish leave their workers parked for reuse (8 after loading); the page now keeps
+    two spare and terminates the rest (`main.js`), about 45–60 MB.
+  - **The jiterpreter's traces**: 2,143 at the title, each a separate small WebAssembly module
+    (2.2 MB of code in all), costing roughly 150–200 MB in WebKit (with traces off the tab was that
+    much smaller). Its threshold (5,000 hits) is left alone: raising it would delay compiling the
+    game's per-tick code, which online play needs fast.
+  - **Its function tables**: `--jiterpreter-table-size=32768` gives every thread its own tables of
+    that size; 4,096 measured about 30 MB less. Left at 32,768 for headroom: traces that don't fit
+    don't get compiled, and online play adds more over time.
 - The initial heap size (`EmccInitialHeapSize`, 512 MB) makes no difference: 128 MB measured the
   same, the heap just grows to what's used.
 - Rollbacks during round results rebuild the results HUD (megabytes each, see MULTIPLAYER.md):
