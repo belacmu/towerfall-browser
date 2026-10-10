@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.JavaScript;
@@ -426,6 +427,23 @@ public static partial class BrowserHost
 				// Logs the keys (and gamepad state) FNA reports, for the next 10 seconds (input debugging).
 				keysFrames = 600;
 				Console.WriteLine("[command] keys: logging pressed keys and gamepads for 10 s");
+				return;
+			}
+			if (words[0] == "patches")
+			{
+				// Methods patched at run time (Harmony): compiled-ahead code couldn't honour these.
+				var patched = HarmonyLib.Harmony.GetAllPatchedMethods().ToList();
+				Console.WriteLine($"[patches] {patched.Count} methods patched at run time");
+				foreach (var group in patched.GroupBy(m => m.DeclaringType?.Assembly.GetName().Name).OrderByDescending(g => g.Count()))
+				{
+					Console.WriteLine($"[patches] {group.Key}: {group.Count()}");
+				}
+				foreach (var m in patched.OrderBy(m => m.DeclaringType?.FullName))
+				{
+					var info = HarmonyLib.Harmony.GetPatchInfo(m);
+					var owners = string.Join(",", info.Owners.Distinct());
+					Console.WriteLine($"[patches]   {m.DeclaringType?.FullName}::{m.Name} ({owners})");
+				}
 				return;
 			}
 			if (words[0] == "bench")
