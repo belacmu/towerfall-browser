@@ -206,6 +206,16 @@ export async function importGame(located, source, onProgress) {
 	return info;
 }
 
+// The entries of content that aren't (completely) in browser storage yet.
+export async function missingFiles(content) {
+	const root = await gameRoot(true);
+	const out = [];
+	for (const c of content) {
+		if ((await existingSize(root, c.to)) !== c.from.size) out.push(c);
+	}
+	return out;
+}
+
 // The located music bank if it isn't (completely) in browser storage yet, else null.
 export async function missingMusic(located) {
 	const music = located.content.find((c) => c.to === MUSIC);

@@ -2,7 +2,7 @@
 //  1. Get the player's game files into OPFS (see gamefiles.js), which .NET mounts at /libsdl.
 //  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
 
-import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
+import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 
@@ -310,8 +310,15 @@ async function ensureGameFiles() {
 	const server = await fromServer(gameFilesHost());
 	if (server) {
 		const located = locateGame(server);
-		// The music waits for the Music button (see MUSIC in gamefiles.js).
-		await copyIn({ ...located, content: located.content.filter((c) => c.to !== MUSIC) }, "server");
+		// Nothing downloads until the player picks: everything, or all but the music (MUSIC in
+		// gamefiles.js), which the Load music button can get later.
+		const missing = await missingFiles(located.content);
+		const game = located.content.filter((c) => c.to !== MUSIC);
+		const missingGame = missing.filter((c) => c.to !== MUSIC);
+		if (missingGame.length > 0 || !(await importedGame())) {
+			const all = missingGame.length > 0 ? await chooseDownload(missing, missingGame) : false;
+			await copyIn({ ...located, content: all ? located.content : game }, "server");
+		}
 		pendingMusic = await missingMusic(located);
 		return;
 	}
@@ -321,6 +328,30 @@ async function ensureGameFiles() {
 		await askForGame();
 	}
 	if (!(await importedGame()).darkWorld) offerDarkWorld();
+}
+
+// Asks whether to download everything that's missing or all but the music; resolves to true for
+// everything. Shows the download sizes.
+function chooseDownload(missing, missingGame) {
+	const size = (list) => formatMB(list.reduce((n, c) => n + c.from.size, 0));
+	status("Load TowerFall?");
+	$("bar").hidden = true;
+	$("downloadAll").textContent = `Load game (${size(missing)})`;
+	$("downloadNoMusic").textContent = `Load game without music (${size(missingGame)})`;
+	// (Only one choice when the music is already stored.)
+	const choice = missing.length > missingGame.length;
+	$("downloadNoMusic").hidden = !choice;
+	$("downloadNoMusicHint").hidden = !choice;
+	$("download").hidden = false;
+	return new Promise((resolve) => {
+		const pick = (all) => () => {
+			$("download").hidden = true;
+			$("bar").hidden = false;
+			resolve(all);
+		};
+		$("downloadAll").addEventListener("click", pick(true), { once: true });
+		$("downloadNoMusic").addEventListener("click", pick(false), { once: true });
+	});
 }
 
 // While the game runs without its music bank, the Music button stands in for the Sound button: it
