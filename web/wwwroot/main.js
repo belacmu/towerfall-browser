@@ -508,6 +508,19 @@ async function startDotnet() {
 	// objects, not the nursery size, so 4x fewer of them (measured: 27 -> 7 per 5 s in the rollback
 	// sync test) means fewer frame hitches for ~12 MB of memory.
 	builder = builder.withEnvironmentVariable("MONO_GC_PARAMS", "nursery-size=16m");
+	// ?jit: settings for r58playz's runtime wasm JIT (builds with -p:WasmJit=true; the knob set
+	// r58Playz/ikvmcraft ships). Ignored by other runtimes.
+	if (new URLSearchParams(location.search).has("jit")) {
+		const knobs = {
+			AUTO: "1", RESIDUAL: "0", VIRTUAL: "1", ISLAND: "1", INLINE_AOT: "1", VCALL_AOT: "1",
+			VCALL_INLINE_IC: "1", VCALL_AOT_IC: "1", AOTCONST: "1", EH: "1", FINALLY: "1", AOT_RESIDUAL: "1",
+			LDADDR_VTYPE: "1", VTYPE_SCALAR: "1", VTYPE_SCALAR_REF: "1", STATS: "1", NAMES: "1", STOREGUARD: "0",
+			OBJGUARD: "0", PINALL: "0", OUTARG: "1", VCALL_WAYS: "4", VCALL_AOT_WAYS: "4", SP_GLOBAL: "1",
+			VERBOSE: "0", PROFILE_FAST: "0", ARITY: "0",
+			OPT: "inline,consprop,copyprop,deadce,branch,alias-analysis,cfold,loop", THRESHOLD: "500", ISLAND_BUDGET: "192",
+		};
+		for (const [k, v] of Object.entries(knobs)) builder = builder.withEnvironmentVariable(`MONO_WASM_JIT_${k}`, v);
+	}
 	// ?env=NAME=value;NAME=value sets runtime environment variables (e.g. MONO_GC_PARAMS), for tuning.
 	for (const pair of (new URLSearchParams(location.search).get("env") ?? "").split(";").filter(Boolean)) {
 		const at = pair.indexOf("=");

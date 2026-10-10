@@ -527,10 +527,10 @@ index 0000000..1039cb7
 +}
 diff --git a/src/MonoMod.Core/Platforms/WasmDetourFactory.cs b/src/MonoMod.Core/Platforms/WasmDetourFactory.cs
 new file mode 100644
-index 0000000..743cd42
+index 0000000..00b13d9
 --- /dev/null
 +++ b/src/MonoMod.Core/Platforms/WasmDetourFactory.cs
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,392 @@
 +using MonoMod.Utils;
 +using System;
 +using System.Reflection;
@@ -553,6 +553,39 @@ index 0000000..743cd42
 +        /// Simple names of assemblies whose methods should never be detoured (as source or target). Detours involving them are silently nullified.
 +        /// </summary>
 +        public static HashSet<string> Blacklist = new();
++
++        // r58playz's runtime wasm JIT (MONO_WASM_JIT_AUTO) can't compile a detoured method: the stub below ends in
++        // calli 0xF0F0F0F0, which only the patched interpreter understands (the JIT reads it as a signature token and
++        // asserts). Each detoured method is added to MONO_WASM_JIT_NO_METHOD ("Ns.Class:Name/argc", read at every
++        // JIT decision) so it stays in the interpreter; the stub only forwards, and its target can still be JIT-compiled.
++        private static readonly bool JitEnabled = Environment.GetEnvironmentVariable("MONO_WASM_JIT_AUTO") == "1";
++        private static readonly HashSet<string> JitDenied = new();
++        private static readonly string? JitDeniedInitial = Environment.GetEnvironmentVariable("MONO_WASM_JIT_NO_METHOD");
++
++        // UTF-8 strings as pointers: MonoMod.Core disables runtime marshalling.
++        [DllImport("Emscripten")]
++        private static extern int set_native_env(IntPtr name, IntPtr value);
++
++        private static void KeepInInterpreter(MethodBase method)
++        {
++            if (!JitEnabled || method.DeclaringType is not { } type)
++                return;
++            // Mono gives nested types an empty namespace and the JIT matches the class part against "Class" or
++            // "Ns.Class" (generic types keep their `N suffix, as Type.Name does).
++            string cls = type.IsNested || string.IsNullOrEmpty(type.Namespace) ? type.Name : type.Namespace + "." + type.Name;
++            string entry = $"{cls}:{method.Name}/{method.GetParameters().Length}";
++            lock (JitDenied)
++            {
++                if (!JitDenied.Add(entry))
++                    return;
++                string list = string.Join(",", JitDenied);
++                IntPtr name = Marshal.StringToCoTaskMemUTF8("MONO_WASM_JIT_NO_METHOD");
++                IntPtr value = Marshal.StringToCoTaskMemUTF8(string.IsNullOrEmpty(JitDeniedInitial) ? list : JitDeniedInitial + "," + list);
++                set_native_env(name, value); // setenv copies both
++                Marshal.FreeCoTaskMem(name);
++                Marshal.FreeCoTaskMem(value);
++            }
++        }
 +
 +        private static class LibA
 +        {
@@ -766,6 +799,7 @@ index 0000000..743cd42
 +            public void Apply()
 +            {
 +                if (Strategy != null) return;
++                KeepInInterpreter(Source);
 +
 +                IntPtr source = triple.Runtime.GetMethodHandle(Source).GetFunctionPointer();
 +                IntPtr target = triple.Runtime.GetMethodHandle(Target).GetFunctionPointer();

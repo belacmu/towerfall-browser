@@ -36,6 +36,12 @@ int mount_fetch_file(const char *path) {
 	return close(fd);
 }
 
+// .NET's Environment.SetEnvironmentVariable only changes its own copy; the runtime reads the real
+// environment (MonoMod's WasmDetourFactory sets MONO_WASM_JIT_NO_METHOD this way).
+int set_native_env(const char *name, const char *value) {
+	return setenv(name, value, 1);
+}
+
 // needed because of upstream mono bug: https://github.com/dotnet/runtime/issues/112262
 void *SDL_CreateWindow(char *title, int w, int h, uint64_t flags);
 void *SDL__CreateWindow(char *title, int w, int h, unsigned int flags) {

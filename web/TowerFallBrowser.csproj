@@ -15,6 +15,8 @@
 		<PublishTrimmed>false</PublishTrimmed>
 		<RunAOTCompilation Condition="'$(RunAOTCompilation)' == ''">false</RunAOTCompilation>
 		<!-- The patched runtime pack (tools/fetch-runtime.sh); -p:RuntimeDir=... builds against another. -->
+		<!-- -p:WasmJit=true: build with r58playz's runtime wasm JIT (Chromium only; docs/COMPILATION.md). -->
+		<RuntimeDir Condition="'$(RuntimeDir)' == '' and '$(WasmJit)' == 'true'">$(MSBuildProjectDirectory)\..\vendor\runtime-jit</RuntimeDir>
 		<RuntimeDir Condition="'$(RuntimeDir)' == ''">$(MSBuildProjectDirectory)\..\vendor\runtime</RuntimeDir>
 
 		<NoWarn>IL2026,IL2046,IL2057,IL2062,IL2065,IL2067,IL2070,IL2072,IL2075,IL2087,IL2090</NoWarn>
@@ -87,6 +89,20 @@
 		<Message Text="Using patched runtime pack: %(ResolvedRuntimePack.PackageDirectory)" Importance="High" />
 	</Target>
 
+	<!-- What r58playz's JIT runtime needs at link time (as in its own BrowserWasmApp.targets):
+	     JSPI, and the C stack pointer exported for the modules the JIT emits (Emscripten drops it at
+	     -O3 without patches/emsdk/4-keep-stack-pointer-export.patch). SIMD is off: the JIT has no
+	     vector support, so in code it compiles Vector128.IsHardwareAccelerated is false, and .NET's
+	     vectorized helpers throw PlatformNotSupportedException when an interpreted caller (which saw
+	     it true) calls a JIT-compiled one (e.g. in string.Split). -->
+	<PropertyGroup Condition="'$(WasmJit)' == 'true'">
+		<EmccExtraLDFlags>$(EmccExtraLDFlags) -Wl,--export=__stack_pointer</EmccExtraLDFlags>
+		<WasmEnableSIMD>false</WasmEnableSIMD>
+	</PropertyGroup>
+	<ItemGroup Condition="'$(WasmJit)' == 'true'">
+		<EmscriptenEnvVars Include="WASM_ENABLE_JSPI=1" />
+		<EmccExportedFunction Include="_diag_trace_request;_diag_trace_take_request;_diag_set_step;_diag_get_step;_diag_set_step2;_diag_get_step2;_diag_stream_append;_diag_stream_len;_diag_stream_ptr;_diag_stream_mark_done;_diag_stream_is_done;_diag_stream_reset" />
+	</ItemGroup>
 	<Import Project="FortRise\FortRise.References.props" />
 	<!-- Ahead-of-time compiled build (tools/build.sh AOT=1; see docs/COMPILATION.md, option A).
 	     Only the site's own assemblies are compiled; the game and mods load at run time and stay

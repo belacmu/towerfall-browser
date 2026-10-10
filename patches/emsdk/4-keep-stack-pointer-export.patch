@@ -1,0 +1,21 @@
+--- a/tools/building.py	2026-10-10 15:46:45
++++ b/tools/building.py	2026-10-10 15:46:45
+@@ -763,7 +763,8 @@
+     exports = settings.WASM_EXPORTS
+   else:
+     # Ignore exported wasm globals.  Those get inlined directly into the JS code.
+-    exports = sorted(set(settings.WASM_EXPORTS) - set(settings.WASM_GLOBAL_EXPORTS))
++    # Except __stack_pointer: code compiled at run time (Mono's wasm JIT) imports the live global.
++    exports = sorted(set(settings.WASM_EXPORTS) - (set(settings.WASM_GLOBAL_EXPORTS) - {'__stack_pointer'}))
+ 
+   extra_info = '{ "exports": [' + ','.join(f'["{asmjs_mangle(x)}", "{x}"]' for x in exports) + ']}'
+ 
+@@ -774,7 +775,7 @@
+   for item in graph:
+     if 'export' in item:
+       export = asmjs_mangle(item['export'])
+-      if settings.EXPORT_ALL or export in required_symbols:
++      if settings.EXPORT_ALL or export in required_symbols or item['export'] == '__stack_pointer':
+         item['root'] = True
+   # fix wasi imports TODO: support wasm stable with an option?
+   WASI_IMPORTS = {
