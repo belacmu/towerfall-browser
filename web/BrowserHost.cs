@@ -188,11 +188,12 @@ public static partial class BrowserHost
 				TfexPatches.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
-			// then e.g. "test" is the base game's own command).
+			// then e.g. "test" is the base game's own command)...
 			if (!commandsReady)
 			{
 				menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
-				commandsReady = menuFrames > 300;
+				// ...and TowerFall's background loading (game data, default match settings) is done.
+				commandsReady = menuFrames > 300 && towerFall.GetType("TowerFall.TFGame")?.GetProperty("Loaded", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is true;
 			}
 			if (startMode != null) ApplyStartMode();
 			while (commandsReady && commands.TryDequeue(out string[] command))
@@ -380,17 +381,6 @@ public static partial class BrowserHost
 				return;
 			}
 			Console.WriteLine($"[command] {string.Join(' ', words)}");
-			// TF.EX's "test" reads the Versus settings, which only exist once the Versus menu has
-			// been opened; give it the defaults (scripted tests go straight from the title).
-			if (words[0] == "test")
-			{
-				Type mainMenu = towerFall.GetType("TowerFall.MainMenu");
-				FieldInfo versus = mainMenu?.GetField("VersusMatchSettings", BindingFlags.Public | BindingFlags.Static);
-				if (versus != null && versus.GetValue(null) == null)
-				{
-					versus.SetValue(null, towerFall.GetType("TowerFall.MatchSettings")?.GetMethod("GetDefaultVersus", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null));
-				}
-			}
 			// What the command prints goes to the console's screen buffer (newest first); echo it.
 			var output = console.GetType().GetField("drawCommands", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(console) as List<string>;
 			output?.Clear();
