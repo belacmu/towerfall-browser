@@ -10,6 +10,8 @@
 //   curl 'localhost:9400/A/evalworkers' --data 'js'  evaluate in every worker thread
 //   curl 'localhost:9400/quit'
 // Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400]
+// (Another driver at the same time: a different --port and different player names, which name
+// the profiles.)
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -138,7 +140,8 @@ async function press(p, k, hold = 80) {
 }
 
 const players = {};
-for (const [i, name] of names.entries()) players[name] = await launch(name, 9341 + i);
+// Chrome's debugging ports follow --port (9341.. for the default 9400), so two drivers can run at once.
+for (const [i, name] of names.entries()) players[name] = await launch(name, port - 59 + i);
 console.log(`Players ${names.join(", ")} loading ${url}; control on http://localhost:${port}/`);
 
 http.createServer(async (req, res) => {

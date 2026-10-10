@@ -26,3 +26,152 @@ index 3e87889..d44315a 100644
  				),
  				sizeof(float) * (
  					(EXTRA_DECODE_PADDING - decode_count) *
+diff --git a/src/FAudio_platform_sdl3.c b/src/FAudio_platform_sdl3.c
+index f45892e..2e66b18 100644
+--- a/src/FAudio_platform_sdl3.c
++++ b/src/FAudio_platform_sdl3.c
+@@ -36,6 +36,14 @@ typedef struct SDLAudioDevice
+ 	SDL_AudioStream *stream;
+ 	float *stagingBuffer;
+ 	size_t stagingLen;
++#ifdef __EMSCRIPTEN__
++	SDL_Thread *mixThread;
++	SDL_AtomicInt mixRunning;
++	Uint64 quantumNS;
++	Uint64 blockNS;
++	int blockBytes;
++	int marginBytes;
++#endif
+ } SDLAudioDevice;
+ 
+ /* Mixer Thread */
+@@ -67,6 +75,62 @@ static void FAudio_INTERNAL_MixCallback(
+ 	}
+ }
+ 
++#ifdef __EMSCRIPTEN__
++
++/* In the browser SDL runs the playback callback on the page's main thread (in
++ * Web Audio's callback, or on a timer while audio is suspended). The main
++ * thread must never wait, but mixing can: streaming wave banks read their file
++ * as they play, and a storage (OPFS) read from the main thread never completes
++ * in Safari, freezing the page. So FAudio mixes on its own thread into the
++ * device's stream, and the main thread only takes finished samples.
++ *
++ * Web Audio takes a whole block at a time (4096 frames, ~85 ms). Mixing the
++ * next block all at once would delay every sound by a block, so the thread
++ * paces itself: after each take it mixes in step with the clock, so the next
++ * block is complete just before it's due (plus a two-quantum margin).
++ */
++static int FAudio_INTERNAL_MixThread(void *userdata)
++{
++	SDLAudioDevice *dev = (SDLAudioDevice*) userdata;
++	Uint64 taken = SDL_GetTicksNS();
++	int last = 0;
++
++	while (SDL_GetAtomicInt(&dev->mixRunning))
++	{
++		const Uint64 now = SDL_GetTicksNS();
++		const int queued = SDL_GetAudioStreamQueued(dev->stream);
++		Uint64 elapsed;
++		int wanted;
++
++		if (queued < last - dev->blockBytes / 2)
++		{
++			taken = now; /* the device just took a block */
++		}
++		elapsed = SDL_min(now - taken, dev->blockNS);
++		wanted = dev->marginBytes + (int) ((Uint64) dev->blockBytes * elapsed / dev->blockNS);
++
++		if (dev->audio->active && queued < wanted)
++		{
++			FAudio_zero(dev->stagingBuffer, dev->stagingLen);
++			FAudio_INTERNAL_UpdateEngine(dev->audio, dev->stagingBuffer);
++			SDL_PutAudioStreamData(
++				dev->stream,
++				dev->stagingBuffer,
++				(int) dev->stagingLen
++			);
++			last = queued + (int) dev->stagingLen;
++		}
++		else
++		{
++			last = queued;
++			SDL_DelayNS(dev->quantumNS / 4);
++		}
++	}
++	return 0;
++}
++
++#endif /* __EMSCRIPTEN__ */
++
+ /* Platform Functions */
+ 
+ static void FAudio_INTERNAL_PrioritizeDirectSound()
+@@ -205,12 +269,22 @@ void FAudio_PlatformInit(
+ 	result->stagingBuffer = (float*) SDL_malloc(result->stagingLen);
+ 
+ 	/* Open the device (or at least try to) */
++#ifdef __EMSCRIPTEN__
++	/* No callback: FAudio_INTERNAL_MixThread feeds the stream */
++	result->stream = SDL_OpenAudioDeviceStream(
++		devID,
++		&spec,
++		NULL,
++		NULL
++	);
++#else
+ 	result->stream = SDL_OpenAudioDeviceStream(
+ 		devID,
+ 		&spec,
+ 		FAudio_INTERNAL_MixCallback,
+ 		result
+ 	);
++#endif
+ 
+ 	/* Write up the received format for the engine */
+ 	WriteWaveFormatExtensible(
+@@ -226,12 +300,43 @@ void FAudio_PlatformInit(
+ 
+ 	/* Start the thread! */
+ 	SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(result->stream));
++#ifdef __EMSCRIPTEN__
++	{
++		SDL_AudioSpec deviceSpec;
++		int deviceFrames = 0;
++		if (	!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(result->stream), &deviceSpec, &deviceFrames) ||
++			deviceFrames <= 0 ||
++			deviceSpec.freq <= 0	)
++		{
++			deviceSpec.freq = spec.freq;
++			deviceFrames = 4096;
++		}
++		/* The device's block, in our sample rate */
++		result->blockBytes = (int) (
++			(Sint64) deviceFrames * spec.freq / deviceSpec.freq *
++			spec.channels * sizeof(float)
++		);
++		result->blockNS = SDL_NS_PER_SECOND * (Uint64) deviceFrames / deviceSpec.freq;
++		result->marginBytes = (int) result->stagingLen * 2;
++	}
++	result->quantumNS = SDL_NS_PER_SECOND * (Uint64) wantSamples / spec.freq;
++	SDL_SetAtomicInt(&result->mixRunning, 1);
++	result->mixThread = SDL_CreateThread(
++		FAudio_INTERNAL_MixThread,
++		"FAudioMix",
++		result
++	);
++#endif
+ }
+ 
+ void FAudio_PlatformQuit(void* platformDevice)
+ {
+ 	SDLAudioDevice *dev = (SDLAudioDevice*) platformDevice;
+ 	SDL_AudioDeviceID devID = SDL_GetAudioStreamDevice(dev->stream);
++#ifdef __EMSCRIPTEN__
++	SDL_SetAtomicInt(&dev->mixRunning, 0);
++	SDL_WaitThread(dev->mixThread, NULL);
++#endif
+ 	SDL_DestroyAudioStream(dev->stream);
+ 	SDL_CloseAudioDevice(devID);
+ 	SDL_free(dev->stagingBuffer);
