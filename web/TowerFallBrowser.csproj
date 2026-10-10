@@ -70,6 +70,15 @@
 		<MicrosoftNetCoreAppRuntimePackRidDir>$(MicrosoftNetCoreAppRuntimePackDir)\runtimes\browser-wasm</MicrosoftNetCoreAppRuntimePackRidDir>
 		<ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
 	</PropertyGroup>
+	<!-- The wasm build lists the runtime's internal calls by running the workload's AOT compiler
+	     (upstream 10.0.x), which doesn't know the ones r58playz's runtime adds; supply the runtime's
+	     own list instead (patches/runtime/, regenerate when the runtime pack changes). -->
+	<PropertyGroup>
+		<RuntimeIcallTable Condition="'$(RuntimeIcallTable)' == ''">$(MSBuildProjectDirectory)\..\patches\runtime\icall-table-r58playz-wasm-10.0.3.json</RuntimeIcallTable>
+	</PropertyGroup>
+	<Target Name="UseRuntimeIcallTable" AfterTargets="_PrepareForBrowserWasmBuildNative" BeforeTargets="_GenerateManagedToNative" Condition="Exists('$(RuntimeIcallTable)')">
+		<Copy SourceFiles="$(RuntimeIcallTable)" DestinationFiles="$(_WasmRuntimeICallTablePath)" SkipUnchangedFiles="true" />
+	</Target>
 	<Target Name="UsePatchedRuntimePack" AfterTargets="ResolveFrameworkReferences" Condition="'$(MicrosoftNetCoreAppRuntimePackDir)' != ''">
 		<ItemGroup>
 			<ResolvedRuntimePack PackageDirectory="$(MicrosoftNetCoreAppRuntimePackDir)"

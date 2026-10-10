@@ -5,7 +5,7 @@
 # Used for Harmony-based FortRise mods; see docs/FORTRISE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-RELEASE=${RUNTIME_RELEASE:-eb111fb8-7474-4f75-a1b7-848fc6293aa5}
+RELEASE=${RUNTIME_RELEASE:-5ecb4294-8cbb-42f1-a73b-476bb46ddbb6}
 # RUNTIME_ZIP picks a variant of a release (dotnet.zip, or e.g. dotnet-jspi-jit.zip); OUT where to.
 ZIP=${RUNTIME_ZIP:-dotnet.zip}
 OUT=${OUT:-vendor/runtime}

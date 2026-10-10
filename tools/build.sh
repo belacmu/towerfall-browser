@@ -11,6 +11,12 @@ source ./env.sh
 PUB=${PUBLISH_DIR:-web/bin/Release/net10.0/publish}
 rm -rf "$PUB"
 case "${AOT:-}" in 1|true|yes) aot=true ;; *) aot=false ;; esac
+# Emscripten with the fixes the runtime pack is built with (tools/patch-emsdk.sh); TOWERFALL_EMSDK=stock
+# uses the workload's own.
+if [ "${TOWERFALL_EMSDK:-patched}" != stock ]; then
+	emsdk=$(tools/patch-emsdk.sh | tail -1)
+	MSBUILD_ARGS="-p:EmscriptenUpstreamEmscriptenPath=$emsdk/emscripten/ -p:WasmCachePath=$emsdk/cache/ ${MSBUILD_ARGS:-}"
+fi
 # MSBUILD_ARGS adds MSBuild options (e.g. -p:WasmNativeStrip=false to keep wasm function names).
 dotnet publish web/TowerFallBrowser.csproj -c Release -p:RunAOTCompilation=$aot -o "$PUB" -nologo -v q ${MSBUILD_ARGS:-}
 
