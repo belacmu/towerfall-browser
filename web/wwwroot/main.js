@@ -622,7 +622,10 @@ async function main() {
 	catalog = await Mods.loadCatalog();
 	await renderMods();
 	const play = $("play");
-	const noIntro = new URLSearchParams(location.search).has("nointro");
+	// The game opens on the main menu: no intro, and past the title screen (see startMode below).
+	// ?intro starts it the way the desktop game does.
+	const showIntro = new URLSearchParams(location.search).has("intro");
+	const noIntro = !showIntro;
 	let autoplay = new URLSearchParams(location.search).has("autoplay");
 	for (;;) {
 		status("Ready");
@@ -693,7 +696,7 @@ async function main() {
 		const text = e.clipboardData?.getData("text");
 		if (text) exports.BrowserHost.SetClipboardText(text);
 	});
-	const startMode = new URLSearchParams(location.search).get("mode");
+	const startMode = new URLSearchParams(location.search).get("mode") ?? (showIntro ? null : "menu");
 	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);

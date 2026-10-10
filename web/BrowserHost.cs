@@ -334,6 +334,7 @@ public static partial class BrowserHost
 	}
 
 	// ?mode=versus|quest|darkworld|trials: once the main menu is up, do what that mode's button does.
+	// "menu" (the page's default) just opens the main menu, past the title screen.
 	[JSExport]
 	internal static Task SetStartMode(string mode)
 	{
@@ -379,6 +380,7 @@ public static partial class BrowserHost
 		{
 			state.SetValue(scene, Enum.Parse(state.PropertyType, "Main"));
 			mainMenuFrames = 0;
+			if (startMode == "menu") startMode = null;
 			return;
 		}
 		if (menuState != "Main")
@@ -410,7 +412,7 @@ public static partial class BrowserHost
 		};
 		if (rollcall == null)
 		{
-			Console.WriteLine($"[mode] unknown mode \"{mode}\" (versus, quest, darkworld, trials, online or quickplay)");
+			Console.WriteLine($"[mode] unknown mode \"{mode}\" (menu, versus, quest, darkworld, trials, online or quickplay)");
 			return;
 		}
 		Type menu = scene.GetType();
