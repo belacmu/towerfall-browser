@@ -120,6 +120,40 @@ the play area. Things to look at with one:
   `FNA_BROWSER_DISPLAY_MODE` (or derive it from the screen's aspect ratio) to fill a phone.
 - Controls over the play area may want lower opacity, or a smaller button cluster.
 
+## Memory (iPhone)
+
+iOS reloads a Safari tab that uses too much memory (WebKit's own limit, or jetsam). Measured in
+the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process's footprint
+(`footprint <pid>` on its `com.apple.WebKit.WebContent`), 2026-10-10:
+
+| | tab footprint |
+|---|---|
+| page loaded, .NET started, before Play | ~450 MB |
+| vanilla, title screen | ~910 MB |
+| TF.EX, title screen | ~1,150–1,230 MB → **~920 MB** with streamed music |
+| TF.EX, first launch (import, FortRise patch) | ~1,600 MB |
+| an instant replay | +70 MB for a moment (and ~90 MB in WebKit's GPU process) |
+
+- **Music is streamed** (`patches/FNA.patch`, `WaveBank`): TowerFall opens its 218 MB music bank
+  with XNA's in-memory constructor, which put all of it in the WebAssembly heap (and that heap
+  never shrinks). In the browser FNA opens it as a streaming bank instead, read from the file as
+  it plays; FAudio supports streaming a bank built for memory. A missing bank still throws, so
+  TowerFall still starts without music.
+- The WebAssembly heap is 540–630 MB at the TF.EX title; WebKit adds roughly 400–600 MB on top
+  (JavaScript, workers). Chrome holds the same title in about 850 MB in total.
+- The jiterpreter (`?runtime=--no-jiterpreter-traces-enabled` turns it off) costs about
+  150–200 MB in WebKit: its thousands of small compiled modules. Off, netplay would be much slower.
+- The initial heap size (`EmccInitialHeapSize`, 512 MB) makes no difference: 128 MB measured the
+  same, the heap just grows to what's used.
+- Rollbacks during round results rebuild the results HUD (megabytes each, see MULTIPLAYER.md):
+  spikes like that raise the heap for good.
+
+To look inside a page that has no console you can read (Safari in the Simulator), run
+`python3 tools/serve.py 8081 --diag` (or the `towerfall-diag` launch config): pages report their
+WebAssembly heap, audio output level and notable log lines every 5 s as `[diag]` lines, and run
+JavaScript queued with `curl localhost:8081/__eval --data 'towerfallCommand("…")'`. Open the page
+in the Simulator with `xcrun simctl openurl booted "http://localhost:8081/?mute&autoplay&…"`.
+
 ## Later steps
 
 - **Zip import** for the public site: one `.zip` of the install can be picked on any phone;

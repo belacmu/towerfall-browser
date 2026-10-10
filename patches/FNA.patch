@@ -109,7 +109,50 @@ index 32e070b..99041ed 100644
 diff --git a/src/Audio/WaveBank.cs b/src/Audio/WaveBank.cs
 --- a/src/Audio/WaveBank.cs
 +++ b/src/Audio/WaveBank.cs
-@@ -188,6 +188,14 @@
+@@ -81,6 +81,18 @@ namespace Microsoft.Xna.Framework.Audio
+ 				throw new ArgumentNullException("nonStreamingWaveBankFilename", "This method does not accept null for this parameter.");
+ 			}
+ 
++			/* In the browser the whole bank would sit in the WebAssembly heap,
++			 * which never shrinks and counts against the tab's memory limit
++			 * (TowerFall's music bank is 218 MB; iOS reloads tabs that grow
++			 * past roughly 1.5 GB). Stream it from the file instead: FAudio
++			 * accepts a streaming bank made from a non-streaming file.
++			 */
++			if (OperatingSystem.IsBrowser())
++			{
++				OpenStreaming(audioEngine, nonStreamingWaveBankFilename);
++				return;
++			}
++
+ 			bankData = TitleContainer.ReadToPointer(
+ 				nonStreamingWaveBankFilename,
+ 				out bankDataLen
+@@ -121,6 +133,11 @@ namespace Microsoft.Xna.Framework.Audio
+ 				throw new ArgumentNullException("streamingWaveBankFilename", "This method does not accept null for this parameter.");
+ 			}
+ 
++			OpenStreaming(audioEngine, streamingWaveBankFilename);
++		}
++
++		private void OpenStreaming(AudioEngine audioEngine, string streamingWaveBankFilename)
++		{
+ 			string safeName = MonoGame.Utilities.FileHelpers.NormalizeFilePathSeparators(
+ 				streamingWaveBankFilename
+ 			);
+@@ -131,6 +148,11 @@ namespace Microsoft.Xna.Framework.Audio
+ 					safeName
+ 				);
+ 			}
++			if (!File.Exists(safeName))
++			{
++				/* FAudio_fopen doesn't fail on a missing file; its reads would. */
++				throw new FileNotFoundException("Wave bank not found.", safeName);
++			}
+ 			bankData = FAudio.FAudio_fopen(safeName);
+ 
+ 			FAudio.FACTStreamingParameters settings = new FAudio.FACTStreamingParameters();
+@@ -188,6 +210,14 @@ namespace Microsoft.Xna.Framework.Audio
  
  		protected virtual void Dispose(bool disposing)
  		{
