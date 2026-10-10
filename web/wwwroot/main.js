@@ -9,11 +9,25 @@ import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
 self.consoleLog = [];
+// Also handed each line while set (see showActivity).
+let onConsoleLine = null;
+// A .NET exception's stack getter calls back into C#, which isn't allowed on this thread and throws:
+// that mustn't take the logging (and fail(), which logs the error first) down with it.
+const logText = (a) => {
+	if (typeof a === "string") return a;
+	try {
+		return a?.stack ?? String(a);
+	} catch {
+		return String(a?.message ?? a);
+	}
+};
 for (const level of ["log", "info", "warn", "error", "debug"]) {
 	const original = console[level].bind(console);
 	console[level] = (...args) => {
-		self.consoleLog.push(`[${level}] ` + args.map((a) => (typeof a === "string" ? a : a?.stack ?? String(a))).join(" "));
+		const line = `[${level}] ` + args.map(logText).join(" ");
+		self.consoleLog.push(line);
 		if (self.consoleLog.length > 2000) self.consoleLog.splice(0, 500);
+		onConsoleLine?.(line);
 		original(...args);
 	};
 }
@@ -27,7 +41,10 @@ function fail(err) {
 	console.error(err);
 	status("Something went wrong");
 	// ManagedError's stack getter calls back into C#, which isn't allowed on this thread.
-	$("error").textContent = String(err?.message ?? err) + "\n\n(See the browser console for details.)";
+	const message = String(err?.message ?? err);
+	$("error").textContent = /out of memory/i.test(message)
+		? "The browser ran out of memory for the game. Right after a reload, the previous page's memory may not be freed yet: close this tab and open the page in a new one."
+		: message + "\n\n(See the browser console for details.)";
 	showOverlay();
 }
 
@@ -397,6 +414,30 @@ function offerMusic(host) {
 	});
 }
 
+// For steps with no telling how long they take (FortRise patching TowerFall.exe the first time,
+// then loading each mod): shows the time passing and what it's doing, from its log.
+function showActivity(text) {
+	const started = performance.now();
+	let doing = "";
+	onConsoleLine = (line) => {
+		const logged = /^\[log\] \[Information\]\[(?:FortRise|Mods)\] (?:\[\w+\] )?(.+)/.exec(line);
+		if (logged) doing = logged[1];
+	};
+	const tick = () => {
+		status(`${text} ${Math.floor((performance.now() - started) / 1000)} s`);
+		detail(doing);
+	};
+	tick();
+	const timer = setInterval(tick, 250);
+	$("bar").classList.add("busy");
+	return () => {
+		clearInterval(timer);
+		onConsoleLine = null;
+		$("bar").classList.remove("busy");
+		detail("");
+	};
+}
+
 function showProgress(done, total) {
 	progress(done / total);
 	detail(`${formatMB(done)} / ${formatMB(total)}`);
@@ -606,11 +647,14 @@ async function main() {
 		status("Getting FortRise…");
 		$("bar").hidden = false;
 		const version = await syncFortRise(showProgress);
-		progress(1);
-		detail("");
-		// Patching TowerFall.exe takes a while the first time (it's cached afterwards).
-		status(`Starting FortRise ${version}…`);
-		await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+		// Patching TowerFall.exe takes a while the first time (it's cached afterwards), and so does
+		// loading the mods.
+		const stopActivity = showActivity(`Starting FortRise ${version}…`);
+		try {
+			await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+		} finally {
+			stopActivity();
+		}
 	} else {
 		await exports.BrowserHost.Init(noIntro, null, null, null);
 	}

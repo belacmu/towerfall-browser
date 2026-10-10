@@ -21,7 +21,7 @@ public static class FortRisePatcher
 	public const string PatchFile = "TowerFall.Patch.dll";
 
 	// Bump when BrowserFixups changes, so cached patches are redone.
-	private const int FixupsVersion = 5;
+	private const int FixupsVersion = 6;
 
 	// fortriseDir holds TowerFall.FortRise.mm.dll plus the assemblies TowerFall.exe references
 	// (FNA.dll, Steamworks.NET.dll); MonoMod resolves dependencies from the working directory.
@@ -37,6 +37,7 @@ public static class FortRisePatcher
 			return patchFile;
 		}
 
+		log.LogInformation("Patching TowerFall.exe (once per FortRise version)...");
 		using var exe = new MemoryStream(File.ReadAllBytes(exePath));
 		string previousDir = Directory.GetCurrentDirectory();
 		Directory.SetCurrentDirectory(fortriseDir);
@@ -116,8 +117,11 @@ public static class FortRisePatcher
 		var platform = new MethodReference("Platform", module.TypeSystem.String, shims);
 		var location = new MethodReference("AssemblyLocation", module.TypeSystem.String, shims);
 		location.Parameters.Add(new ParameterDefinition(module.ImportReference(typeof(System.Reflection.Assembly))));
+		var loadMods = new MethodReference("LoadMods", module.TypeSystem.Void, shims);
+		loadMods.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+		loadMods.Parameters.Add(new ParameterDefinition(module.ImportReference(typeof(System.Collections.IList))));
 
-		int platforms = 0, locations = 0;
+		int platforms = 0, locations = 0, modLoads = 0;
 		foreach (TypeDefinition type in module.GetTypes())
 		{
 			foreach (MethodDefinition method in type.Methods)
@@ -143,6 +147,14 @@ public static class FortRisePatcher
 						instr.OpCode = OpCodes.Call;
 						instr.Operand = location;
 						locations++;
+					}
+					// FortRise's mod loader can load a mod twice, depending on the mods' order (see
+					// BrowserShims.LoadMods).
+					else if (called.Name == "LoadMods" && called.DeclaringType.FullName == "FortRise.ModuleManager" && method.Name != "LoadMods")
+					{
+						instr.OpCode = OpCodes.Call;
+						instr.Operand = loadMods;
+						modLoads++;
 					}
 				}
 			}
@@ -179,7 +191,7 @@ public static class FortRisePatcher
 			natives++;
 		}
 
-		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {Updaters} update checks disabled, {Natives} native loaders deferred to the app.", platforms, locations, updaters, natives);
+		log.LogInformation("Browser fixups: {Platforms} platform checks and {Locations} assembly locations answered by the host, {ModLoads} mod loads ordered by it, {Updaters} update checks disabled, {Natives} native loaders deferred to the app.", platforms, locations, modLoads, updaters, natives);
 	}
 
 	private static string Sha256(string path)
