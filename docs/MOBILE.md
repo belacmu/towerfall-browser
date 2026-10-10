@@ -56,7 +56,11 @@ Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely fi
   60 Hz. FortRise's first patch run (about 20 s on desktop) will take longer. Watch `[perf]` lines
   in the console (`self.consoleLog`, or remote devtools).
 - **Audio.** SDL feeds a ScriptProcessorNode on the page's busier main thread; it may crackle.
-  iPhone's silent switch mutes web audio.
+  Safari only starts audio from inside a tap, click or key press, and SDL created its AudioContext
+  after Play and resumed it from a timer (fine in Chrome), so iPhone was silent. The page now
+  creates SDL's context during the Play click and resumes it on later taps when it isn't running
+  (`unlockAudio` in `main.js`). It also sets `navigator.audioSession.type = "playback"` (Safari 17+)
+  so the silent switch doesn't mute the game; the Sound button does that.
 
 ## Step 2: touch controls (virtual gamepad)
 
@@ -75,9 +79,17 @@ that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
   of everything and hide, and the pad stays connected. The page sends the controls' state when it
   changes (`SetTouchGamepad`), and `MainLoop` applies it on the game thread before each frame.
 - Layout: a floating stick wherever the left thumb lands on the left half (it follows the thumb
-  past its rim, and rests across from the buttons on the right); Jump (A), Shoot (X) and Dodge (RB
-  and RT both, whichever the game binds) at the bottom right, sliding between them works; Back (B)
-  and Pause (Start) at the top left.
+  past half its radius, and rests across from the buttons on the right); Jump (A), Shoot (X) and
+  Dodge (RB and RT both, whichever the game binds) at the bottom right, sliding between them works;
+  Back (B) and Pause (Start) at the top left. A touch counts for the nearest button within reach
+  (0.6 of a round button's radius past its edge, which covers the gaps between them; 14 px for the
+  small ones), and a held button reaches further.
+- The stick is tuned to how TowerFall reads a pad (`XGamepadInput`, after FNA's default
+  independent-axes deadzone): it runs at |x| >= 0.5, ducks or looks up at |y| >= 0.8 and rounds aim
+  to 45 degrees, which on a linear touch stick meant dragging ~60% of the radius to start running.
+  Instead, past a small deadzone the stick sends a full push in 8 even sectors (left/right run,
+  diagonals run and aim diagonally without ducking, up/down duck or look up), with FNA's deadzone
+  added back so the game sees the angle meant; free aiming still follows the thumb within a sector.
 - The `keys` host command (`towerfallCommand("keys")`) logs connected gamepads' state too.
 
 The controls and the page's handling of them are tested headless with multi-touch input; the game

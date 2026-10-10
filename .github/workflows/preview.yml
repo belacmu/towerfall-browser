@@ -1,0 +1,18 @@
+# Pushing a branch other than main asks Deploy (deploy.yml) to put it in the site's preview/. This
+# workflow only signals: Deploy runs from main's copy, the branch GitHub Pages lets deploy, and
+# picks the branch up from this run (workflow_run).
+name: Preview
+
+on:
+  push:
+    branches-ignore: [main]
+
+permissions: {}
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          BRANCH: ${{ github.ref_name }}
+        run: echo "Deploy will put $BRANCH ($GITHUB_SHA) in preview/."

@@ -1,11 +1,26 @@
-# Builds the site and deploys it to GitHub Pages on every push to main.
-# The site contains no game files: players supply their own TowerFall folder.
+# Builds the site and deploys it to GitHub Pages: main at the root, and one other branch at
+# preview/ for trying it (on a phone too) before it's merged. Same origin, so the preview shares the
+# main site's browser storage: imported game files, the remembered game file host, settings, saves.
+#   - Push to main, or a dispatch: rebuilds main, and the branch already in preview/ if it's still
+#     around (a dispatch can name another branch, or "none").
+#   - Push to any other branch: the Preview workflow (preview.yml) finishes and triggers this one,
+#     which puts that branch in preview/. The last branch pushed wins.
+# Deploys always run from main's copy of this workflow (workflow_run runs the default branch's), the
+# branch GitHub Pages lets deploy. The site contains no game files: players supply their own.
 name: Deploy
 
 on:
   push:
     branches: [main]
+  workflow_run:
+    workflows: [Preview]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      preview:
+        description: Branch for preview/ (empty keeps the current one, "none" removes it)
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -18,7 +33,11 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    outputs:
+      preview: ${{ steps.preview.outputs.branch }}
+      preview-built: ${{ steps.preview-build.outcome }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +59,59 @@ jobs:
           path: ~/.towerfall-browser/rust
           key: rust-${{ runner.os }}-${{ hashFiles('tools/install-rust.sh', 'tools/build-netplay.sh') }}
 
+      - name: Pick the preview branch
+        id: preview
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT: ${{ inputs.preview }}
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: |
+          branch="" sha=""
+          case "$EVENT" in
+            workflow_run) branch="$RUN_BRANCH" sha="$RUN_SHA" ;;
+            workflow_dispatch) branch="$INPUT" ;;
+          esac
+          # Otherwise keep the branch that's in preview/ now.
+          [ -n "$branch" ] || branch=$(curl -sSf "$SITE/preview/preview.json" | jq -r '.branch // empty') || branch=""
+          if [ "$branch" = none ] || [ "$branch" = main ]; then branch=""; fi
+          if [ -n "$branch" ] && [ -z "$sha" ]; then
+            # Its latest commit; a branch that's gone (merged and deleted) leaves preview/ empty.
+            sha=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+            [ -n "$sha" ] || { echo "Branch $branch is gone; no preview."; branch=""; }
+          fi
+          echo "Preview: ${branch:-(none)} ${sha}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # The preview is built first, in this same checkout (vendor/ and the SDK are shared and
+      # re-fetched only where the branch pins something else), so vendor/ ends up as main's for
+      # the cache. A failed preview doesn't stop main's deploy; the preview job below reports it.
+      - name: Build the preview
+        id: preview-build
+        if: steps.preview.outputs.branch != ''
+        continue-on-error: true
+        env:
+          BRANCH: ${{ steps.preview.outputs.branch }}
+          SHA: ${{ steps.preview.outputs.sha }}
+        run: |
+          git fetch --depth 1 origin "$SHA"
+          git checkout --detach FETCH_HEAD
+          tools/install-sdk.sh
+          tools/install-rust.sh
+          tools/fetch-deps.sh
+          tools/build.sh
+          mkdir -p "$RUNNER_TEMP/preview"
+          mv web/bin/Release/net10.0/publish/wwwroot "$RUNNER_TEMP/preview/site"
+          # The page shows what it is (main.js).
+          jq -n --arg branch "$BRANCH" --arg sha "$SHA" --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{branch: $branch, sha: $sha, built: $built}' > "$RUNNER_TEMP/preview/site/preview.json"
+
+      - name: Back to main
+        if: steps.preview.outputs.branch != ''
+        run: git checkout --detach "$GITHUB_SHA"
+
       - name: Install SDK
         run: tools/install-sdk.sh
 
@@ -52,9 +124,14 @@ jobs:
       - name: Build
         run: tools/build.sh
 
+      - name: Put the site together
+        run: |
+          mv web/bin/Release/net10.0/publish/wwwroot "$RUNNER_TEMP/site"
+          if [ -d "$RUNNER_TEMP/preview/site" ]; then mv "$RUNNER_TEMP/preview/site" "$RUNNER_TEMP/site/preview"; fi
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/bin/Release/net10.0/publish/wwwroot
+          path: ${{ runner.temp }}/site
 
   deploy:
     needs: build
@@ -65,3 +142,20 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Main deployed either way; a branch that was meant for preview/ but didn't build shows up red.
+  preview:
+    needs: [build, deploy]
+    if: needs.build.outputs.preview != ''
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          BRANCH: ${{ needs.build.outputs.preview }}
+          BUILT: ${{ needs.build.outputs.preview-built }}
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: |
+          if [ "$BUILT" != success ]; then
+            echo "::error::The preview of $BRANCH didn't build (see the build job's \"Build the preview\" step); preview/ was left out."
+            exit 1
+          fi
+          echo "::notice::Preview of $BRANCH: $SITE/preview/"
