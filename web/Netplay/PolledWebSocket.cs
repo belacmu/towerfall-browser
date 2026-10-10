@@ -14,10 +14,13 @@ namespace TowerFallBrowser;
 // Installed under every ClientWebSocket in place of .NET's browser WebSocket. That one completes
 // its operations on the thread owning the page's JS context, our game thread, so TF.EX, which
 // blocks the game thread until its lobby connection opens, deadlocked the page.
-// Waiting happens on the calling thread (TF.EX connects and receives on thread-pool threads).
+// Waiting happens on the calling thread (TF.EX connects and receives on thread-pool threads). Each
+// tfws_* call waits for the page's main thread, so pollers first read the socket's signal, a counter
+// the page bumps whenever it opens, gets a message or closes, and only call in when it moved: a
+// receive loop polling every 2 ms otherwise cost the main thread ~800 calls a second all match.
 internal sealed class PolledWebSocket : WebSocket
 {
-	[DllImport("Emscripten")] private static extern int tfws_open(string url);
+	[DllImport("Emscripten")] private static extern unsafe int tfws_open(string url, int* signal);
 	[DllImport("Emscripten")] private static extern int tfws_state(int h);
 	[DllImport("Emscripten")] private static extern unsafe int tfws_close_info(int h, byte* reason, nuint cap);
 	[DllImport("Emscripten")] private static extern unsafe int tfws_send(int h, byte* data, nuint len, int text);
@@ -29,6 +32,12 @@ internal sealed class PolledWebSocket : WebSocket
 	private const int PollMs = 2;
 
 	private int handle;
+	// Bumped by the page (see above). Never freed: a poller on another thread may still read it after
+	// Abort, and it's 4 bytes per connection.
+	private readonly unsafe int* signal = (int*)NativeMemory.AllocZeroed(sizeof(int));
+	private int refreshedAt = -1; // the signal when Refresh last asked the page
+	private int peekedAt = -1; // ... and when ReceiveAsync last did
+	private bool mayHaveMore; // the last peek found a message; another may be queued under the same signal
 	private WebSocketState state = WebSocketState.None;
 	private WebSocketCloseStatus? closeStatus;
 	private string closeDescription;
@@ -36,6 +45,8 @@ internal sealed class PolledWebSocket : WebSocket
 	private int pendingOffset;
 	private WebSocketMessageType pendingType;
 	private readonly object sendLock = new();
+
+	private unsafe int Signal => Volatile.Read(ref *signal);
 
 	public override WebSocketCloseStatus? CloseStatus => closeStatus;
 	public override string CloseStatusDescription => closeDescription;
@@ -66,19 +77,22 @@ internal sealed class PolledWebSocket : WebSocket
 		return false;
 	}
 
-	private void Connect(Uri uri, CancellationToken cancellationToken)
+	private unsafe void Connect(Uri uri, CancellationToken cancellationToken)
 	{
 		state = WebSocketState.Connecting;
 		Console.WriteLine($"[netplay] connecting to {uri}");
-		handle = tfws_open(uri.ToString());
+		handle = tfws_open(uri.ToString(), signal);
 		if (handle == 0)
 		{
 			state = WebSocketState.Closed;
 			throw new WebSocketException(WebSocketError.Faulted, $"Invalid WebSocket URL {uri}");
 		}
+		int seen = 0; // nothing has happened yet
 		while (true)
 		{
-			int s = tfws_state(handle);
+			int now = Signal;
+			int s = now == seen ? 0 : tfws_state(handle);
+			seen = now;
 			if (s == 1)
 			{
 				Console.WriteLine($"[netplay] connected to {uri}");
@@ -102,6 +116,9 @@ internal sealed class PolledWebSocket : WebSocket
 	private unsafe void Refresh()
 	{
 		if (handle == 0 || state is WebSocketState.Closed or WebSocketState.Aborted) return;
+		int now = Signal;
+		if (now == refreshedAt) return;
+		refreshedAt = now;
 		int s = tfws_state(handle);
 		if (s == 3)
 		{
@@ -134,24 +151,30 @@ internal sealed class PolledWebSocket : WebSocket
 	{
 		while (pending == null)
 		{
-			int type;
-			int length = tfws_peek(handle, &type);
-			if (length >= 0)
+			int now = Signal;
+			if (now != peekedAt || mayHaveMore)
 			{
-				pending = new byte[length];
-				fixed (byte* p = pending)
+				peekedAt = now;
+				int type;
+				int length = tfws_peek(handle, &type);
+				mayHaveMore = length >= 0;
+				if (length >= 0)
 				{
-					tfws_take(handle, p);
+					pending = new byte[length];
+					fixed (byte* p = pending)
+					{
+						tfws_take(handle, p);
+					}
+					pendingOffset = 0;
+					pendingType = type == 1 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
+					break;
 				}
-				pendingOffset = 0;
-				pendingType = type == 1 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
-				break;
-			}
-			Refresh();
-			if (state is WebSocketState.CloseReceived or WebSocketState.Closed)
-			{
-				state = WebSocketState.Closed;
-				return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, closeStatus, closeDescription));
+				Refresh();
+				if (state is WebSocketState.CloseReceived or WebSocketState.Closed)
+				{
+					state = WebSocketState.Closed;
+					return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, closeStatus, closeDescription));
+				}
 			}
 			if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<WebSocketReceiveResult>(cancellationToken);
 			Thread.Sleep(PollMs);
@@ -170,7 +193,12 @@ internal sealed class PolledWebSocket : WebSocket
 		CloseOutput(closeStatus, statusDescription);
 		return Task.Run(() =>
 		{
-			for (int i = 0; i < 2500 && tfws_state(handle) != 3; i++) Thread.Sleep(PollMs);
+			for (int i = 0, seen = -1; i < 2500; i++, Thread.Sleep(PollMs))
+			{
+				int now = Signal;
+				if (now != seen && tfws_state(handle) == 3) break;
+				seen = now;
+			}
 			Refresh();
 			state = WebSocketState.Closed;
 		}, cancellationToken);

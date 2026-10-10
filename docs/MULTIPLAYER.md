@@ -21,6 +21,11 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
   unanswered (UDP to port 443 is dropped on some networks, now and then on others), and TF.EX
   gives players 20 s to connect, so they sat at "waiting for other players" and were sent back
   to the menu.
+- Every call into tfnet.js waits for the page's main thread, and ggrs-ffi polls many hundreds of
+  times a second. So each socket (and each lobby WebSocket) shares counters in wasm memory that
+  the page bumps when something arrives or changes, and polls whose counter didn't move return
+  without calling the page. In an idle match that took each player from ~2,400 calls a second to
+  ~700 (packet sends and reads), and the main thread from ~54 to ~42 ms busy per second.
 - Lobbies use .NET's `ClientWebSocket` to TF.EX's server setting plus `/ws`. TF.EX's official
   server (`wss://tfex-server.balatro-vs-matchmaking.eu`) **turns browsers away**: since the TF.EX
   0.19.1 release (2026-10-10, ~08:00 UTC) a handshake carrying an `Origin` header gets 403 (by
