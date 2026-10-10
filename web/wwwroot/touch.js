@@ -1,5 +1,5 @@
 // On-screen controls for touch screens. They drive a virtual gamepad in the host (TouchGamepad.cs),
-// so the game sees an ordinary controller. Layout: a floating stick anywhere on the left half,
+// so the game sees an ordinary controller. Layout: a stick on the left half (see pointerdown),
 // jump/shoot/dodge at the bottom right, back and pause at the top left.
 //
 // The page's Controls button turns them on and off (remembered per browser); by default they're on
@@ -174,8 +174,19 @@ export function createTouchControls(send) {
 		const el = buttonAt(e.clientX, e.clientY);
 		if (el) {
 			pointers.set(e.pointerId, { kind: "button", el });
-		} else if (e.clientX < innerWidth / 2 && ![...pointers.values()].some((p) => p.kind === "stick")) {
-			pointers.set(e.pointerId, { kind: "stick", ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY });
+		} else if (![...pointers.values()].some((p) => p.kind === "stick")) {
+			// A touch inside the resting stick's ring takes hold of it there, so a tap off centre is
+			// a press that way, and tapping again presses again, like flicking a real stick (picking
+			// the archer two to the right). Anywhere else on the left half the stick centres on the
+			// thumb. Let go, it goes back to rest.
+			const b = stick.getBoundingClientRect();
+			const cx = (b.left + b.right) / 2;
+			const cy = (b.top + b.bottom) / 2;
+			if (Math.hypot(e.clientX - cx, e.clientY - cy) <= radius()) {
+				pointers.set(e.pointerId, { kind: "stick", ox: cx, oy: cy, x: e.clientX, y: e.clientY });
+			} else if (e.clientX < innerWidth / 2) {
+				pointers.set(e.pointerId, { kind: "stick", ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY });
+			}
 		}
 		render();
 	});

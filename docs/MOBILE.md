@@ -78,8 +78,11 @@ that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
   mid-game (whether the game picks that up is still to be seen); turned off, the controls let go
   of everything and hide, and the pad stays connected. The page sends the controls' state when it
   changes (`SetTouchGamepad`), and `MainLoop` applies it on the game thread before each frame.
-- Layout: a floating stick wherever the left thumb lands on the left half (it follows the thumb
-  past half its radius, and rests across from the buttons on the right); Jump (A), Shoot (X) and
+- Layout: a stick on the left half that follows the thumb past half its radius. A faint ring
+  marks where it rests, across from the buttons on the right: a touch inside the ring takes hold
+  of the stick there, so tapping off centre is a press in that direction and tapping again presses
+  again (stepping through the archers); a touch anywhere else on the left half centres the stick
+  on the thumb. Let go, it goes back to rest; Jump (A), Shoot (X) and
   Dodge (RB and RT both, whichever the game binds) at the bottom right, sliding between them works;
   Back (B) and Pause (Start) at the top left. A touch counts for the nearest button within reach
   (0.6 of a round button's radius past its edge, which covers the gaps between them; 14 px for the

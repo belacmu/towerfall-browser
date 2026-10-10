@@ -141,9 +141,9 @@
 			}
 			#touch .back { left: var(--edge); }
 			#touch .pause { left: calc(var(--edge) + var(--size) * 0.9); }
-			/* The stick appears where the left thumb lands; until then a faint one marks its spot,
-			   where the left thumb rests: across from the middle of the buttons on the right, a little
-			   lower. Its radius (0.8 * --size) is also in touch.js. */
+			/* A faint ring marks where the stick rests, and where a touch takes hold of it without
+			   moving it (touch.js): where the left thumb rests, across from the middle of the buttons
+			   on the right, a little lower. Its radius (0.8 * --size) is also in touch.js. */
 			#touch .stick {
 				position: absolute;
 				left: calc(var(--edge) + var(--size));
