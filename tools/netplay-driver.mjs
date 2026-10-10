@@ -7,6 +7,7 @@
 //   curl 'localhost:9400/A/log?from=0'           in-page log lines from that index
 //   curl 'localhost:9400/A/console?from=0'       console output of all threads (works while hung)
 //   curl 'localhost:9400/A/eval' --data 'js'     evaluate in the page
+//   curl 'localhost:9400/A/evalworkers' --data 'js'  evaluate in every worker thread
 //   curl 'localhost:9400/quit'
 // Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400]
 import { spawn } from "node:child_process";
@@ -21,6 +22,9 @@ const url = opt("--url", "http://localhost:8080/?mute&nointro&autoplay&mods=TF.E
 const names = opt("--players", "A,B").split(",");
 const port = Number(opt("--port", "9400"));
 const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// The real GPU where Chrome can use it headless (Metal on macOS); software rendering elsewhere,
+// which costs several CPU cores per running game.
+const GPU_FLAGS = process.platform === "darwin" ? ["--use-angle=metal", "--ignore-gpu-blocklist"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const children = [];
@@ -33,7 +37,7 @@ async function launch(name, debugPort) {
 	fs.mkdirSync(profile, { recursive: true });
 	children.push(spawn(chrome, [
 		"--headless=new", `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, "--no-first-run",
-		"--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--autoplay-policy=no-user-gesture-required",
+		...GPU_FLAGS, "--autoplay-policy=no-user-gesture-required",
 		"--window-size=960,600", "about:blank",
 	], { stdio: "ignore" }));
 	let target;
@@ -65,9 +69,26 @@ async function launch(name, debugPort) {
 	// readable even when the page's main thread hangs.
 	const consoleLines = [];
 	const pausedWaiters = [];
+	const workerSessions = [];
+	// Evaluates in every worker (the game runs on one), e.g. runtime diagnostics.
+	const evalWorkers = (expression) =>
+		Promise.all(workerSessions.map((sessionId) => new Promise((resolve) => {
+			const id = nextId++;
+			const timer = setTimeout(() => resolve({ sessionId, error: "timeout" }), 10_000);
+			const onMessage = (m) => {
+				const d = JSON.parse(m.data);
+				if (d.id !== id) return;
+				clearTimeout(timer);
+				ws.removeEventListener("message", onMessage);
+				resolve({ sessionId, value: d.result?.result?.value ?? d.result?.exceptionDetails?.exception?.description ?? d.error });
+			};
+			ws.addEventListener("message", onMessage);
+			ws.send(JSON.stringify({ id, sessionId, method: "Runtime.evaluate", params: { expression, returnByValue: true, awaitPromise: true } }));
+		})));
 	ws.addEventListener("message", (m) => {
 		const d = JSON.parse(m.data);
 		if (d.method === "Target.attachedToTarget") {
+			workerSessions.push(d.params.sessionId);
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.enable" }));
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.runIfWaitingForDebugger" }));
 		} else if (d.method === "Debugger.paused") {
@@ -97,7 +118,7 @@ async function launch(name, debugPort) {
 		await send("Debugger.disable");
 		return result;
 	};
-	return { name, send, consoleLines, stack };
+	return { name, send, consoleLines, stack, evalWorkers };
 }
 
 // Key events as the game sees them (SDL reads DOM keydown/keyup on the canvas' document).
@@ -151,6 +172,8 @@ http.createServer(async (req, res) => {
 		} else if (action === "console") {
 			const from = Number(u.searchParams.get("from") ?? 0);
 			res.end(p.consoleLines.slice(from).map((l, i) => `${from + i}: ${l}`).join("\n") + "\n");
+		} else if (action === "evalworkers") {
+			res.end(JSON.stringify(await p.evalWorkers(body), null, 1) + "\n");
 		} else if (action === "eval") {
 			const r = await p.send("Runtime.evaluate", { expression: body, returnByValue: true, awaitPromise: true });
 			res.end(JSON.stringify(r.result?.value ?? r) + "\n");

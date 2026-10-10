@@ -4,6 +4,7 @@
 
 import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, locateDarkWorld, locateGame, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
+import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
@@ -69,6 +70,32 @@ $("mute").addEventListener("click", () => {
 	$("canvas").focus();
 });
 applyMute();
+
+// On-screen controls (touch.js), driving a virtual gamepad in the host. On by default on touch
+// screens; the Controls button turns them on and off (remembered per browser).
+let touchOn = touchWanted();
+let controls = null; // created once the game runs and they're wanted
+let host = null; // exports.BrowserHost, once the game runs
+
+async function applyTouch() {
+	$("touchToggle").textContent = touchOn ? "Controls: on" : "Controls: off";
+	// Before the game runs, Init() picks the setting up.
+	if (!host) return;
+	if (touchOn) {
+		// Plugs the virtual gamepad in (once) before the next frame, like connecting a controller.
+		await host.EnableTouchGamepad();
+		controls ??= createTouchControls((buttons, x, y) => host.SetTouchGamepad(buttons, x, y));
+	}
+	controls?.setVisible(touchOn);
+}
+
+$("touchToggle").addEventListener("click", () => {
+	touchOn = !touchOn;
+	saveTouchWanted(touchOn);
+	applyTouch().catch(console.error);
+	$("canvas").focus();
+});
+applyTouch();
 
 // --- Mods (see mods.js) ---------------------------------------------------------------------
 
@@ -400,6 +427,9 @@ async function main() {
 	$("dw").hidden = true;
 	stopDarkWorldOffer();
 
+	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch.
+	if (touchOn) await exports.BrowserHost.EnableTouchGamepad();
+
 	if (useFortRise()) {
 		status("Getting FortRise…");
 		$("bar").hidden = false;
@@ -414,6 +444,8 @@ async function main() {
 	}
 	$("overlay").classList.add("hidden");
 	$("canvas").focus();
+	host = exports.BrowserHost;
+	await applyTouch();
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
 	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).
@@ -446,6 +478,7 @@ async function main() {
 
 		let keepRunning;
 		try {
+			await controls?.flush();
 			keepRunning = await exports.BrowserHost.MainLoop();
 		} catch (e) {
 			fail(e);

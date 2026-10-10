@@ -1,0 +1,52 @@
+# Keeps the hosted TF.EX (online play) on its latest release: the official server only lets the
+# latest version play online. Hourly, tools/update-tfex.py checks for a new release; when it's safe
+# to adopt (same ggrs-ffi as the browser build, FortRise requirement met) the pin is committed and
+# the site redeployed, otherwise an issue says what needs doing.
+name: TF.EX
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for a new TF.EX
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update-tfex.py
+
+      - name: Commit and redeploy
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "TF.EX ${{ steps.check.outputs.version }} (online play)" tools/fetch-tfex.sh
+          git push
+          # Pushes made with the workflow token don't trigger other workflows; dispatches do.
+          gh workflow run deploy.yml --ref main
+
+      - name: Open an issue if it can't be adopted
+        if: steps.check.outputs.blocked != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BLOCKED: ${{ steps.check.outputs.blocked }}
+        run: |
+          title="${BLOCKED%%:*} needs attention (online play)"
+          if gh issue list --state open --search "in:title \"$title\"" --json number --jq length | grep -q '^0$'; then
+            gh issue create --title "$title" --body "$BLOCKED
+
+          The official TF.EX server only lets the latest version play online, so online play on the site is unavailable until this is done. See tools/update-tfex.py."
+          fi

@@ -9,8 +9,9 @@ using HarmonyLib;
 namespace TowerFallBrowser;
 
 // Times chosen methods (inclusive, per frame) with Harmony prefixes/postfixes, for finding what's
-// slow in the browser. Turned on by the host's "profile [Type::Method ...]" command (with no
-// arguments, a set covering TF.EX's per-tick work); results are printed with each [perf] line.
+// slow in the browser. Turned on by the host's "profile [Type::Method ...]" command (Type::* for
+// every method of a type; with no arguments, a set covering TF.EX's per-tick work); results are
+// printed with each [perf] line.
 public static class Profiler
 {
 	private static readonly string[] Defaults =
@@ -28,6 +29,15 @@ public static class Profiler
 		"TF.State.TowerFallExtensions.LevelExtensions::LoadState",
 		"TF.EX.Domain.Services.ReplayService::AddRecord",
 		"TF.EX.Domain.Services.SyncTestUtilsService::AddFrame",
+		"TF.EX.Domain.InstantReplayFootage::Bake",
+		"TF.EX.Domain.InstantReplayFootage::Capture",
+		"TF.EX.Domain.InstantReplayFootage::Restore",
+		"TF.EX.Domain.InstantReplayFootage::Track",
+		"TowerFall.ReplayFrame::Record",
+		"TowerFall.Level::CoreRender",
+		"TowerFall.Level::PreRender",
+		"Monocle.Engine::Draw",
+		"TowerFall.Level::HandlePausing",
 	};
 
 	private sealed class Entry
@@ -53,7 +63,7 @@ public static class Profiler
 			string[] parts = spec.Split("::");
 			Type type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(parts[0])).FirstOrDefault(t => t != null);
 			MethodBase[] methods = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
-				.Where(m => m.Name == parts[^1] && !m.IsAbstract && !m.ContainsGenericParameters).ToArray() ?? Array.Empty<MethodBase>();
+				.Where(m => (parts[^1] == "*" ? !m.Name.StartsWith('<') : m.Name == parts[^1]) && !m.IsAbstract && !m.ContainsGenericParameters).ToArray() ?? Array.Empty<MethodBase>();
 			if (methods.Length == 0)
 			{
 				report.Append($" {spec}: not found;");
@@ -64,7 +74,8 @@ public static class Profiler
 				if (entries.ContainsKey(m)) continue;
 				try
 				{
-					string name = $"{type.Name}.{m.Name}" + (methods.Length > 1 ? $"({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})" : "");
+					bool overloaded = methods.Count(o => o.Name == m.Name) > 1;
+					string name = $"{type.Name}.{m.Name}" + (overloaded ? $"({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})" : "");
 					entries[m] = new Entry { Name = name };
 					harmony.Patch(m, prefix: prefix, postfix: postfix);
 				}
@@ -96,10 +107,18 @@ public static class Profiler
 	public static string Report(int frames)
 	{
 		var sb = new StringBuilder();
+		if (StateSpeedups.GetAllCalls > 0)
+		{
+			double total = StateSpeedups.GetAllTicks * 1000.0 / Stopwatch.Frequency;
+			sb.Append($"\n[profile]   {total / frames,7:0.00} ms/frame {StateSpeedups.GetAllCalls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {StateSpeedups.GetAllCalls,6} calls  StateSpeedups.GetAll");
+			StateSpeedups.GetAllTicks = 0;
+			StateSpeedups.GetAllCalls = 0;
+		}
 		foreach (Entry e in entries.Values.Where(e => e.Calls > 0).OrderByDescending(e => e.Ticks))
 		{
 			double ms = e.Ticks * 1000.0 / Stopwatch.Frequency / frames;
-			sb.Append($"\n[profile]   {ms,7:0.00} ms/frame {e.Calls / (double)frames,6:0.0} calls/frame  {e.Name}");
+			double total = e.Ticks * 1000.0 / Stopwatch.Frequency;
+			sb.Append($"\n[profile]   {ms,7:0.00} ms/frame {e.Calls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {e.Calls,6} calls  {e.Name}");
 			e.Ticks = 0;
 			e.Calls = 0;
 		}

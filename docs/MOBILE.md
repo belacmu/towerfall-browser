@@ -58,16 +58,51 @@ Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely fi
 - **Audio.** SDL feeds a ScriptProcessorNode on the page's busier main thread; it may crackle.
   iPhone's silent switch mutes web audio.
 
+## Step 2: touch controls (virtual gamepad)
+
+The page draws on-screen controls (`web/wwwroot/touch.js`) and the host plugs in a virtual gamepad
+that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
+(`(pointer: coarse)`); the Controls button next to Sound turns them on and off on any device
+(mouse included), remembered per browser, and `?touch` / `?notouch` override that.
+
+- SDL's virtual joystick driver (in the prebuilt `SDL3.a`) with the standard gamepad shape (15
+  buttons, 6 axes), so SDL maps it like an Xbox controller and FNA, and the game, see an ordinary
+  gamepad: analog aiming, controller prompts, rebindable in the game's options, no game patching.
+- `Init()` attaches it right after constructing the game and registers it with FNA the way FNA's
+  `ProgramInit` does for controllers present at launch, so the game finds it however it looks for
+  controllers. Turned on later, it's plugged in before the next frame like a controller connected
+  mid-game (whether the game picks that up is still to be seen); turned off, the controls let go
+  of everything and hide, and the pad stays connected. The page sends the controls' state when it
+  changes (`SetTouchGamepad`), and `MainLoop` applies it on the game thread before each frame.
+- Layout: a floating stick wherever the left thumb lands on the left half (it follows the thumb
+  past its rim, and rests across from the buttons on the right); Jump (A), Shoot (X) and Dodge (RB
+  and RT both, whichever the game binds) at the bottom right, sliding between them works; Back (B)
+  and Pause (Start) at the top left.
+- The `keys` host command (`towerfallCommand("keys")`) logs connected gamepads' state too.
+
+The controls and the page's handling of them are tested headless with multi-touch input; the game
+side compiles (CI) but hasn't been tried in the game yet. To check in the game: open with `?touch` on
+desktop, run `towerfallCommand("keys")`, and use the controls with the mouse; the pad should show
+as `pad0`. Then on a phone: does the game take the pad as player 1, do the menus respond, and are
+the default bindings right (jump/shoot/dodge)?
+
+### Widescreen mods
+
+There are widescreen mods for TowerFall. The controls are translucent and anchored to the screen
+corners rather than to the 4:3 side bars, so they work there too, but they sit over the edges of
+the play area. Things to look at with one:
+
+- The canvas is a fixed 1536x960 (16:10) drawing buffer (`BrowserDisplayMode` in
+  `patches/FNA.patch`), letterboxed to the page. A 16:9 game fits it with bars; set
+  `FNA_BROWSER_DISPLAY_MODE` (or derive it from the screen's aspect ratio) to fill a phone.
+- Controls over the play area may want lower opacity, or a smaller button cluster.
+
 ## Later steps
 
-- **Touch controls**: a virtual gamepad. The page draws the stick and buttons (in the side bars a
-  4:3 game leaves on a landscape phone) and passes their state to the host each frame; the host
-  applies it on the game thread with SDL's virtual joystick (`SDL_AttachVirtualJoystick`, built
-  into the prebuilt `SDL3.a`; FNA's SDL3-CS binds it), so the game sees an ordinary controller:
-  analog aiming, controller prompts, no game patching. Bluetooth controllers may already work
-  through SDL's Gamepad API backend; if not, the same bridge can forward them.
 - **Zip import** for the public site: one `.zip` of the install can be picked on any phone;
   unzip it with `DecompressionStream("deflate-raw")` into the same entry list `locateGame()` takes.
-- **Page**: `viewport-fit=cover`, `100dvh`, `touch-action: none`, no selection or long-press menu;
-  fullscreen and a landscape lock on Android; a web app manifest for "Add to Home Screen" on
-  iPhone, which has no element fullscreen.
+- **Page**: fullscreen and a landscape lock on Android; a web app manifest for "Add to Home
+  Screen" on iPhone, which has no element fullscreen. (Done: `viewport-fit=cover`, `100dvh`, and
+  no scrolling, zooming, selection or long-press menu on the controls.)
+- **Bluetooth controllers** may already work through SDL's Gamepad API backend; if not, the same
+  virtual-gamepad bridge can forward them from the page.

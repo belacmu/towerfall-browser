@@ -76,8 +76,9 @@ The published site is `web/bin/Release/net10.0/publish/wwwroot`.
 
 URL options: `?nointro` skips the intro, `?mute` / `?unmute`, `?uncapped` ticks on every display
 frame, `?autoplay` starts without the Play click (tests), `?mods=Name,Name` sets the enabled mods,
-`?allmods` also lists untested mods, `?fortrise` / `?vanilla` force FortRise on or off, and `?debug`
-shows FortRise's debug log (including its Harmony patches).
+`?allmods` also lists untested mods, `?touch` / `?notouch` override the Controls button,
+`?fortrise` / `?vanilla` force FortRise on or off, and `?debug` shows FortRise's debug log
+(including its Harmony patches).
 
 Keyboard: arrows move/aim, C jump/confirm, X shoot/cancel, Shift dodge/catch (rebindable in Options).
 

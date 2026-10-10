@@ -125,6 +125,7 @@ public static partial class BrowserHost
 				game = FortRiseLauncher.Start(GameAssembly, FortRiseDir, fortriseVersion, noIntro, loggers);
 				towerFall = game.GetType().Assembly;
 			}
+			TouchGamepad.AttachIfEnabled();
 
 			// The constructor's GameData.CheckForDLC() also requires Steam to report the DLC as
 			// installed. In the browser, having the Dark World content is enough.
@@ -188,25 +189,34 @@ public static partial class BrowserHost
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
 			// then e.g. "test" is the base game's own command).
-			menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
+			if (!commandsReady)
+			{
+				menuFrames = game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName == "TowerFall.MainMenu" ? menuFrames + 1 : 0;
+				commandsReady = menuFrames > 300;
+			}
+			while (commandsReady && commands.TryDequeue(out string[] command))
+			{
+				RunGameCommand(command);
+			}
 			// (Set on the game thread, which SDL belongs to.)
 			if (Interlocked.Exchange(ref pastedText, null) is string pasted)
 			{
 				SDL3.SDL.SDL_SetClipboardText(pasted);
-			}
-			while ((menuFrames > 300 || commandsRan) && commands.TryDequeue(out string[] command))
-			{
-				commandsRan = true;
-				RunGameCommand(command);
 			}
 			if (keysFrames > 0)
 			{
 				keysFrames--;
 				var down = Microsoft.Xna.Framework.Input.Keyboard.GetState().GetPressedKeys();
 				string now = string.Join(",", down);
+				for (int i = 0; i < 4; i++)
+				{
+					var pad = Microsoft.Xna.Framework.Input.GamePad.GetState((PlayerIndex)i);
+					if (pad.IsConnected) now += $" pad{i}: {pad.Buttons} stick {pad.ThumbSticks.Left} triggers {pad.Triggers.Left:0.#}/{pad.Triggers.Right:0.#}";
+				}
 				if (now != lastKeys) Console.WriteLine($"[keys] {(now.Length > 0 ? now : "(none)")}");
 				lastKeys = now;
 			}
+			TouchGamepad.Update();
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
 			frameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - frameStart;
@@ -233,6 +243,23 @@ public static partial class BrowserHost
 
 	private static string pastedText;
 
+	// On-screen controls (wwwroot/touch.js): a virtual gamepad, plugged in by Init() when enabled
+	// before it, or before the next frame when enabled later.
+	[JSExport]
+	internal static Task EnableTouchGamepad()
+	{
+		TouchGamepad.Enabled = true;
+		return Task.CompletedTask;
+	}
+
+	// Their state: TouchGamepad's button bits and the stick (-32767..32767, y down).
+	[JSExport]
+	internal static Task SetTouchGamepad(int buttons, int x, int y)
+	{
+		TouchGamepad.Set(buttons, x, y);
+		return Task.CompletedTask;
+	}
+
 	private static readonly System.Collections.Concurrent.ConcurrentQueue<string[]> commands = new();
 
 	// Runs a line in the game's dev console (Monocle Commands, where mods such as TF.EX register
@@ -249,7 +276,7 @@ public static partial class BrowserHost
 	private static int menuFrames;
 	private static int keysFrames;
 	private static string lastKeys = "";
-	private static bool commandsRan;
+	private static bool commandsReady;
 
 	private static void RunGameCommand(string[] words)
 	{
@@ -257,9 +284,20 @@ public static partial class BrowserHost
 		{
 			if (words[0] == "keys")
 			{
-				// Logs the keys FNA reports as down, for the next 10 seconds (input debugging).
+				// Logs the keys (and gamepad state) FNA reports, for the next 10 seconds (input debugging).
 				keysFrames = 600;
-				Console.WriteLine("[command] keys: logging pressed keys for 10 s");
+				Console.WriteLine("[command] keys: logging pressed keys and gamepads for 10 s");
+				return;
+			}
+			if (words[0] == "bench")
+			{
+				Bench.Run();
+				return;
+			}
+			if (words[0] == "netplay")
+			{
+				object menu = game.GetType().GetProperty("Scene")?.GetValue(game);
+				Console.WriteLine($"[command] netplay: {(menu?.GetType().FullName == "TowerFall.MainMenu" ? TfexPatches.EnterNetplay(menu) : "not on the main menu")}");
 				return;
 			}
 			if (words[0] == "menustate" && words.Length > 1)
