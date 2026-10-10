@@ -16,6 +16,11 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
   page's WebSocket signaling and WebRTC data channel, speaking matchbox's protocol so browser
   players can meet desktop players. Before connecting it asks the signaling server's `/turn` for
   ICE servers (cached for an hour); if that fails (any server but ours), it uses Google's STUN.
+  Its offers and answers carry the candidates gathered in the first second and trickle the rest:
+  waiting for gathering to complete took about 40 s whenever one STUN/TURN request went
+  unanswered (UDP to port 443 is dropped on some networks, now and then on others), and TF.EX
+  gives players 20 s to connect, so they sat at "waiting for other players" and were sent back
+  to the menu.
 - Lobbies use .NET's `ClientWebSocket` to TF.EX's server setting plus `/ws`. TF.EX's official
   server (`wss://tfex-server.balatro-vs-matchmaking.eu`) **turns browsers away**: since the TF.EX
   0.19.1 release (2026-10-10, ~08:00 UTC) a handshake carrying an `Origin` header gets 403 (by
