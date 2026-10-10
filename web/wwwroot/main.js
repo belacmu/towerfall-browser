@@ -71,6 +71,18 @@ $("mute").addEventListener("click", () => {
 });
 applyMute();
 
+// The mouse cursor shows over the game while it moves and hides after a few seconds still (the
+// game itself hides it for good; see canvas.canvas in index.html).
+const CURSOR_IDLE_MS = 3000;
+let cursorTimer;
+function cursorMoved() {
+	document.body.classList.remove("cursorIdle");
+	clearTimeout(cursorTimer);
+	cursorTimer = setTimeout(() => document.body.classList.add("cursorIdle"), CURSOR_IDLE_MS);
+}
+addEventListener("pointermove", (e) => e.pointerType === "mouse" && cursorMoved());
+cursorMoved();
+
 // On-screen controls (touch.js), driving a virtual gamepad in the host. On by default on touch
 // screens; the Controls button turns them on and off (remembered per browser).
 let touchOn = touchWanted();

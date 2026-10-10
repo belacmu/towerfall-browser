@@ -32,7 +32,11 @@
 				image-rendering: pixelated;
 				outline: none;
 				background: #000;
+				/* The game hides the mouse (SDL sets cursor: none inline); main.js hides it only after
+				   it's been still a while (body.cursorIdle). */
+				cursor: default !important;
 			}
+			body.cursorIdle canvas.canvas, body.cursorIdle #touch { cursor: none !important; }
 			#overlay {
 				position: fixed;
 				inset: 0;
