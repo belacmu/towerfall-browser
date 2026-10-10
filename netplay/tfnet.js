@@ -10,6 +10,8 @@
 //  - each side waits for ICE gathering to finish before sending its SDP, then trickles any more
 //    candidates;
 //  - one data channel: negotiated, id 0, unordered, no retransmits; packets are raw binary.
+//  - ICE servers come from the signaling server's /turn (our server: STUN plus TURN relay
+//    credentials, so players behind strict NATs can still connect); any other server: STUN only.
 //
 // RTCPeerConnection only exists on the page's main thread, so every function here is proxied there
 // (__proxy: "sync") from whichever worker thread the game calls it on.
@@ -22,6 +24,39 @@ var LibraryTFNet = {
 		sockets: null,
 		next: 1,
 		iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
+		ice: null, // { url, at, servers: Promise } from the last /turn request
+
+		// The ICE servers for a room URL, from its server's /turn. Credentials last 6 hours; reused
+		// for one.
+		iceServersFor(roomUrl) {
+			let url;
+			try {
+				const u = new URL(roomUrl);
+				u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+				u.pathname = "/turn";
+				u.search = "";
+				url = u.href;
+			} catch {
+				return Promise.resolve(TFNet.iceServers);
+			}
+			if (TFNet.ice?.url === url && performance.now() - TFNet.ice.at < 3600e3) return TFNet.ice.servers;
+			const abort = new AbortController();
+			const timer = setTimeout(() => abort.abort(), 4000);
+			const servers = fetch(url, { signal: abort.signal })
+				.then((r) => (r.ok ? r.json() : null))
+				.then((j) => {
+					if (!Array.isArray(j?.iceServers) || !j.iceServers.length) throw new Error("no ICE servers");
+					return j.iceServers;
+				})
+				.catch((e) => {
+					console.warn(`[tfnet] ${url}: ${e.message ?? e}; using STUN only`);
+					TFNet.ice = null;
+					return TFNet.iceServers;
+				})
+				.finally(() => clearTimeout(timer));
+			TFNet.ice = { url, at: performance.now(), servers };
+			return servers;
+		},
 
 		uuidToBytes(uuid, ptr) {
 			const hex = uuid.replace(/-/g, "");
@@ -43,7 +78,9 @@ var LibraryTFNet = {
 				state: 0, // 0 running, 1 closed, 2 connection failed, 3 disconnected
 				error: "",
 				keepAlive: null,
+				iceServers: null, // once s.ice resolves
 			};
+			s.ice = TFNet.iceServersFor(url).then((servers) => (s.iceServers = servers));
 			const signal = (receiver, data) => {
 				if (s.ws.readyState === 1) s.ws.send(JSON.stringify({ Signal: { receiver, data } }));
 			};
@@ -55,7 +92,7 @@ var LibraryTFNet = {
 			};
 
 			const createPeer = (uuid) => {
-				const pc = new RTCPeerConnection({ iceServers: TFNet.iceServers });
+				const pc = new RTCPeerConnection({ iceServers: s.iceServers });
 				const dc = pc.createDataChannel("matchbox_socket_0", { ordered: false, maxRetransmits: 0, negotiated: true, id: 0 });
 				dc.binaryType = "arraybuffer";
 				const peer = { pc, dc, connected: false, pending: [], remoteSet: false };
@@ -69,6 +106,9 @@ var LibraryTFNet = {
 				dc.onclose = () => {
 					if (peer.connected) s.events.push([uuid, 2]);
 					peer.connected = false;
+				};
+				pc.onconnectionstatechange = () => {
+					if (pc.connectionState === "failed") console.warn(`[tfnet] couldn't connect to peer ${uuid}`);
 				};
 				s.peers.set(uuid, peer);
 				return peer;
@@ -107,6 +147,8 @@ var LibraryTFNet = {
 			};
 
 			const offer = async (uuid) => {
+				await s.ice;
+				if (s.state !== 0) return;
 				const peer = createPeer(uuid);
 				await peer.pc.setLocalDescription(await peer.pc.createOffer());
 				await gathered(peer.pc);
@@ -123,6 +165,9 @@ var LibraryTFNet = {
 				trickle(uuid, peer);
 			};
 			const onSignal = async (sender, data) => {
+				// (Every message waits on the same promise, so they still run in arrival order.)
+				await s.ice;
+				if (s.state !== 0) return;
 				if ("Offer" in data) {
 					await accept(sender, data.Offer);
 				} else if ("Answer" in data) {

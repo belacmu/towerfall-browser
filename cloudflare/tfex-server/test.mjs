@@ -135,6 +135,19 @@ test("origins: desktop (none) and the site are let in, other pages aren't", asyn
 	eq(await handshake("/nope"), 404, "unknown path");
 });
 
+test("turn: ICE servers for the site's pages, with CORS; not for other pages", async () => {
+	const turn = (origin) => fetch(base.replace(/^ws/, "http") + "/turn", { headers: { Origin: origin } });
+	const res = await turn("https://belacmu.github.io");
+	eq(res.status, 200, "the site");
+	eq(res.headers.get("access-control-allow-origin"), "https://belacmu.github.io", "CORS");
+	const { iceServers } = await res.json();
+	const urls = iceServers.flatMap((s) => [].concat(s.urls));
+	eq(urls.some((u) => u.startsWith("stun:")), true, "a STUN server");
+	eq(urls.some((u) => /:53(\?|$)/.test(u)), false, "no port 53");
+	for (const s of iceServers) if ([].concat(s.urls).some((u) => /^turns?:/.test(u))) eq(typeof s.credential, "string", "TURN credential");
+	eq((await turn("https://example.com")).status, 403, "another page");
+});
+
 // ---- Signaling (matchbox) ----
 
 test("signaling: ids from ?peer=, NewPeer to those already in, signals relayed, PeerLeft", async () => {
