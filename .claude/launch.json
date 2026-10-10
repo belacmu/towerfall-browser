@@ -21,6 +21,18 @@
       "port": 8081
     },
     {
+      "name": "towerfall-aot",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8082"
+      ],
+      "port": 8082,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/aot-publish/wwwroot"
+      }
+    },
+    {
       "name": "tfex-server",
       "runtimeExecutable": "node",
       "runtimeArgs": [

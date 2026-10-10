@@ -8,6 +8,7 @@
 //   curl 'localhost:9400/A/console?from=0'       console output of all threads (works while hung)
 //   curl 'localhost:9400/A/eval' --data 'js'     evaluate in the page
 //   curl 'localhost:9400/A/evalworkers' --data 'js'  evaluate in every worker thread
+//   curl 'localhost:9400/A/catch', then 'localhost:9400/A/pauses'   stacks of uncaught exceptions in workers
 //   curl 'localhost:9400/quit'
 // Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400]
 import { spawn } from "node:child_process";
@@ -70,6 +71,17 @@ async function launch(name, debugPort) {
 	const consoleLines = [];
 	const pausedWaiters = [];
 	const workerSessions = [];
+	const catching = new Set();
+	const pauses = [];
+	// Pause every worker on uncaught exceptions (wasm traps included) and record the stack.
+	const catchWorkers = async () => {
+		for (const sessionId of workerSessions) {
+			catching.add(sessionId);
+			ws.send(JSON.stringify({ id: nextId++, sessionId, method: "Debugger.enable" }));
+			ws.send(JSON.stringify({ id: nextId++, sessionId, method: "Debugger.setPauseOnExceptions", params: { state: "all" } }));
+		}
+		return workerSessions.length;
+	};
 	// Evaluates in every worker (the game runs on one), e.g. runtime diagnostics.
 	const evalWorkers = (expression) =>
 		Promise.all(workerSessions.map((sessionId) => new Promise((resolve) => {
@@ -91,6 +103,10 @@ async function launch(name, debugPort) {
 			workerSessions.push(d.params.sessionId);
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.enable" }));
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.runIfWaitingForDebugger" }));
+		} else if (d.method === "Debugger.paused" && catching.has(d.sessionId)) {
+			// An exception in a worker we're watching: record where, then let it continue.
+			pauses.push({ session: d.sessionId, reason: d.params.reason, description: d.params.data?.description, frames: d.params.callFrames.map((f) => `${f.functionName || "(anonymous)"} ${f.url.split("/").pop()}:${f.location.lineNumber}:${f.location.columnNumber}`) });
+			ws.send(JSON.stringify({ id: nextId++, sessionId: d.sessionId, method: "Debugger.resume" }));
 		} else if (d.method === "Debugger.paused") {
 			pausedWaiters.splice(0).forEach((w) => w({ session: d.sessionId ?? "page", frames: d.params.callFrames.map((f) => `${f.functionName || "(anonymous)"} ${f.url.split("/").pop()}:${f.location.lineNumber}`) }));
 		} else if (d.method?.startsWith("Network.webSocket")) {
@@ -118,7 +134,7 @@ async function launch(name, debugPort) {
 		await send("Debugger.disable");
 		return result;
 	};
-	return { name, send, consoleLines, stack, evalWorkers };
+	return { name, send, consoleLines, stack, evalWorkers, catchWorkers, pauses };
 }
 
 // Key events as the game sees them (SDL reads DOM keydown/keyup on the canvas' document).
@@ -172,6 +188,10 @@ http.createServer(async (req, res) => {
 		} else if (action === "console") {
 			const from = Number(u.searchParams.get("from") ?? 0);
 			res.end(p.consoleLines.slice(from).map((l, i) => `${from + i}: ${l}`).join("\n") + "\n");
+		} else if (action === "catch") {
+			res.end(`watching ${await p.catchWorkers()} workers\n`);
+		} else if (action === "pauses") {
+			res.end(JSON.stringify(p.pauses, null, 1) + "\n");
 		} else if (action === "evalworkers") {
 			res.end(JSON.stringify(await p.evalWorkers(body), null, 1) + "\n");
 		} else if (action === "eval") {

@@ -7,8 +7,8 @@
 //    {"NewPeer":id} (the receiver makes the offer), {"PeerLeft":id}, {"Signal":{"sender":id,"data":S}};
 //    peer -> server: {"Signal":{"receiver":id,"data":S}} and "KeepAlive" every 10 s, where S is
 //    {"Offer":sdp} | {"Answer":sdp} | {"IceCandidate":json-of-RTCIceCandidateInit or "null"}.
-//  - each side waits for ICE gathering to finish before sending its SDP, then trickles any more
-//    candidates;
+//  - each side waits for ICE gathering to finish (at most a second) before sending its SDP, then
+//    trickles any more candidates;
 //  - one data channel: negotiated, id 0, unordered, no retransmits; packets are raw binary.
 //  - ICE servers come from the signaling server's /turn (our server: STUN plus TURN relay
 //    credentials, so players behind strict NATs can still connect); any other server: STUN only.
@@ -25,6 +25,7 @@ var LibraryTFNet = {
 		next: 1,
 		iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
 		ice: null, // { url, at, servers: Promise } from the last /turn request
+		GATHER_WAIT_MS: 1000, // longest wait for ICE gathering before sending an offer or answer (see gathered)
 
 		// The ICE servers for a room URL, from its server's /turn. Credentials last 6 hours; reused
 		// for one.
@@ -107,22 +108,40 @@ var LibraryTFNet = {
 					if (peer.connected) s.events.push([uuid, 2]);
 					peer.connected = false;
 				};
-				pc.onconnectionstatechange = () => {
+				const started = performance.now();
+				pc.onconnectionstatechange = async () => {
 					if (pc.connectionState === "failed") console.warn(`[tfnet] couldn't connect to peer ${uuid}`);
+					if (pc.connectionState !== "connected") return;
+					// Direct or through the TURN relay, for reports of slow or failed connections.
+					let path = "";
+					try {
+						const stats = await pc.getStats();
+						stats.forEach((s) => {
+							const pair = s.type === "transport" && stats.get(s.selectedCandidatePairId);
+							const local = pair && stats.get(pair.localCandidateId);
+							if (local) path = local.candidateType === "relay" ? ` through the relay (${local.relayProtocol})` : ` directly (${local.candidateType})`;
+						});
+					} catch {}
+					console.log(`[tfnet] connected to peer ${uuid}${path} in ${Math.round(performance.now() - started)} ms`);
 				};
 				s.peers.set(uuid, peer);
 				return peer;
 			};
+			// ICE gathering finishes, or GATHER_WAIT_MS passes, whichever is first. Usable candidates
+			// arrive within a few hundred ms, but "complete" waits for every STUN/TURN request, and one
+			// that's never answered (UDP to port 443 on many networks) holds it for about 40 s, past
+			// TF.EX's 20 s to connect. The SDP carries what's gathered so far; trickle sends the rest.
 			const gathered = (pc) =>
 				pc.iceGatheringState === "complete"
 					? Promise.resolve()
 					: new Promise((resolve) => {
-							const check = () => {
-								if (pc.iceGatheringState === "complete") {
-									pc.removeEventListener("icegatheringstatechange", check);
-									resolve();
-								}
+							const done = () => {
+								clearTimeout(timer);
+								pc.removeEventListener("icegatheringstatechange", check);
+								resolve();
 							};
+							const check = () => pc.iceGatheringState === "complete" && done();
+							const timer = setTimeout(done, TFNet.GATHER_WAIT_MS);
 							pc.addEventListener("icegatheringstatechange", check);
 						});
 			const addCandidate = async (peer, json) => {
@@ -356,7 +375,11 @@ var LibraryTFNet = {
 // thread that owns the page's JS context, which deadlocks when a mod blocks that thread waiting
 // for a connection. These are polled instead, so nothing ever calls back into .NET.
 var LibraryTFWs = {
-	$TFWs__postset: "TFWs.sockets = new Map();",
+	$TFWs__postset:
+		"TFWs.sockets = new Map();" +
+		// Workers only report an error's message to the page; log the whole stack (wasm function
+		// names included, unless stripped) so traps can be traced.
+		"if (ENVIRONMENT_IS_PTHREAD) { self.addEventListener('error', (e) => console.error('[worker error] ' + (e.error && e.error.stack || e.message))); self.addEventListener('unhandledrejection', (e) => console.error('[worker rejection] ' + (e.reason && e.reason.stack || e.reason))); }",
 	$TFWs: { sockets: null, next: 1 },
 
 	// int tfws_open(const char* url): a handle (> 0), or 0 if the URL is invalid.

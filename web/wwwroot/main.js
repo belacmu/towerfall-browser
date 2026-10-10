@@ -503,6 +503,11 @@ async function startDotnet() {
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
 	const server = tfexServer();
 	if (server.url) builder = builder.withEnvironmentVariable("TFEX_SERVER", server.url).withEnvironmentVariable("TFEX_SERVER_FORCE", server.force ? "1" : "0");
+	// A 16 MB GC nursery instead of the default 4 MB: TF.EX's rollback state saves allocate a few MB
+	// per second, and each minor collection stops every thread at a cost set by the surviving
+	// objects, not the nursery size, so 4x fewer of them (measured: 27 -> 7 per 5 s in the rollback
+	// sync test) means fewer frame hitches for ~12 MB of memory.
+	builder = builder.withEnvironmentVariable("MONO_GC_PARAMS", "nursery-size=16m");
 	// ?env=NAME=value;NAME=value sets runtime environment variables (e.g. MONO_GC_PARAMS), for tuning.
 	for (const pair of (new URLSearchParams(location.search).get("env") ?? "").split(";").filter(Boolean)) {
 		const at = pair.indexOf("=");
