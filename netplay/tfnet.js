@@ -14,7 +14,10 @@
 //    credentials, so players behind strict NATs can still connect); any other server: STUN only.
 //
 // RTCPeerConnection only exists on the page's main thread, so every function here is proxied there
-// (__proxy: "sync") from whichever worker thread the game calls it on.
+// (__proxy: "sync") from whichever worker thread the game calls it on. Each call waits for the main
+// thread, so callers first check a socket's signal: two counters in wasm memory (their own, passed
+// to tfnet_open) that the page bumps when packets arrive (0) and when anything else changes (1:
+// peer events, state, id). Unchanged counters mean there's nothing to ask for.
 
 var LibraryTFNet = {
 	// (Emscripten copies these objects into the build as source text, which turns a Map into {};
@@ -59,6 +62,11 @@ var LibraryTFNet = {
 			return servers;
 		},
 
+		// Bumps one of a socket's signal counters (see the top).
+		bump(s, counter) {
+			if (s.signal) Atomics.add(HEAP32, (s.signal >> 2) + counter, 1);
+		},
+
 		uuidToBytes(uuid, ptr) {
 			const hex = uuid.replace(/-/g, "");
 			for (let i = 0; i < 16; i++) HEAPU8[ptr + i] = parseInt(hex.substr(i * 2, 2), 16);
@@ -69,8 +77,9 @@ var LibraryTFNet = {
 			return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 		},
 
-		open(url) {
+		open(url, counters) {
 			const s = {
+				signal: counters, // address of the socket's two signal counters; 0 once closed
 				ws: null,
 				id: null,
 				peers: new Map(), // uuid -> { pc, dc, connected, pending: [candidate json] }
@@ -89,6 +98,7 @@ var LibraryTFNet = {
 				if (s.state !== 0) return;
 				s.state = s.id ? 3 : 2;
 				s.error = message;
+				TFNet.bump(s, 1);
 				TFNet.shutdown(s);
 			};
 
@@ -100,12 +110,18 @@ var LibraryTFNet = {
 				dc.onopen = () => {
 					peer.connected = true;
 					s.events.push([uuid, 1]);
+					TFNet.bump(s, 1);
 				};
 				dc.onmessage = (e) => {
-					if (e.data instanceof ArrayBuffer) s.inbox.push([uuid, new Uint8Array(e.data)]);
+					if (!(e.data instanceof ArrayBuffer)) return;
+					s.inbox.push([uuid, new Uint8Array(e.data)]);
+					TFNet.bump(s, 0);
 				};
 				dc.onclose = () => {
-					if (peer.connected) s.events.push([uuid, 2]);
+					if (peer.connected) {
+						s.events.push([uuid, 2]);
+						TFNet.bump(s, 1);
+					}
 					peer.connected = false;
 				};
 				const started = performance.now();
@@ -219,12 +235,18 @@ var LibraryTFNet = {
 				} catch {
 					return;
 				}
-				if (msg.IdAssigned) s.id = msg.IdAssigned;
+				if (msg.IdAssigned) {
+					s.id = msg.IdAssigned;
+					TFNet.bump(s, 1);
+				}
 				else if (msg.NewPeer) offer(msg.NewPeer).catch((err) => console.error("[tfnet] offer failed:", err));
 				else if (msg.PeerLeft) {
 					const peer = s.peers.get(msg.PeerLeft);
 					if (peer) {
-						if (peer.connected) s.events.push([msg.PeerLeft, 2]);
+						if (peer.connected) {
+							s.events.push([msg.PeerLeft, 2]);
+							TFNet.bump(s, 1);
+						}
 						peer.connected = false;
 						peer.pc.close();
 						s.peers.delete(msg.PeerLeft);
@@ -250,15 +272,16 @@ var LibraryTFNet = {
 		},
 	},
 
-	// int tfnet_open(const char* url, size_t len): a handle (> 0).
+	// int tfnet_open(const char* url, size_t len, int32_t signal[2]): a handle (> 0). The page bumps
+	// signal[0] when packets arrive and signal[1] when anything else changes, until tfnet_close.
 	tfnet_open__deps: ["$TFNet"],
 	tfnet_open__proxy: "sync",
-	tfnet_open__sig: "ipp",
-	tfnet_open: function (url, len) {
+	tfnet_open__sig: "ippp",
+	tfnet_open: function (url, len, signal) {
 		globalThis.tfnetCalls ??= {};
 		globalThis.tfnetCalls.tfnet_open = (globalThis.tfnetCalls.tfnet_open | 0) + 1; // calls proxied to the page (for diagnostics)
 		const h = TFNet.next++;
-		TFNet.sockets.set(h, TFNet.open(UTF8ToString(url, len)));
+		TFNet.sockets.set(h, TFNet.open(UTF8ToString(url, len), signal));
 		return h;
 	},
 
@@ -272,6 +295,7 @@ var LibraryTFNet = {
 		const s = TFNet.sockets.get(h);
 		if (!s) return;
 		if (s.state === 0) s.state = 1;
+		s.signal = 0; // the caller may free it now
 		TFNet.shutdown(s);
 		TFNet.sockets.delete(h);
 	},
@@ -373,7 +397,9 @@ var LibraryTFNet = {
 // Plain WebSockets for .NET's ClientWebSocket (TF.EX's lobby connection; see
 // web/Netplay/PolledWebSocket.cs). .NET's own browser WebSocket delivers its events through the
 // thread that owns the page's JS context, which deadlocks when a mod blocks that thread waiting
-// for a connection. These are polled instead, so nothing ever calls back into .NET.
+// for a connection. These are polled instead, so nothing ever calls back into .NET. Like the
+// sockets above, each has a signal counter in wasm memory that the page bumps whenever it opens,
+// gets a message or closes, so pollers only call in (and wait for the main thread) when it moved.
 var LibraryTFWs = {
 	$TFWs__postset:
 		"TFWs.sockets = new Map();" +
@@ -382,27 +408,35 @@ var LibraryTFWs = {
 		"if (ENVIRONMENT_IS_PTHREAD) { self.addEventListener('error', (e) => console.error('[worker error] ' + (e.error && e.error.stack || e.message))); self.addEventListener('unhandledrejection', (e) => console.error('[worker rejection] ' + (e.reason && e.reason.stack || e.reason))); }",
 	$TFWs: { sockets: null, next: 1 },
 
-	// int tfws_open(const char* url): a handle (> 0), or 0 if the URL is invalid.
+	// int tfws_open(const char* url, int32_t* signal): a handle (> 0), or 0 if the URL is invalid.
+	// The page bumps *signal on every open, message and close, until tfws_free.
 	tfws_open__deps: ["$TFWs"],
 	tfws_open__proxy: "sync",
-	tfws_open__sig: "ip",
-	tfws_open: function (url) {
+	tfws_open__sig: "ipp",
+	tfws_open: function (url, signal) {
 		globalThis.tfnetCalls ??= {};
 		globalThis.tfnetCalls.tfws_open = (globalThis.tfnetCalls.tfws_open | 0) + 1; // calls proxied to the page (for diagnostics)
-		const s = { ws: null, state: 0, code: 0, reason: "", inbox: [] };
+		const s = { ws: null, state: 0, code: 0, reason: "", inbox: [], signal };
+		const bump = () => s.signal && Atomics.add(HEAP32, s.signal >> 2, 1);
 		try {
 			s.ws = new WebSocket(UTF8ToString(url));
 		} catch {
 			return 0;
 		}
 		s.ws.binaryType = "arraybuffer";
-		s.ws.onopen = () => (s.state = 1);
-		s.ws.onmessage = (e) =>
+		s.ws.onopen = () => {
+			s.state = 1;
+			bump();
+		};
+		s.ws.onmessage = (e) => {
 			s.inbox.push(typeof e.data === "string" ? [1, new TextEncoder().encode(e.data)] : [2, new Uint8Array(e.data)]);
+			bump();
+		};
 		s.ws.onclose = (e) => {
 			s.state = 3;
 			s.code = e.code;
 			s.reason = e.reason;
+			bump();
 		};
 		const h = TFWs.next++;
 		TFWs.sockets.set(h, s);
@@ -499,6 +533,7 @@ var LibraryTFWs = {
 		globalThis.tfnetCalls.tfws_free = (globalThis.tfnetCalls.tfws_free | 0) + 1; // calls proxied to the page (for diagnostics)
 		const s = TFWs.sockets.get(h);
 		if (!s) return;
+		s.signal = 0; // the caller may free it now
 		if (s.ws.readyState < 2) s.ws.close();
 		TFWs.sockets.delete(h);
 	},

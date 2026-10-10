@@ -2,11 +2,18 @@
 //! matchbox signaling protocol live in netplay/tfnet.js on the page's main thread; these are thin
 //! wrappers over its functions. Signaling, peer roles and channel settings match matchbox, so
 //! browser peers interoperate with desktop ones.
+//!
+//! Every tfnet_* call waits for the page's main thread, and ggrs-ffi polls these many hundreds of
+//! times a second from several threads. So each socket shares two counters with the page, which
+//! bumps the first when packets arrive and the second when anything else changes (peer events,
+//! state, our id); a poll whose counter hasn't moved returns at once without calling the page.
 
 use std::collections::HashSet;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 pub use uuid::Uuid;
@@ -60,7 +67,7 @@ impl fmt::Display for SendError {
 }
 
 extern "C" {
-	fn tfnet_open(url: *const u8, len: usize) -> i32;
+	fn tfnet_open(url: *const u8, len: usize, signal: *mut i32) -> i32;
 	fn tfnet_close(h: i32);
 	fn tfnet_state(h: i32) -> i32;
 	fn tfnet_error(h: i32, buf: *mut u8, cap: usize) -> i32;
@@ -75,8 +82,38 @@ const RECV_BUFFER: usize = 256 * 1024;
 // messages are at most 64 KiB here).
 const RECV_SLACK: usize = 64 * 1024 + 20;
 
+/// The counters the page bumps (see the top): PACKETS when packets arrive, CHANGES for the rest.
+/// Shared by a socket, its channel and its message loop future; the page stops writing at close.
+type Signal = Arc<[AtomicI32; 2]>;
+const PACKETS: usize = 0;
+const CHANGES: usize = 1;
+
+/// Tells whether a signal counter moved since the last call (true the first time).
+struct Watch {
+	counter: usize,
+	seen: Option<i32>,
+}
+
+impl Watch {
+	fn new(counter: usize) -> Self {
+		Watch { counter, seen: None }
+	}
+
+	fn moved(&mut self, signal: &Signal) -> bool {
+		let now = signal[self.counter].load(Ordering::Acquire);
+		let moved = self.seen != Some(now);
+		self.seen = Some(now);
+		moved
+	}
+}
+
 pub struct WebRtcSocket {
 	handle: i32,
+	signal: Signal,
+	changes: Watch,
+	state: i32, // tfnet_state's, as of the last change
+	id: Option<PeerId>,
+	id_changes: Watch,
 	peers: HashSet<PeerId>,
 	channel: Option<WebRtcChannel>,
 	closed: bool,
@@ -85,18 +122,25 @@ pub struct WebRtcSocket {
 /// Completes when the signaling connection ends (like matchbox's message loop future).
 pub struct MessageLoopFuture {
 	handle: i32,
+	signal: Signal,
+	changes: Watch,
+	state: i32,
 }
 
 impl Future for MessageLoopFuture {
 	type Output = Result<(), Error>;
 
 	// Doesn't register a waker: ggrs-ffi polls this alongside a 10 ms timer, which drives it.
-	fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-		match unsafe { tfnet_state(self.handle) } {
+	fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+		let this = &mut *self;
+		if this.changes.moved(&this.signal) {
+			this.state = unsafe { tfnet_state(this.handle) };
+		}
+		match this.state {
 			0 => Poll::Pending,
 			1 => Poll::Ready(Ok(())),
-			2 => Poll::Ready(Err(Error::ConnectionFailed(error_of(self.handle)))),
-			_ => Poll::Ready(Err(Error::Disconnected(error_of(self.handle)))),
+			2 => Poll::Ready(Err(Error::ConnectionFailed(error_of(this.handle)))),
+			_ => Poll::Ready(Err(Error::Disconnected(error_of(this.handle)))),
 		}
 	}
 }
@@ -111,22 +155,43 @@ impl WebRtcSocket {
 	/// A socket with one unreliable channel (unordered, no retransmits) in the given room.
 	pub fn new_unreliable(room_url: impl Into<String>) -> (WebRtcSocket, MessageLoopFuture) {
 		let url = room_url.into();
-		let handle = unsafe { tfnet_open(url.as_ptr(), url.len()) };
+		let signal: Signal = Arc::new([AtomicI32::new(0), AtomicI32::new(0)]);
+		let handle = unsafe { tfnet_open(url.as_ptr(), url.len(), signal.as_ptr() as *mut i32) };
+		let channel = WebRtcChannel { handle, signal: signal.clone(), packets: Watch::new(PACKETS), buf: Vec::new() };
 		(
-			WebRtcSocket { handle, peers: HashSet::new(), channel: Some(WebRtcChannel { handle, buf: Vec::new() }), closed: false },
-			MessageLoopFuture { handle },
+			WebRtcSocket {
+				handle,
+				signal: signal.clone(),
+				changes: Watch::new(CHANGES),
+				state: 0,
+				id: None,
+				id_changes: Watch::new(CHANGES),
+				peers: HashSet::new(),
+				channel: Some(channel),
+				closed: false,
+			},
+			MessageLoopFuture { handle, signal, changes: Watch::new(CHANGES), state: 0 },
 		)
 	}
 
 	/// Our id, once the signaling server has assigned it.
 	pub fn id(&mut self) -> Option<PeerId> {
-		let mut bytes = [0u8; 16];
-		(unsafe { tfnet_id(self.handle, bytes.as_mut_ptr()) } == 1).then(|| PeerId(Uuid::from_bytes(bytes)))
+		if self.id.is_none() && self.id_changes.moved(&self.signal) {
+			let mut bytes = [0u8; 16];
+			if unsafe { tfnet_id(self.handle, bytes.as_mut_ptr()) } == 1 {
+				self.id = Some(PeerId(Uuid::from_bytes(bytes)));
+			}
+		}
+		self.id
 	}
 
 	/// Peers that connected or disconnected since the last call.
 	pub fn update_peers(&mut self) -> Vec<(PeerId, PeerState)> {
 		let mut changes = Vec::new();
+		if !self.changes.moved(&self.signal) {
+			return changes;
+		}
+		self.state = unsafe { tfnet_state(self.handle) };
 		let mut bytes = [0u8; 16];
 		loop {
 			let event = unsafe { tfnet_next_event(self.handle, bytes.as_mut_ptr()) };
@@ -146,8 +211,9 @@ impl WebRtcSocket {
 	}
 
 	pub fn try_update_peers(&mut self) -> Result<Vec<(PeerId, PeerState)>, Error> {
-		match unsafe { tfnet_state(self.handle) } {
-			0 => Ok(self.update_peers()),
+		let changes = self.update_peers();
+		match self.state {
+			0 => Ok(changes),
 			1 => Err(Error::Disconnected("socket closed".into())),
 			2 => Err(Error::ConnectionFailed(error_of(self.handle))),
 			_ => Err(Error::Disconnected(error_of(self.handle))),
@@ -187,6 +253,8 @@ impl Drop for WebRtcSocket {
 /// A data channel to all peers of a socket.
 pub struct WebRtcChannel {
 	handle: i32,
+	signal: Signal,
+	packets: Watch,
 	// Reused for every receive (it's called every tick).
 	buf: Vec<u8>,
 }
@@ -203,6 +271,9 @@ impl WebRtcChannel {
 
 	pub fn receive(&mut self) -> Vec<(PeerId, Packet)> {
 		let mut out = Vec::new();
+		if !self.packets.moved(&self.signal) {
+			return out;
+		}
 		if self.buf.len() != RECV_BUFFER {
 			self.buf = vec![0u8; RECV_BUFFER];
 		}
