@@ -2,46 +2,47 @@
 
 Goal: TowerFall on phones with touch controls. Step 1 is finding out whether it runs at all.
 
-## Step 1: does it boot? (private deployment)
+## Step 1: does it boot? (private file host)
 
 Phones can't pick a folder (`showDirectoryPicker` is desktop Chromium only, and mobile browsers
-don't do `webkitdirectory` or folder drops), so the public site can't get the game files onto one
-yet. Private mode already solves that on a dev server: the server hosts `gamefiles/manifest.json`
-and the page imports from it. `cloudflare/` is the same thing on Cloudflare, reachable from a phone:
+don't do `webkitdirectory` or folder drops), so a phone can't import the game files itself yet.
+Instead the public site loads them from a private file host you run, `cloudflare/`:
 
-- an **R2 bucket** holds your TowerFall install (`tools/upload-gamefiles.sh`);
-- a **Worker** (`cloudflare/worker.js`) serves `/gamefiles/*` from the bucket and everything else
-  from the GitHub Pages build, adding the COOP/COEP headers threads need;
-- **Cloudflare Access** lets only you in. The Worker also checks Access's token on every request
-  and answers 403 without a valid one, so if Access is off or misconfigured nothing is exposed.
+- an **R2 bucket** holds your TowerFall install (`tools/upload-gamefiles.sh`), laid out like
+  `tools/serve.py`'s private mode: `gamefiles/manifest.json` plus the files;
+- a **Worker** (`cloudflare/worker.js`) serves it under `/<KEY>/gamefiles/*`, cross-origin (CORS),
+  where `KEY` is a long random secret. Every other path is a 404 that never touches the bucket;
+- the **site** is told about the host once, by opening it with
+  `#gamefiles=https://towerfall-private.<subdomain>.workers.dev/<KEY>/`. It remembers the host in
+  that browser and imports from it, like private mode: the first visit copies the game into the
+  browser's storage, later ones only check the manifest. `#gamefiles=` forgets it.
 
-Keep it private: the public site deliberately hosts no game files.
+The link is the only thing keeping the files private (it sits in the URL fragment, so it never
+reaches GitHub's servers): share it with no one. To revoke it, set a new `KEY`. The public site
+itself still hosts no game files.
 
 ### Setup (once)
 
-1. **Bucket.** Cloudflare dashboard → R2 → create bucket `towerfall-gamefiles`. Then R2 → Manage
-   API tokens → create a token with *Object Read & Write* on that bucket; note the access key ID,
-   secret, and your account ID.
+1. **Bucket.** Cloudflare dashboard → R2 → create bucket `towerfall-gamefiles`, and an R2 API
+   token with *Object Read & Write* on it; note the access key ID, secret, and your account ID.
 2. **Upload** from the machine with TowerFall installed (needs [rclone](https://rclone.org/install/)):
    ```bash
    R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… tools/upload-gamefiles.sh [install dir]
    ```
    The default install dir is the macOS Steam one. Re-running uploads only what changed.
-3. **Worker.** `cd cloudflare && npx wrangler deploy` (logs in on first use). It's served at
-   `https://towerfall-private.<your-subdomain>.workers.dev`, and refuses every request until step 4.
-4. **Access.** Zero Trust → Access → Applications → add a *self-hosted* application for that
-   hostname, with a policy allowing your email (one-time PIN login works on a phone). From the
-   application, copy the *Application Audience (AUD) Tag*; your team domain is
-   `<team>.cloudflareaccess.com` (Zero Trust → Settings). Put both in `cloudflare/wrangler.toml`
-   (`ACCESS_AUD`, `ACCESS_TEAM_DOMAIN`) and deploy again.
+3. **Worker.** From `cloudflare/`: `npx wrangler deploy`, then `openssl rand -hex 24 | npx wrangler
+   secret put KEY`. Without `KEY` it answers 404 to everything.
+4. **Link.** On each device, open
+   `https://belacmu.github.io/towerfall-browser/#gamefiles=https://towerfall-private.<subdomain>.workers.dev/<KEY>/`.
 
-The site comes from `SITE_URL` (the Pages build of `main`), so the deployment always runs the
-latest published site. To try a branch, point `SITE_URL` at another build.
+Costs: this fits Cloudflare's free tiers for one player. A first import on a device is about 1,600
+R2 reads and Worker requests, a later visit one of each (R2: 10M reads/month free; Workers free plan:
+100k requests/day).
 
 ### What to try on each phone
 
-Open the Worker URL with `?autoplay&nointro` (no Play tap needed, no audio), wait for the
-game files to copy (once; later visits only check them), and see whether the title screen comes up.
+Open the link with `?autoplay&nointro` before the `#` (no Play tap needed, no audio), wait for the
+game files to copy, and see whether the title screen comes up.
 Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely first:
 
 - **iPhone memory.** The runtime asks for a 512 MB shared heap (`EmccInitialHeapSize` in

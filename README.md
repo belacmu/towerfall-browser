@@ -17,12 +17,13 @@ Next: online multiplayer.
 - **Public**: the server hosts only this site. The page asks the player to drop or choose their
   TowerFall folder, copies the game files into the browser's storage (OPFS), and runs them. Nothing
   is uploaded anywhere. Suitable for GitHub Pages.
-- **Private**: the server also hosts a TowerFall install under `gamefiles/` (with a `manifest.json`),
-  and the page imports it automatically. `tools/stage-gamefiles.sh` sets this up for the dev server;
-  `cloudflare/` does it on Cloudflare (R2 + a Worker behind Access), e.g. for phones
-  (`docs/MOBILE.md`).
+- **Private**: a server also hosts a TowerFall install under `gamefiles/` (with a `manifest.json`),
+  and the page imports it automatically. `tools/stage-gamefiles.sh` sets this up for the dev server.
+  `cloudflare/` is a private file host on Cloudflare (R2 + a Worker) that the public site loads
+  from when opened with a `#gamefiles=<host>` link, e.g. on phones (`docs/MOBILE.md`).
 
-The page picks the mode at runtime: private if `gamefiles/manifest.json` exists, otherwise public.
+The page picks the mode at runtime: private if it was given a file host or `gamefiles/manifest.json`
+exists, otherwise public.
 
 ## How it works
 

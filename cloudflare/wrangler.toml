@@ -1,14 +1,8 @@
-# The private deployment (see worker.js and docs/MOBILE.md). Deploy: cd cloudflare && npx wrangler deploy
+# The private game file host (see worker.js and docs/MOBILE.md). Deploy: cd cloudflare && npx wrangler deploy
+# Its KEY is a secret: npx wrangler secret put KEY (a long random string, e.g. openssl rand -hex 24).
 name = "towerfall-private"
 main = "worker.js"
 compatibility_date = "2025-06-01"
-
-[vars]
-# Where the site itself comes from (trailing slash). Game files come from the bucket below.
-SITE_URL = "https://belacmu.github.io/towerfall-browser/"
-# From Zero Trust: your team domain, and the Access application's "Application Audience (AUD) Tag".
-ACCESS_TEAM_DOMAIN = "YOUR-TEAM.cloudflareaccess.com"
-ACCESS_AUD = "YOUR-ACCESS-APPLICATION-AUD-TAG"
 
 [[r2_buckets]]
 binding = "GAMEFILES"

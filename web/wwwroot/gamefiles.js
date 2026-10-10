@@ -3,7 +3,8 @@
 //
 // Sources, all reduced to a flat list of { path, size, open() -> Promise<Blob | Response> }:
 //   - a folder the player picks or drops (public site: no game files are hosted), or
-//   - /gamefiles/manifest.json on the server (private deployments that host the files).
+//   - gamefiles/manifest.json on a server that hosts the files: this one (tools/serve.py's private
+//     mode) or a private file host elsewhere (cloudflare/, given as a base URL).
 // Paths are relative to whatever folder was supplied; locateGame() finds the game inside it, so
 // the player can hand over the Steam folder, the .app bundle, or an extracted copy.
 
@@ -11,10 +12,10 @@ const MARKER = ".imported.json";
 
 // --- Sources ---------------------------------------------------------------------------------
 
-export async function fromServer() {
+export async function fromServer(base = "") {
 	let res;
 	try {
-		res = await fetch("gamefiles/manifest.json", { cache: "no-store" });
+		res = await fetch(base + "gamefiles/manifest.json", { cache: "no-store" });
 	} catch {
 		return null;
 	}
@@ -24,7 +25,7 @@ export async function fromServer() {
 		path: f.path,
 		size: f.size,
 		open: async () => {
-			const r = await fetch("gamefiles/" + f.path.split("/").map(encodeURIComponent).join("/"));
+			const r = await fetch(base + "gamefiles/" + f.path.split("/").map(encodeURIComponent).join("/"));
 			if (!r.ok) throw new Error(`Failed to fetch ${f.path}: ${r.status}`);
 			return r;
 		},
