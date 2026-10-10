@@ -24,6 +24,11 @@ const logText = (a) => {
 for (const level of ["log", "info", "warn", "error", "debug"]) {
 	const original = console[level].bind(console);
 	console[level] = (...args) => {
+		// Progress reports from .NET (see FortRiseLauncher), for showActivity only.
+		if (typeof args[0] === "string" && args[0].startsWith("[progress] ")) {
+			onConsoleLine?.(args[0]);
+			return;
+		}
 		const line = `[${level}] ` + args.map(logText).join(" ");
 		self.consoleLog.push(line);
 		if (self.consoleLog.length > 2000) self.consoleLog.splice(0, 500);
@@ -415,17 +420,26 @@ function offerMusic(host) {
 }
 
 // For steps with no telling how long they take (FortRise patching TowerFall.exe the first time,
-// then loading each mod): shows the time passing and what it's doing, from its log.
+// then loading each mod): shows the time passing and what it's doing, from its log, and how far
+// patching is while it patches.
 function showActivity(text) {
 	const started = performance.now();
 	let doing = "";
+	let patched = 100;
 	onConsoleLine = (line) => {
+		const report = /^\[progress\] patch (\d+)$/.exec(line);
+		if (report) {
+			patched = Number(report[1]);
+			$("bar").classList.toggle("busy", patched >= 100);
+			progress(patched / 100);
+			return;
+		}
 		const logged = /^\[log\] \[Information\]\[(?:FortRise|Mods)\] (?:\[\w+\] )?(.+)/.exec(line);
 		if (logged) doing = logged[1];
 	};
 	const tick = () => {
 		status(`${text} ${Math.floor((performance.now() - started) / 1000)} s`);
-		detail(doing);
+		detail(patched < 100 ? `${doing} ${patched}%` : doing);
 	};
 	tick();
 	const timer = setInterval(tick, 250);

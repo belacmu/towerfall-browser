@@ -16,7 +16,15 @@ public static class FortRiseLauncher
 	public static Game Start(string exePath, string fortriseDir, string fortriseVersion, bool noIntro, ILoggerFactory loggers)
 	{
 		ILogger log = loggers.CreateLogger("FortRise");
-		string patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers);
+		// The page shows patching's progress from these lines (and leaves them out of the console).
+		int shown = -1;
+		string patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, fraction =>
+		{
+			int percent = (int)(fraction * 100);
+			if (percent == shown) return;
+			shown = percent;
+			Console.WriteLine($"[progress] patch {percent}");
+		});
 
 		// FortRiseHandler.LoadAssembly: dependencies not in the app resolve from the FortRise folder.
 		AssemblyLoadContext.Default.Resolving += (context, name) =>
