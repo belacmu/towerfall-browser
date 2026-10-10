@@ -11,6 +11,16 @@
       "port": 8080
     },
     {
+      "name": "towerfall-diag",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8081",
+        "--diag"
+      ],
+      "port": 8081
+    },
+    {
       "name": "tfex-server",
       "runtimeExecutable": "node",
       "runtimeArgs": [

@@ -37,7 +37,7 @@ async function launch(name, debugPort) {
 	fs.mkdirSync(profile, { recursive: true });
 	children.push(spawn(chrome, [
 		"--headless=new", `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, "--no-first-run",
-		...GPU_FLAGS, "--autoplay-policy=no-user-gesture-required",
+		...GPU_FLAGS, "--autoplay-policy=no-user-gesture-required", "--mute-audio", // the page's audio runs, silently
 		"--window-size=960,600", "about:blank",
 	], { stdio: "ignore" }));
 	let target;
