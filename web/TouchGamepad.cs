@@ -1,5 +1,7 @@
 using System;
 using System.Reflection;
+using HarmonyLib;
+using Microsoft.Xna.Framework;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using SDL3;
@@ -10,6 +12,14 @@ namespace TowerFallBrowser;
 // gamepad shape, so FNA, and through it the game, see an ordinary Xbox-style controller (analog
 // aiming, controller prompts, rebindable in the game's options). The page sends the controls' state
 // whenever it changes; the game thread, which SDL belongs to, applies it before each frame.
+//
+// While the controls show, the keyboard isn't a player. The game lists gamepads first and then
+// the keyboard (PlayerInput.AssignInputs), so with the pad plugged in the keyboard was player 2. A
+// postfix takes the keyboard back out of each list the game builds, as long as a gamepad is left;
+// the game's menus still take keys, as they do when four pads are connected. Only lists the game
+// built: in an online lobby TF.EX skips AssignInputs and seats remote players on KeyboardInputs
+// of its own. Turning the controls on or off rebuilds the list the next time the main menu is up
+// (in a match, the Level expects every player's input to stay).
 public static unsafe class TouchGamepad
 {
 	// State bits: SDL_GamepadButton indices (0 = south/A ... 14 = d-pad right), plus the triggers.
@@ -19,6 +29,8 @@ public static unsafe class TouchGamepad
 	private const int AxisCount = 6; // left x/y, right x/y, left/right trigger (SDL_GamepadAxis order)
 
 	public static bool Enabled;
+	private static volatile bool shown;
+	private static volatile bool reassign;
 	private static bool attempted;
 	private static IntPtr joystick;
 	// Latest state from the page: buttons in the low 32 bits, then left stick x and y (16 bits each).
@@ -28,6 +40,99 @@ public static unsafe class TouchGamepad
 	public static long Pack(int buttons, int x, int y) => (uint)buttons | (long)(ushort)(short)x << 32 | (long)(ushort)(short)y << 48;
 
 	public static void Set(int buttons, int x, int y) => Interlocked.Exchange(ref pending, Pack(buttons, x, y));
+
+	// The page shows or hides the controls (any thread). Showing them plugs the pad in; it stays
+	// plugged in when they're hidden.
+	public static void Show(bool on)
+	{
+		if (on) Enabled = true;
+		if (on != shown) reassign = game != null;
+		shown = on;
+	}
+
+	private static Game game;
+	private static FieldInfo playerInputs;
+	private static PropertyInfo loaded;
+	private static Type keyboardInput, xGamepadInput;
+	private static MethodInfo assignInputs, updateJoysticks, updateMenuInputs, updateMenuButtons;
+	private static bool patched;
+
+	// Init() calls this after constructing the game, before its first frame (where TFGame.Load
+	// first assigns the inputs). If the game isn't as expected, the keyboard just stays a player.
+	public static void Init(Game tfGame)
+	{
+		AttachIfEnabled();
+		try
+		{
+			// Public and not: FortRise makes some of these internal.
+			const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+			Assembly tf = tfGame.GetType().Assembly;
+			Type tfGameType = tf.GetType("TowerFall.TFGame", throwOnError: true);
+			playerInputs = tfGameType.GetField("PlayerInputs", any) ?? throw new MissingMemberException("TFGame.PlayerInputs");
+			loaded = tfGameType.GetProperty("Loaded", any) ?? throw new MissingMemberException("TFGame.Loaded");
+			keyboardInput = tf.GetType("TowerFall.KeyboardInput", throwOnError: true);
+			xGamepadInput = tf.GetType("TowerFall.XGamepadInput", throwOnError: true);
+			assignInputs = tf.GetType("TowerFall.PlayerInput", throwOnError: true).GetMethod("AssignInputs", any) ?? throw new MissingMemberException("PlayerInput.AssignInputs");
+			updateJoysticks = tf.GetType("Monocle.MInput", throwOnError: true).GetMethod("UpdateJoysticks", any) ?? throw new MissingMemberException("MInput.UpdateJoysticks");
+			updateMenuInputs = tf.GetType("TowerFall.MenuInput", throwOnError: true).GetMethod("UpdateInputs", any) ?? throw new MissingMemberException("MenuInput.UpdateInputs");
+			updateMenuButtons = tf.GetType("TowerFall.MenuButtons", throwOnError: true).GetMethod("Update", any) ?? throw new MissingMemberException("MenuButtons.Update");
+			game = tfGame;
+			if (shown) PatchAssignInputs();
+		}
+		catch (Exception e)
+		{
+			game = null;
+			Console.Error.WriteLine($"[touch] The keyboard stays a player with the controls on: {e.Message}");
+		}
+	}
+
+	private static void PatchAssignInputs()
+	{
+		if (patched) return;
+		patched = true;
+		const BindingFlags all = BindingFlags.NonPublic | BindingFlags.Static;
+		new Harmony("TowerFallBrowser.TouchGamepad").Patch(assignInputs,
+			prefix: new HarmonyMethod(typeof(TouchGamepad).GetMethod(nameof(AssignInputsPrefix), all)),
+			postfix: new HarmonyMethod(typeof(TouchGamepad).GetMethod(nameof(AssignInputsPostfix), all)));
+	}
+
+	private static void AssignInputsPrefix(out object __state) => __state = playerInputs.GetValue(null);
+
+	private static void AssignInputsPostfix(object __state)
+	{
+		if (!shown || playerInputs.GetValue(null) is not Array inputs || inputs == __state) return;
+		bool gamepad = false;
+		foreach (object input in inputs) gamepad |= xGamepadInput.IsInstanceOfType(input);
+		if (!gamepad) return;
+		int removed = 0;
+		for (int i = 0; i < inputs.Length; i++)
+		{
+			if (!keyboardInput.IsInstanceOfType(inputs.GetValue(i))) continue;
+			inputs.SetValue(null, i);
+			removed++;
+		}
+		if (removed == 0) return;
+		Console.WriteLine("[touch] On-screen controls on: the keyboard isn't a player");
+		updateMenuInputs.Invoke(null, null);
+		updateMenuButtons.Invoke(null, null);
+	}
+
+	// After the controls were turned on or off: the game's own reassignment, in the main menu.
+	private static void ReassignInMenu()
+	{
+		if (game == null || game.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().FullName != "TowerFall.MainMenu" || loaded.GetValue(null) is not true) return;
+		reassign = false;
+		try
+		{
+			if (shown) PatchAssignInputs();
+			updateJoysticks.Invoke(null, null);
+			assignInputs.Invoke(null, null);
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[touch] Couldn't reassign the players' inputs: {e}");
+		}
+	}
 
 	// Plugs the pad in once it's enabled (game thread). Init() calls this after constructing the game
 	// (FNA has initialized SDL then) and before its first frame, so the game finds it like a
@@ -89,6 +194,7 @@ public static unsafe class TouchGamepad
 	public static void Update()
 	{
 		AttachIfEnabled();
+		if (reassign) ReassignInMenu();
 		if (joystick == IntPtr.Zero) return;
 		long now = Interlocked.Read(ref pending);
 		if (now == applied) return;

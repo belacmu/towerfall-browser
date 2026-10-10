@@ -150,9 +150,10 @@ async function applyTouch() {
 	$("touchToggle").textContent = touchOn ? "Controls: on" : "Controls: off";
 	// Before the game runs, Init() picks the setting up.
 	if (!host) return;
+	// Showing them plugs the virtual gamepad in (once) before the next frame, like connecting a
+	// controller; while they show, the keyboard isn't a player.
+	await host.ShowTouchControls(touchOn);
 	if (touchOn) {
-		// Plugs the virtual gamepad in (once) before the next frame, like connecting a controller.
-		await host.EnableTouchGamepad();
 		controls ??= createTouchControls((buttons, x, y) => host.SetTouchGamepad(buttons, x, y));
 	}
 	controls?.setVisible(touchOn);
@@ -583,7 +584,7 @@ async function main() {
 	stopDarkWorldOffer();
 
 	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch.
-	if (touchOn) await exports.BrowserHost.EnableTouchGamepad();
+	await exports.BrowserHost.ShowTouchControls(touchOn);
 
 	if (useFortRise()) {
 		status("Getting FortRise…");
