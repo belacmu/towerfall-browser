@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FAUDIO_VERSION=26.10
-want="$FAUDIO_VERSION $(shasum -a 256 patches/FAudio.patch | cut -c1-16)"
+want="$FAUDIO_VERSION $(cat patches/FAudio.patch tools/build-faudio.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
 if [ "${1:-}" = "--if-needed" ] && [ -f vendor/statics/FAudio.a ] && [ "$(cat vendor/FAudio/.stamp 2>/dev/null)" = "$want" ]; then
 	exit 0
 fi

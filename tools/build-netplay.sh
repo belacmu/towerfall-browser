@@ -18,7 +18,7 @@ RUST_TOOLCHAIN=nightly-2025-02-01
 SRC=vendor/netplay-src
 OUT=vendor/netplay
 
-want="$RUST_TOOLCHAIN $GGRS_FFI_COMMIT $GGRS_COMMIT $(cat netplay/*.patch netplay/matchbox-browser/Cargo.toml netplay/matchbox-browser/src/*.rs | shasum -a 256 | cut -c1-16)"
+want="$RUST_TOOLCHAIN $GGRS_FFI_COMMIT $GGRS_COMMIT $(cat netplay/*.patch netplay/matchbox-browser/Cargo.toml netplay/matchbox-browser/src/*.rs tools/build-netplay.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
 [ -f $OUT/ggrs_ffi.a ] && [ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
 
 fetch() { # repo dir commit patch
