@@ -121,6 +121,33 @@
 			}
 			#corner button:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 			#corner button:disabled { cursor: default; }
+			/* The AI opponents picker (the AI button; see main.js). */
+			#aiPanel {
+				position: fixed;
+				top: calc(max(8px, env(safe-area-inset-top)) + min(19vmin, 88px) * 0.45 + 12px);
+				right: max(8px, env(safe-area-inset-right));
+				z-index: 10;
+				display: flex;
+				flex-direction: column;
+				align-items: stretch;
+				gap: 6px;
+				padding: 8px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(0, 0, 0, 0.8);
+			}
+			#aiPanel[hidden] { display: none; }
+			#aiPanel button {
+				height: 32px;
+				padding: 0 12px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(255, 255, 255, 0.08);
+				color: rgba(255, 255, 255, 0.8);
+				font-size: 10px;
+				text-transform: uppercase;
+			}
+			#aiPanel .hint { font-size: 10px; color: #999; max-width: 15em; }
 			/* On-screen controls (touch.js). */
 			#touch {
 				position: fixed;
@@ -224,10 +251,12 @@
 			<canvas id="canvas" class="canvas" tabindex="0"></canvas>
 		</div>
 		<div id="corner">
+			<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
 			<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
 			<button id="music" title="Download the game's music" hidden></button>
 			<button id="mute" title="Toggle sound">Sound: on</button>
 		</div>
+		<div id="aiPanel" hidden></div>
 		<div id="overlay">
 			<div id="previewNote" class="hint" hidden></div>
 			<div id="status">Starting…</div>

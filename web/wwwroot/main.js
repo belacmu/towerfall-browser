@@ -203,6 +203,67 @@ $("touchToggle").addEventListener("click", () => {
 });
 applyTouch();
 
+// AI opponents. LoaderAI (behind the AIJimmy and AINova mods) sets its computer players up with
+// keys a phone doesn't have, so the AI button picks them instead: P2-P4 each none or one of its AI
+// types, joined in versus archer select by the host (LoaderAi.cs). Remembered per browser.
+const OPPONENTS_KEY = "towerfall.opponents";
+let aiTypes = [];
+let opponents = (() => {
+	try {
+		const saved = JSON.parse(localStorage.getItem(OPPONENTS_KEY));
+		if (Array.isArray(saved)) return [0, 1, 2].map((i) => (typeof saved[i] === "string" ? saved[i] : ""));
+	} catch {}
+	return ["", "", ""];
+})();
+const aiName = (type) => (type ? type[0] + type.slice(1).toLowerCase() : "none");
+
+function renderOpponents() {
+	const count = opponents.filter((t) => aiTypes.includes(t)).length;
+	$("aiToggle").textContent = count ? `AI: ${count}` : "AI: off";
+	const panel = $("aiPanel");
+	panel.innerHTML = "";
+	opponents.forEach((type, i) => {
+		const button = document.createElement("button");
+		button.textContent = `P${i + 2}: ${aiName(aiTypes.includes(type) ? type : "")}`;
+		button.addEventListener("click", () => {
+			const choices = ["", ...aiTypes];
+			opponents[i] = choices[(choices.indexOf(aiTypes.includes(type) ? type : "") + 1) % choices.length];
+			try {
+				localStorage.setItem(OPPONENTS_KEY, JSON.stringify(opponents));
+			} catch {}
+			renderOpponents();
+			sendOpponents();
+		});
+		panel.append(button);
+	});
+	const hint = document.createElement("div");
+	hint.className = "hint";
+	hint.textContent = "They join in Versus archer select.";
+	panel.append(hint);
+}
+
+function sendOpponents() {
+	host?.SetAiOpponents(["", ...opponents.map((t) => (aiTypes.includes(t) ? t : ""))]).catch(console.error);
+}
+
+// LoaderAI's AI types register once the game has loaded; the button shows when there are some.
+async function watchAiTypes() {
+	for (let i = 0; i < 60 && !aiTypes.length; i++) {
+		const types = await host.GetAiTypes();
+		aiTypes = types ? types.split(",") : [];
+		if (!aiTypes.length) await new Promise((resolve) => setTimeout(resolve, 1000));
+	}
+	if (!aiTypes.length) return;
+	$("aiToggle").hidden = false;
+	renderOpponents();
+	sendOpponents();
+}
+
+$("aiToggle").addEventListener("click", () => {
+	$("aiPanel").hidden = !$("aiPanel").hidden;
+	$("canvas").focus();
+});
+
 // --- Mods (see mods.js) ---------------------------------------------------------------------
 
 let catalog = [];
@@ -680,6 +741,7 @@ async function main() {
 	host = exports.BrowserHost;
 	if (pendingMusic) offerMusic(host);
 	await applyTouch();
+	if (useFortRise()) watchAiTypes().catch(console.error);
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
 	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).
