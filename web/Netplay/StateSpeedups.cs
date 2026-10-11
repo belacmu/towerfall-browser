@@ -27,6 +27,12 @@ public static class StateSpeedups
 	private const string ExtensionsDll = "TF.State.TowerFallExtensions.dll";
 	private const string LevelExtensions = "TF.State.TowerFallExtensions.LevelExtensions";
 
+	// The main site and every preview share the page's storage (OPFS), so the TF.State a device has
+	// installed may have been adapted by another build. Each adaptation is stamped with this; bump it
+	// whenever what Install does changes. A copy adapted by anything else is extracted again first.
+	private const string AdaptationVersion = "state-load-1";
+	private const string StampResource = "TowerFallBrowser.Adaptation";
+
 	// --- Install time ----------------------------------------------------------------------
 
 	// Rewrites the installed TF.State's GetAll<T> to call ours and gives DeleteAll<T>/Delete<T> their
@@ -126,6 +132,8 @@ public static class StateSpeedups
 			log.LogWarning($"Direct field access not set up: {e.Message}");
 		}
 		if (!changed) return;
+		foreach (Resource old in module.Resources.Where(r => r.Name == StampResource).ToList()) module.Resources.Remove(old);
+		module.Resources.Add(new EmbeddedResource(StampResource, Mono.Cecil.ManifestResourceAttributes.Private, System.Text.Encoding.UTF8.GetBytes(AdaptationVersion)));
 		module.Write(path);
 		File.Delete(Path.ChangeExtension(path, ".pdb")); // no longer matches
 		log.LogInformation("Optimized TF.State's entity lookups for the browser.");
@@ -138,6 +146,28 @@ public static class StateSpeedups
 	{
 		var text = string.Join("\n", m.Body.Instructions.Select(i => $"{i.OpCode} {(i.Operand is Instruction t ? t.Offset : i.Operand)}"));
 		return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)))[..16];
+	}
+
+	// Whether the TF.State DLL in a mod folder was adapted by a build other than this one (another
+	// stamp, or none on a copy that calls into the host), so it must be extracted again from its zip
+	// before Install. A copy nothing has adapted yet is fine as it is.
+	public static bool NeedsFreshCopy(string modFolder)
+	{
+		string path = Directory.Exists(modFolder)
+			? Directory.EnumerateFiles(modFolder, ExtensionsDll, SearchOption.AllDirectories).FirstOrDefault(p => !p.Contains("_RelinkerCache"))
+			: null;
+		if (path == null) return false;
+		try
+		{
+			using var module = ModuleDefinition.ReadModule(path);
+			if (!module.AssemblyReferences.Any(r => r.Name == "TowerFallBrowser")) return false;
+			var stamp = module.Resources.OfType<EmbeddedResource>().FirstOrDefault(r => r.Name == StampResource);
+			return stamp == null || System.Text.Encoding.UTF8.GetString(stamp.GetResourceData()) != AdaptationVersion;
+		}
+		catch (Exception)
+		{
+			return true; // unreadable: start over from the zip
+		}
 	}
 
 	// --- Run time --------------------------------------------------------------------------
