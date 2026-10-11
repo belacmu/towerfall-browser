@@ -97,14 +97,15 @@ public static class DirectFields
 			if (ins[k - 1].OpCode.Code != Code.Call || ins[k - 1].Operand is not MethodReference { Name: "For" } f || !IsDynamicData(f.DeclaringType)) continue;
 			if (StoredLocal(ins[k], body) is not int dyn || localStores.GetValueOrDefault(dyn) != 1) continue;
 			(Instruction load, TypeReference objType) = Source(ins[k - 2], body, method, localStores, argStores);
-			if (load == null || objType == null || objType.IsValueType || objType.IsGenericParameter || objType.ContainsGenericParameter || objType is GenericInstanceType || objType.IsArray) continue;
+			if (load == null || objType == null || objType.IsValueType || objType.IsGenericParameter || objType.IsArray) continue;
+			if (objType.ContainsGenericParameter && objType is not GenericInstanceType) continue;
 			dyns[dyn] = (load, objType);
 		}
 		if (dyns.Count == 0) return 0;
 
 		// Find every site first (the code put in for one contains the same pattern again).
-		var gets = new List<(Instruction First, Instruction Call, (Instruction Load, TypeReference Type) Obj, FieldReference Field, TypeReference Wanted, string Site)>();
-		var sets = new List<(Instruction First, Instruction Ldstr, Instruction Before, Instruction Set, bool Boxed, (Instruction Load, TypeReference Type) Obj, FieldReference Field, string Site)>();
+		var gets = new List<(Instruction First, Instruction Call, (Instruction Load, TypeReference Type) Obj, Member Member, TypeReference Wanted)>();
+		var sets = new List<(Instruction First, Instruction Ldstr, Instruction Before, Instruction Set, bool Boxed, (Instruction Load, TypeReference Type) Obj, Member Member)>();
 		for (int k = 0; k + 2 < ins.Count; k++)
 		{
 			if (LoadedLocal(ins[k], body) is not int dyn || !dyns.TryGetValue(dyn, out var obj)) continue;
@@ -113,29 +114,28 @@ public static class DirectFields
 			if (ins[k + 2].Operand is GenericInstanceMethod { Name: "Get", Parameters.Count: 1 } get && IsDynamicData(get.DeclaringType) && ins[k + 2].OpCode.Code == Code.Callvirt)
 			{
 				TypeReference wanted = get.GenericArguments[0];
-				if (wanted.IsGenericParameter || wanted.ContainsGenericParameter) continue;
-				FieldReference field = Resolve(module, obj.Type, name, out string site);
-				if (field == null || !GetMatches(field.FieldType, wanted)) continue;
-				gets.Add((ins[k], ins[k + 2], obj, field, wanted, site));
+				Member member = Resolve(module, obj.Type, name, get: true, set: false);
+				if (member == null || !GetMatches(member.Type, wanted)) continue;
+				gets.Add((ins[k], ins[k + 2], obj, member, wanted));
 				continue;
 			}
 			// [dyn] ldstr name; <value>; [box V]; callvirt Set(string, object)
 			int setAt = FindSet(ins, k + 2);
 			if (setAt < 0) continue;
-			FieldReference setField = Resolve(module, obj.Type, name, out string setSite);
-			if (setField == null) continue;
+			Member setMember = Resolve(module, obj.Type, name, get: false, set: true);
+			if (setMember == null) continue;
 			Instruction before = ins[setAt - 1];
 			bool boxed = before.OpCode.Code == Code.Box;
-			if (setField.FieldType.IsValueType)
+			if (boxed)
 			{
 				// Only an exactly matching boxed value, unboxed again by the setter, can go straight in.
-				if (!boxed || ((TypeReference)before.Operand).FullName != setField.FieldType.FullName) continue;
+				if (!Same((TypeReference)before.Operand, setMember.Type)) continue;
 			}
-			else if (boxed)
+			else if (setMember.Type.IsValueType || setMember.Type.IsGenericParameter || setMember.Type.ContainsGenericParameter)
 			{
 				continue;
 			}
-			sets.Add((ins[k], ins[k + 1], before, ins[setAt], boxed, obj, setField, setSite));
+			sets.Add((ins[k], ins[k + 1], before, ins[setAt], boxed, obj, setMember));
 		}
 		if (gets.Count + sets.Count == 0) return 0;
 
@@ -144,13 +144,13 @@ public static class DirectFields
 		// Sets first: a Get inside a Set's value then still continues into the Set's new code.
 		foreach (var x in sets)
 		{
-			EmitSet(body, x.First, x.Ldstr, x.Before, x.Set, x.Boxed, x.Obj.Load, x.Obj.Type, x.Field, isMethod);
-			sites.Add(x.Site);
+			EmitSet(body, x.First, x.Ldstr, x.Before, x.Set, x.Boxed, x.Obj.Load, x.Obj.Type, x.Member, isMethod);
+			sites.Add(x.Member.Site);
 		}
 		foreach (var x in gets)
 		{
-			EmitGet(body, x.First, x.Call, x.Obj.Load, x.Obj.Type, x.Field, x.Wanted, isMethod);
-			sites.Add(x.Site);
+			EmitGet(body, x.First, x.Call, x.Obj.Load, x.Obj.Type, x.Member, x.Wanted, isMethod);
+			sites.Add(x.Member.Site);
 		}
 		body.OptimizeMacros();
 		return gets.Count + sets.Count;
@@ -189,33 +189,102 @@ public static class DirectFields
 		return (Instruction.Create(OpCodes.Ldarg, p), p.ParameterType);
 	}
 
-	// The field DynamicData would find for `name` on an object of exactly `type`: walking up from the
-	// type, the first level with a field (static or instance) or property of that name decides. Only
-	// non-generic instance fields are used.
-	private static FieldReference Resolve(ModuleDefinition module, TypeReference type, string name, out string site)
+	// What a direct access uses in place of DynamicData's lookup: a field, or a property's accessors.
+	private sealed class Member
 	{
-		site = null;
+		public FieldReference Field;
+		public MethodReference Getter, Setter;
+		public TypeReference Type; // in terms of the object's type (its generic arguments put in)
+		public string Site;
+	}
+
+	// The member DynamicData would find for `name` on an object of exactly `type`: walking up from the
+	// type, the first level with a field (static or instance) or property of that name decides, a field
+	// before a property. Only instance members; for a property, the accessors needed must be on it
+	// (DynamicData would otherwise take another level's or store the value on the side).
+	private static Member Resolve(ModuleDefinition module, TypeReference type, string name, bool get, bool set)
+	{
 		for (TypeReference t = type; t != null;)
 		{
 			TypeDefinition def = t.Resolve();
 			if (def == null) return null;
+			var generic = t as GenericInstanceType;
+			if (def.HasGenericParameters != (generic != null)) return null;
+			string typeName = (generic?.ElementType ?? t).Resolve().FullName;
+			string objName = type is GenericInstanceType g ? g.ElementType.Resolve().FullName : type.Resolve().FullName;
 			FieldDefinition field = def.Fields.FirstOrDefault(f => f.Name == name);
 			if (field != null)
 			{
-				if (field.IsStatic || def.HasGenericParameters || field.FieldType.ContainsGenericParameter) return null;
-				site = $"{type.FullName}|{name}|{def.FullName}";
-				return module.ImportReference(field);
+				if (field.IsStatic) return null;
+				TypeReference fieldType = Substitute(field.FieldType, generic);
+				if (fieldType == null) return null;
+				FieldReference imported = module.ImportReference(field);
+				return new Member
+				{
+					Field = generic == null ? imported : new FieldReference(imported.Name, imported.FieldType, generic),
+					Type = fieldType is GenericParameter ? fieldType : module.ImportReference(fieldType),
+					Site = $"{objName}|{name}|{typeName}|F",
+				};
 			}
-			if (def.Properties.Any(p => p.Name == name)) return null;
+			PropertyDefinition prop = def.Properties.FirstOrDefault(p => p.Name == name);
+			if (prop != null)
+			{
+				MethodDefinition getter = prop.GetMethod, setter = prop.SetMethod;
+				if ((get && (getter == null || getter.IsStatic)) || (set && (setter == null || setter.IsStatic))) return null;
+				TypeReference propType = Substitute(prop.PropertyType, generic);
+				if (propType == null) return null;
+				return new Member
+				{
+					Getter = get ? Accessor(module, getter, generic) : null,
+					Setter = set ? Accessor(module, setter, generic) : null,
+					Type = propType is GenericParameter ? propType : module.ImportReference(propType),
+					Site = $"{objName}|{name}|{typeName}|{(get ? "G" : "S")}",
+				};
+			}
+			// Bases that are themselves generic instances would need their arguments worked out; stop.
+			if (def.BaseType is GenericInstanceType) return null;
 			t = def.BaseType;
 		}
 		return null;
 	}
 
-	// Get<T>'s (T) on the boxed field value: the same as the field itself when the types match exactly,
-	// or a castclass for reference types.
-	private static bool GetMatches(TypeReference field, TypeReference wanted) =>
-		field.FullName == wanted.FullName || (!field.IsValueType && !wanted.IsValueType);
+	// A type as seen from a generic instance: the type's own parameters become the instance's arguments.
+	private static TypeReference Substitute(TypeReference t, GenericInstanceType generic)
+	{
+		if (t is GenericParameter p)
+		{
+			if (generic == null || p.Type != GenericParameterType.Type) return null;
+			return generic.GenericArguments[p.Position];
+		}
+		return t.ContainsGenericParameter ? null : t;
+	}
+
+	private static MethodReference Accessor(ModuleDefinition module, MethodDefinition m, GenericInstanceType generic)
+	{
+		MethodReference imported = module.ImportReference(m);
+		if (generic == null) return imported;
+		var r = new MethodReference(imported.Name, imported.ReturnType, generic) { HasThis = imported.HasThis, ExplicitThis = imported.ExplicitThis, CallingConvention = imported.CallingConvention };
+		foreach (ParameterDefinition p in imported.Parameters) r.Parameters.Add(new ParameterDefinition(p.ParameterType));
+		return r;
+	}
+
+	private static bool Same(TypeReference a, TypeReference b)
+	{
+		if (a is GenericParameter pa || b is GenericParameter)
+		{
+			return a is GenericParameter x && b is GenericParameter y && x.Type == y.Type && x.Position == y.Position;
+		}
+		return a.FullName == b.FullName;
+	}
+
+	// Get<T>'s (T) on the boxed value: the same as the value itself when the types match exactly, or a
+	// castclass between reference types.
+	private static bool GetMatches(TypeReference member, TypeReference wanted)
+	{
+		if (Same(member, wanted)) return true;
+		bool known(TypeReference t) => !t.IsGenericParameter && !t.ContainsGenericParameter;
+		return known(member) && known(wanted) && !member.IsValueType && !wanted.IsValueType;
+	}
 
 	// The Set(string, object) that consumes the value pushed after `start`: no branches in between,
 	// and the stack never drops below the value's level.
@@ -278,7 +347,7 @@ public static class DirectFields
 	//   slow: ldloc dyn; ldstr name; callvirt Get<T>
 	//   done:
 	// The first instruction object is reused, so branches and handlers that pointed at it still do.
-	private static void EmitGet(MethodBody body, Instruction first, Instruction call, Instruction load, TypeReference objType, FieldReference field, TypeReference wanted, MethodReference isMethod)
+	private static void EmitGet(MethodBody body, Instruction first, Instruction call, Instruction load, TypeReference objType, Member member, TypeReference wanted, MethodReference isMethod)
 	{
 		ILProcessor il = body.GetILProcessor();
 		Instruction slow = Clone(first);
@@ -286,9 +355,9 @@ public static class DirectFields
 		var fast = new List<Instruction>
 		{
 			Clone(load), Instruction.Create(OpCodes.Ldtoken, objType), Instruction.Create(OpCodes.Call, isMethod), Instruction.Create(OpCodes.Brfalse, slow),
-			Clone(load), Instruction.Create(OpCodes.Ldfld, field),
+			Clone(load), member.Field != null ? Instruction.Create(OpCodes.Ldfld, member.Field) : Instruction.Create(OpCodes.Callvirt, member.Getter),
 		};
-		if (field.FieldType.FullName != wanted.FullName) fast.Add(Instruction.Create(OpCodes.Castclass, wanted));
+		if (!Same(member.Type, wanted)) fast.Add(Instruction.Create(OpCodes.Castclass, wanted));
 		fast.Add(Instruction.Create(OpCodes.Br, done));
 		// `first` becomes the start of the fast path; a new instruction takes its place in the slow one.
 		Instruction head = fast[0];
@@ -308,7 +377,7 @@ public static class DirectFields
 	//   (stack: value) -> stloc tmp; obj; ldloc tmp; [castclass F]; stfld field; br done
 	//   slow: [box V]; stloc tmpo; ldloc dyn; ldstr name; ldloc tmpo; callvirt Set
 	//   done:
-	private static void EmitSet(MethodBody body, Instruction first, Instruction ldstr, Instruction beforeSet, Instruction set, bool boxed, Instruction load, TypeReference objType, FieldReference field, MethodReference isMethod)
+	private static void EmitSet(MethodBody body, Instruction first, Instruction ldstr, Instruction beforeSet, Instruction set, bool boxed, Instruction load, TypeReference objType, Member member, MethodReference isMethod)
 	{
 		ILProcessor il = body.GetILProcessor();
 		TypeReference valueType = boxed ? (TypeReference)beforeSet.Operand : body.Method.Module.TypeSystem.Object;
@@ -338,8 +407,8 @@ public static class DirectFields
 			Clone(load), Instruction.Create(OpCodes.Ldtoken, objType), Instruction.Create(OpCodes.Call, isMethod), Instruction.Create(OpCodes.Brfalse, slowStart),
 			Clone(load), Instruction.Create(OpCodes.Ldloc, tmp),
 		};
-		if (!field.FieldType.IsValueType && field.FieldType.FullName != "System.Object") code.Add(Instruction.Create(OpCodes.Castclass, field.FieldType));
-		code.Add(Instruction.Create(OpCodes.Stfld, field));
+		if (!boxed && member.Type.FullName != "System.Object") code.Add(Instruction.Create(OpCodes.Castclass, member.Type));
+		code.Add(member.Field != null ? Instruction.Create(OpCodes.Stfld, member.Field) : Instruction.Create(OpCodes.Callvirt, member.Setter));
 		code.Add(Instruction.Create(OpCodes.Br, done));
 		code.Add(slowStart);
 		code.AddRange(slow);
@@ -372,25 +441,32 @@ public static class DirectFields
 		{
 			string[] p = site.Split('|');
 			Type type = Find(p[0]);
-			if (type == null || !Binds(type, p[1], p[2]))
+			if (type == null || !Binds(type, p[1], p[2], p[3]))
 			{
-				Console.Error.WriteLine($"[netplay] Direct field access stays off: {p[0]}.{p[1]} isn't the field it was for.");
+				Console.Error.WriteLine($"[netplay] Direct field access stays off: {p[0]}.{p[1]} isn't the member it was for.");
 				return;
 			}
 		}
 		Enabled = true;
-		Console.WriteLine($"[netplay] Direct field access on ({sites.Length} fields).");
+		Console.WriteLine($"[netplay] Direct field access on ({sites.Length} members).");
 	}
 
-	// DynamicData's lookup for `name` from `type` upwards lands on an instance field of `declaring`.
-	private static bool Binds(Type type, string name, string declaring)
+	// DynamicData's lookup for `name` from `type` upwards lands on `declaring`'s instance field (F), or
+	// on its property with a getter (G) or setter (S).
+	private static bool Binds(Type type, string name, string declaring, string kind)
 	{
 		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 		for (Type t = type; t != null && t != t.BaseType; t = t.BaseType)
 		{
-			FieldInfo field = t.GetField(name, all);
-			if (field != null) return !field.IsStatic && t.FullName?.Replace('+', '/') == declaring;
-			if (t.GetProperty(name, all) != null) return false;
+			Type def = t.IsGenericType ? t.GetGenericTypeDefinition() : t;
+			FieldInfo field = def.GetField(name, all);
+			if (field != null) return kind == "F" && !field.IsStatic && def.FullName?.Replace('+', '/') == declaring;
+			PropertyInfo prop = def.GetProperty(name, all);
+			if (prop != null)
+			{
+				MethodInfo accessor = kind == "G" ? prop.GetGetMethod(true) : kind == "S" ? prop.GetSetMethod(true) : null;
+				return accessor != null && !accessor.IsStatic && def.FullName?.Replace('+', '/') == declaring;
+			}
 		}
 		return false;
 	}
