@@ -203,6 +203,96 @@ $("touchToggle").addEventListener("click", () => {
 });
 applyTouch();
 
+// AI opponents. LoaderAI (behind the AIJimmy and AINova mods) sets its computer players up with
+// keys a phone doesn't have, so the AI button (shown in versus archer select) picks them instead: P2 on (to P4, or P8 with an
+// 8-player mod) each none or one of its AI types, joined in versus archer select by the host
+// (LoaderAi.cs). Remembered per browser.
+const OPPONENTS_KEY = "towerfall.opponents";
+let aiTypes = [];
+let aiSlots = 4;
+// From P2, up to P8.
+let opponents = (() => {
+	try {
+		const saved = JSON.parse(localStorage.getItem(OPPONENTS_KEY));
+		if (Array.isArray(saved)) return Array.from({ length: 7 }, (_, i) => (typeof saved[i] === "string" ? saved[i] : ""));
+	} catch {}
+	return Array(7).fill("");
+})();
+const aiName = (type) => (type ? type[0] + type.slice(1).toLowerCase() : "none");
+
+function renderOpponents() {
+	const shown = opponents.slice(0, aiSlots - 1);
+	const count = shown.filter((t) => aiTypes.includes(t)).length;
+	$("aiToggle").textContent = count ? `AI: ${count}` : "AI: off";
+	const panel = $("aiPanel");
+	panel.innerHTML = "";
+	panel.classList.toggle("wide", shown.length > 3);
+	shown.forEach((type, i) => {
+		const button = document.createElement("button");
+		button.textContent = `P${i + 2}: ${aiName(aiTypes.includes(type) ? type : "")}`;
+		button.addEventListener("click", () => {
+			const choices = ["", ...aiTypes];
+			opponents[i] = choices[(choices.indexOf(aiTypes.includes(type) ? type : "") + 1) % choices.length];
+			try {
+				localStorage.setItem(OPPONENTS_KEY, JSON.stringify(opponents));
+			} catch {}
+			renderOpponents();
+			sendOpponents();
+		});
+		panel.append(button);
+	});
+	const hint = document.createElement("div");
+	hint.className = "hint";
+	hint.textContent = "They join in Versus archer select (not online), if there are archers left for them.";
+	panel.append(hint);
+}
+
+function sendOpponents() {
+	host?.SetAiOpponents(["", ...opponents.slice(0, aiSlots - 1).map((t) => (aiTypes.includes(t) ? t : ""))]).catch(console.error);
+}
+
+let onArcherSelect = false;
+
+async function fetchAiSetup() {
+	const [slots, types, select] = (await host.GetAiSetup()).split("|");
+	aiSlots = Math.min(8, Math.max(2, Number(slots) || 4));
+	aiTypes = types ? types.split(",") : [];
+	onArcherSelect = select === "1";
+}
+
+// LoaderAI's AI types register once the game has loaded; then the button shows whenever the game
+// is in versus archer select (checked twice a second).
+async function watchAiTypes() {
+	for (let i = 0; i < 60 && !aiTypes.length; i++) {
+		await fetchAiSetup();
+		if (!aiTypes.length) await new Promise((resolve) => setTimeout(resolve, 1000));
+	}
+	if (!aiTypes.length) return;
+	renderOpponents();
+	sendOpponents();
+	for (;;) {
+		const button = $("aiToggle");
+		if (button.hidden === onArcherSelect) {
+			button.hidden = !onArcherSelect;
+			if (onArcherSelect) renderOpponents();
+			else $("aiPanel").hidden = true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		await fetchAiSetup();
+	}
+}
+
+// (Opening it checks the slots again: an 8-player mode can be turned on in the game.)
+$("aiToggle").addEventListener("click", async () => {
+	const panel = $("aiPanel");
+	panel.hidden = !panel.hidden;
+	$("canvas").focus();
+	if (panel.hidden) return;
+	await fetchAiSetup();
+	renderOpponents();
+	sendOpponents();
+});
+
 // --- Mods (see mods.js) ---------------------------------------------------------------------
 
 let catalog = [];
@@ -680,6 +770,7 @@ async function main() {
 	host = exports.BrowserHost;
 	if (pendingMusic) offerMusic(host);
 	await applyTouch();
+	if (useFortRise()) watchAiTypes().catch(console.error);
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
 	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).
