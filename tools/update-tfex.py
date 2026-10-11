@@ -2,8 +2,9 @@
 """Keeps the hosted TF.EX (online play) current. The official server only lets players on the
 latest TF.EX play online, so a new release must reach the site quickly.
 
-Checks TF.EX's latest GitHub release. It's adopted automatically (tools/fetch-tfex.sh's pin is
-updated; CI then commits and redeploys) when it's safe:
+Checks TF.EX's latest GitHub release. It's adopted (tools/fetch-tfex.sh's pin is updated; CI then
+puts it on a branch in the site's preview/ for a person to merge, see .github/workflows/tfex.yml)
+when it's safe:
   - it was built against the ggrs-ffi release we build for the browser (TF.EX's release workflow
     bundles the newest ggrs-ffi release at the time, and the browser can't use that native code;
     tools/build-netplay.sh builds the pinned commit instead);
