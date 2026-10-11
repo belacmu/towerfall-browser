@@ -38,6 +38,8 @@ public static class LoaderAi
 	private static FieldInfo saveData;
 	private static FieldInfo captureActive, replayMode, versusSettings;
 	private static MethodInfo isNetplay;
+	private static PropertyInfo sceneProperty, menuState;
+	private static Type mainMenu;
 	private static readonly Random random = new();
 
 	// Per slot: the AI type the page wants there, or null. Set from the page's thread.
@@ -65,7 +67,10 @@ public static class LoaderAi
 			altSelect = tfGameType.GetField("AltSelect", Any);
 			characterTaken = tfGameType.GetMethod("CharacterTaken", Any);
 			rollcall = tf.GetType("TowerFall.RollcallElement", throwOnError: true);
-			rollcallMode = tf.GetType("TowerFall.MainMenu", throwOnError: true).GetField("RollcallMode", Any);
+			mainMenu = tf.GetType("TowerFall.MainMenu", throwOnError: true);
+			rollcallMode = mainMenu.GetField("RollcallMode", Any);
+			menuState = mainMenu.GetProperty("State", Any);
+			sceneProperty = tfGame.GetType().GetProperty("Scene", Any);
 			archerDataGet = tf.GetType("TowerFall.ArcherData", throwOnError: true).GetMethods(Any).First(m => m.Name == "Get" && m.GetParameters().Length == 2);
 			darkWorldDlc = tf.GetType("TowerFall.GameData", throwOnError: true).GetProperty("DarkWorldDLC", Any);
 			archerAmount = tf.GetType("TowerFall.ArcherData", throwOnError: true).GetProperty("Amount", Any);
@@ -105,7 +110,7 @@ public static class LoaderAi
 
 	// The AI types LoaderAI has (they register once the game has loaded), comma-separated; empty
 	// without LoaderAI.
-	public static string Types() => game == null ? "" : string.Join(",", (string[])Call(api, "GetAgentTypes"));
+	public static string Types() => game == null ? "" : string.Join(",", (string[])Call(api, "GetAgentTypes") ?? Array.Empty<string>());
 
 	// The player slots LoaderAI serves: 4, or up to 8 with an 8-player mod.
 	public static int Slots() => game == null ? 0 : (int)module.GetProperty("PlayerSlots", Any).GetValue(null);
@@ -116,20 +121,31 @@ public static class LoaderAi
 	// Per slot (P1 first): an AI type, or empty for none.
 	public static void SetOpponents(string[] slots) => wanted = slots.Select(s => string.IsNullOrEmpty(s) ? null : s).ToArray();
 
-	// Each frame, before the game's (game thread).
+	// Each frame, before the game's (game thread). A mod that changes archer select in a way this
+	// doesn't expect turns it off, rather than stopping the game.
 	public static void Update()
 	{
 		if (game == null) return;
-		if (Online())
+		try
 		{
-			OnArcherSelect = false;
-			joined.Clear();
-			return;
+			UpdateRollcall();
 		}
-		object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
-		bool versusRollcall = scene?.GetType().FullName == "TowerFall.MainMenu"
-			&& scene.GetType().GetProperty("State").GetValue(scene).ToString() == "Rollcall"
-			&& rollcallMode.GetValue(null).ToString() == "Versus";
+		catch (Exception e)
+		{
+			game = null;
+			OnArcherSelect = false;
+			Console.Error.WriteLine($"[ai] Setting up opponents failed, so the page stops doing it: {e}");
+		}
+	}
+
+	private static void UpdateRollcall()
+	{
+		// Outside the main menu (in levels, every frame) only this is looked at.
+		object scene = sceneProperty.GetValue(game);
+		bool versusRollcall = scene != null && scene.GetType() == mainMenu
+			&& menuState.GetValue(scene).ToString() == "Rollcall"
+			&& rollcallMode.GetValue(null).ToString() == "Versus"
+			&& !Online();
 		OnArcherSelect = versusRollcall;
 		if (!versusRollcall)
 		{

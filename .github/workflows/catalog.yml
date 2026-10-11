@@ -24,7 +24,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/mod-cache
-          key: mod-cache-${{ github.run_id }}
+          # A new cache only when the catalog's files change (one per day filled the 10 GB limit
+          # with copies, evicting the site's build caches).
+          key: mod-cache-${{ hashFiles('mods/catalog.json') }}
           restore-keys: mod-cache-
 
       - name: Refresh the catalog
@@ -57,7 +59,17 @@ jobs:
           pinned=$(grep -oP '^FORTRISE_VERSION=\K.*' tools/fetch-fortrise.sh)
           latest=$(gh api repos/FortRise/FortRise/releases/latest --jq .tag_name)
           echo "Pinned $pinned, latest $latest"
-          [ "$pinned" = "$latest" ] && exit 0
+          # Only a newer version: the pin can be a prerelease ahead of the latest release (5.5.0-beta.3
+          # vs 5.4.1). A release counts as newer than its own prereleases.
+          python3 - "$pinned" "$latest" <<'PY' || exit 0
+          import re, sys
+          def key(v):
+              m = re.match(r"v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$", v)
+              if not m: sys.exit(1)
+              pre = m.group(4)
+              return tuple(map(int, m.group(1, 2, 3))), (1, "") if pre is None else (0, pre)
+          sys.exit(0 if key(sys.argv[2]) > key(sys.argv[1]) else 1)
+          PY
           title="FortRise $latest is out (pinned: $pinned)"
           if gh issue list --state open --search "in:title \"FortRise $latest is out\"" --json number --jq length | grep -q '^0$'; then
             gh issue create --title "$title" --body "Update FORTRISE_VERSION and FORTRISE_SHA256 in tools/fetch-fortrise.sh, rebuild, and rerun tools/smoke-mods.mjs (FortRise changes can affect mods). Release: https://github.com/FortRise/FortRise/releases/tag/$latest"

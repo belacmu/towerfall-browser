@@ -290,7 +290,10 @@ test("matchmaking: public lobbies are listed and joined by room id; skins relay"
 	const B = await tfex("BOB");
 	B.send({ GetLobbies: {} });
 	const listed = (await B.next("GetLobbiesResponse")).GetLobbiesResponse.lobbies;
-	assert(listed.some((l) => l.RoomId === lobby.RoomId), "listed");
+	const entry = listed.find((l) => l.RoomId === lobby.RoomId);
+	assert(entry, "listed");
+	eq(entry.Players.map((p) => [p.Name, p.RoomPeerId]), [["ALICE", ""]], "listed without peer ids");
+	eq(entry.Mods, lobby.Mods, "with its mods (TF.EX checks WiderSet's)");
 	B.send({ JoinLobby: { room_id: lobby.RoomId, name: "BOB", is_player: true } });
 	const joined = (await B.next("JoinLobbyResponse")).JoinLobbyResponse;
 	assert(joined.success && joined.room_peer_id, "joined");
@@ -310,14 +313,14 @@ test("matchmaking: public lobbies are listed and joined by room id; skins relay"
 
 class FakeConn {
 	static n = 0;
-	constructor(mm, name) {
+	constructor(mm, name, ip = null) {
 		this.id = `f${FakeConn.n++}`;
 		this.state = {};
 		this.inbox = [];
 		this.mm = mm;
 		this.closed = false;
-		mm.open(this, clock);
-		this.do({ Identify: { player_id: `local:${uuid()}`, name } });
+		mm.open(this, clock, ip);
+		if (!this.closed) this.do({ Identify: { player_id: `local:${uuid()}`, name } });
 	}
 	send(text) {
 		this.inbox.push(text);
@@ -583,6 +586,110 @@ test("core: silent connections are dropped after the keep-alive window", async (
 		B.do({ KeepAlive: {} });
 	}
 	assert(A.closed && !B.closed, "A dropped, B kept");
+});
+
+test("core: a full match room's peers can't be taken over from elsewhere", async () => {
+	const { SignalRoom } = await import("./signal.js");
+	const room = new SignalRoom();
+	const conn = (name) => ({ name, state: {}, inbox: [], closed: null, send(t) { this.inbox.push(JSON.parse(t)); }, close(code) { this.closed = code; }, save() {} });
+	const host = uuid();
+	const A = conn("A");
+	room.open(A, host, clock, "1.1.1.1");
+	const B = conn("B");
+	room.open(B, uuid(), clock, "2.2.2.2");
+	const X = conn("X");
+	room.open(X, host, clock + 5000, "6.6.6.6");
+	eq([X.closed, A.closed], [4003, null], "another address can't take a live peer id");
+	assert(!B.inbox.some((m) => m.PeerLeft), "nobody hears the host left");
+	const A2 = conn("A2");
+	room.open(A2, host, clock + 6000, "1.1.1.1");
+	eq([A2.closed, A.closed], [null, 4001], "the same address reconnects");
+	assert(B.inbox.some((m) => m.PeerLeft === host) && B.inbox.at(-1).NewPeer === host, "B reconnects to it");
+	const Y = conn("Y");
+	room.open(Y, host, clock + 6000 + 26_000, "6.6.6.6");
+	eq(Y.closed, null, "a peer quiet past its keep-alives can be replaced");
+	// Rate and size limits.
+	const C = conn("C");
+	room.open(C, uuid(), clock, "3.3.3.3");
+	room.message(C, "x".repeat(70 * 1024), clock);
+	eq(C.closed, 4029, "too big");
+	const D = conn("D");
+	room.open(D, uuid(), clock, "4.4.4.4");
+	for (let i = 0; i < 250 && D.closed === null; i++) room.message(D, '"KeepAlive"', clock);
+	eq(D.closed, 4029, "too many at once");
+	const E = conn("E");
+	room.open(E, uuid(), clock, "5.5.5.5");
+	for (let i = 0; i < 1000; i++) room.message(E, '"KeepAlive"', clock + i * 100);
+	eq(E.closed, null, "10 a second is fine");
+});
+
+test("core: per-address and per-connection limits", async () => {
+	const mm = await core();
+	const conns = Array.from({ length: 16 }, (_, i) => new FakeConn(mm, `P${i}`, "9.9.9.9"));
+	assert(conns.every((c) => !c.closed), "16 from one address");
+	const extra = new FakeConn(mm, "EXTRA", "9.9.9.9");
+	assert(extra.closed, "the 17th is refused");
+	extra.do({ EnterQuickPlay: { name: "EXTRA", is_wide: false } });
+	assert(!extra.state.quickPlay, "and ignored");
+	assert(!new FakeConn(mm, "OTHER", "8.8.8.8").closed, "other addresses aren't");
+	const F = conns[0];
+	for (let i = 0; i < 150 && !F.closed; i++) F.do({ KeepAlive: {} });
+	assert(F.closed, "a flood closes the connection");
+	const G = conns[1];
+	for (let i = 0; i < 300; i++) {
+		clock += 100;
+		G.do({ KeepAlive: {} });
+	}
+	assert(!G.closed, "10 a second is fine");
+});
+
+test("core: guessing join codes runs out of tries; spectators and lobby size are capped", async () => {
+	const mm = await core();
+	const A = new FakeConn(mm, "ALICE", "1.1.1.1");
+	A.do({ CreateLobby: { lobby: builtLobby("ALICE") } });
+	const lobby = A.last("CreateLobbyResponse").lobby;
+	const S = Array.from({ length: 8 }, (_, i) => new FakeConn(mm, `S${i}`, `3.3.3.${i}`));
+	for (const c of S) c.do({ JoinPrivate: { code: lobby.JoinCode, name: c.id, is_player: false } });
+	assert(S.every((c) => c.last("PrivateJoinResult").success), "8 spectators");
+	const S9 = new FakeConn(mm, "S9", "3.3.4.4");
+	S9.do({ JoinPrivate: { code: lobby.JoinCode, name: "S9", is_player: false } });
+	eq(S9.last("PrivateJoinResult").message, "LOBBY FULL", "a 9th spectator");
+	const G = new FakeConn(mm, "GUESS", "2.2.2.2");
+	for (let i = 0; i < 20; i++) G.do({ JoinPrivate: { code: "ZZZZZ", name: "G", is_player: true } });
+	G.take("PrivateJoinResult");
+	G.do({ JoinPrivate: { code: lobby.JoinCode, name: "G", is_player: true } });
+	eq(G.last("PrivateJoinResult").message, "TOO MANY TRIES", "locked out after 20 wrong codes");
+	clock += 11 * 60_000;
+	G.do({ JoinPrivate: { code: lobby.JoinCode, name: "G", is_player: true } });
+	assert(G.last("PrivateJoinResult").success, "until a while later");
+	const big = builtLobby("BIG");
+	big.Mods = Array.from({ length: 16 }, (_, i) => ({ Name: `M${i}`, Data: Object.fromEntries(Array.from({ length: 32 }, (_, k) => [`k${k}`, "v".repeat(256)])) }));
+	const H = new FakeConn(mm, "BIG");
+	H.do({ CreateLobby: { lobby: big } });
+	eq(H.last("CreateLobbyResponse").message, "LOBBY TOO BIG", "oversized lobby refused");
+	assert(mm.isMember(lobby.RoomId, lobby.Players[0].RoomPeerId) && !mm.isMember(lobby.RoomId, uuid()), "isMember (for /turn)");
+});
+
+test("core: a player leaving mid-match still gets the lobby back to archer select", async () => {
+	const mm = await core();
+	const { A, all } = started(mm, { Mode: 3 }, 3);
+	mm.close(all[2], clock);
+	for (const c of all) c.inbox.length = 0;
+	tick(mm, 34_000);
+	assert(A.tags().includes("ArcherSelectLobby"), "back to archer select");
+	assert(!A.last("LobbyUpdate").lobby.InGame, "not in game");
+});
+
+test("core: quick play lobbies close when a player leaves before the match", async () => {
+	const mm = await core();
+	const A = new FakeConn(mm, "ALICE");
+	const B = new FakeConn(mm, "BOB");
+	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false } });
+	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });
+	const roomId = A.last("QuickPlayMatchFound").lobby.RoomId;
+	B.do({ LeaveLobby: {} });
+	eq(A.last("LobbyUpdate").lobby.Players, [], "A gets a lobby without a host (TF.EX leaves it)");
+	assert(!mm.rooms.has(roomId) && !A.state.roomId, "closed");
 });
 
 // ---- run ----

@@ -115,8 +115,21 @@ async function haveZip(zips, sha) {
 
 async function storeZip(zips, sha, buffer) {
 	const w = await (await zips.getFileHandle(sha + ".zip", { create: true })).createWritable();
-	await w.write(buffer);
-	await w.close();
+	try {
+		await w.write(buffer);
+		await w.close();
+	} catch (e) {
+		await w.abort().catch(() => {});
+		await zips.removeEntry(sha + ".zip").catch(() => {});
+		throw e.name === "QuotaExceededError" ? new StorageFullError() : e;
+	}
+}
+
+// The browser won't store more for this site.
+export class StorageFullError extends Error {
+	constructor() {
+		super("The browser has no room left to store this mod for the site. Free up space on the device (or remove other site data), then try again.");
+	}
 }
 
 // Thrown when a catalog mod's file can't be downloaded; the page then asks for the zip.
@@ -155,6 +168,10 @@ export async function ensureFiles(mods, onProgress) {
 // or a custom mod.
 export async function addZip(file) {
 	const buffer = await file.arrayBuffer();
+	// "PK\3\4" (or "PK\5\6", an empty zip): anything else can't be a mod, and would stop every
+	// mod from installing while it stays enabled.
+	const magic = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength)).join();
+	if (magic !== "80,75,3,4" && magic !== "80,75,5,6") throw new Error(`${file.name} isn't a zip file.`);
 	const sha = await sha256(buffer);
 	const zips = await (await fortriseDir()).getDirectoryHandle("ModZips", { create: true });
 	await storeZip(zips, sha, buffer);

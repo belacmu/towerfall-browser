@@ -200,7 +200,19 @@ public static partial class BrowserHost
 				// ...and TowerFall's background loading (game data, default match settings) is done.
 				commandsReady = menuFrames > 300 && towerFall.GetType("TowerFall.TFGame")?.GetProperty("Loaded", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is true;
 			}
-			if (startMode != null) ApplyStartMode();
+			if (startMode != null)
+			{
+				// (A convenience: if a mod has changed the menus, the game still starts.)
+				try
+				{
+					ApplyStartMode();
+				}
+				catch (Exception e)
+				{
+					startMode = null;
+					Console.Error.WriteLine($"[mode] {e}");
+				}
+			}
 			while (commandsReady && commands.TryDequeue(out string[] command))
 			{
 				RunGameCommand(command);
@@ -339,7 +351,18 @@ public static partial class BrowserHost
 	// (no types without it, or until the game has loaded), and the page's picks: per slot from P1, a
 	// type or empty (see LoaderAi).
 	[JSExport]
-	internal static Task<string> GetAiSetup() => Task.FromResult($"{LoaderAi.Slots()}|{LoaderAi.Types()}|{(LoaderAi.OnArcherSelect ? 1 : 0)}");
+	internal static Task<string> GetAiSetup()
+	{
+		try
+		{
+			return Task.FromResult($"{LoaderAi.Slots()}|{LoaderAi.Types()}|{(LoaderAi.OnArcherSelect ? 1 : 0)}");
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[ai] {e}");
+			return Task.FromResult("0||0");
+		}
+	}
 
 	[JSExport]
 	internal static Task SetAiOpponents(string[] slots)
@@ -529,10 +552,20 @@ public static partial class BrowserHost
 			// What the command prints goes to the console's screen buffer (newest first); echo it.
 			var output = console.GetType().GetField("drawCommands", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(console) as List<string>;
 			output?.Clear();
-			// Let exceptions through (with their stack) instead of a one-line note.
-			console.GetType().GetField("safeExecute", BindingFlags.NonPublic | BindingFlags.Instance)?.SetValue(console, false);
-			console.GetType().GetMethod("ExecuteCommand", new[] { typeof(string), typeof(string[]) })
-				.Invoke(console, new object[] { words[0].ToLowerInvariant(), words[1..] });
+			// Let exceptions through (with their stack) instead of a one-line note, for this command
+			// only: in the game's own console, a mistyped command must not stop the game.
+			FieldInfo safeExecute = console.GetType().GetField("safeExecute", BindingFlags.NonPublic | BindingFlags.Instance);
+			object wasSafe = safeExecute?.GetValue(console);
+			safeExecute?.SetValue(console, false);
+			try
+			{
+				console.GetType().GetMethod("ExecuteCommand", new[] { typeof(string), typeof(string[]) })
+					.Invoke(console, new object[] { words[0].ToLowerInvariant(), words[1..] });
+			}
+			finally
+			{
+				if (wasSafe != null) safeExecute.SetValue(console, wasSafe);
+			}
 			for (int i = (output?.Count ?? 0) - 1; i >= 0; i--)
 			{
 				Console.WriteLine($"[command]   {output[i]}");

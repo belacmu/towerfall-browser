@@ -1,81 +1,100 @@
 {
 	"Ralidon.SpeedrunTimer": {
 		"status": "works",
-		"note": "Timer shows in levels and stops on game over (Harmony postfix), tested 2026-10-09."
+		"note": "Timer shows in levels and stops on game over (Harmony postfix), tested 2026-10-09.",
+		"sha256": "5ddc5409e67189938000e165d44799871bd368105bd44002e7532bc6a01b253b"
 	},
 	"AllSeeing.Skeleton": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "104e7000e5a0c1a84f361611ef26ede7c158e31620d93eb995f852140d2a91fb"
 	},
 	"AmongUsRedBlue": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "24991eb7ecc0fabbac404d1d2eadc63db773cd19ccd3cf404a4a7bd8a76532a9"
 	},
 	"Spookyan": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "a5cf0833621848f8cde9a21b969c0018f3f2527941c4876c537c3f713cfdde2d"
 	},
 	"Hitbox": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "996556ac80ea31fb40bf74705dbe3b4e2a158b6f52133f14a31fa2996f37420d"
 	},
 	"DDRROBOT": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "f13a6aefa8760bd8645431196e4baece43a48c603d9845664dba142d2f478ad3"
 	},
 	"King": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "79a626f463b059cd34d522946cceb1803daf31de597f07b5f6129e5e33cfebea"
 	},
 	"Celeste": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "6db1427d7c9cf6ab393cddabbe2d338bb727984336b06ec4007e218f483d695a"
 	},
 	"Osiria": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "cf4140b30114f73a9e0ee5cb7aa28e8b6fabf1ec9171038fbf8c5325edd3d22c"
 	},
 	"Perplexing": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "9e45e743020bd4b474415cd92ce0d91ac42ffc7578527a168507e9e9ddf5ad6e"
 	},
 	"Shadow": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "ae51efe1b661e260688d738b069d249083febccd61307f9b45609f33222b1b1a"
 	},
 	"Dummy": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "7d15980e089695679b8a62742b8e391dae885e166e91733b9dae4c7de0599971"
 	},
 	"Yuu": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "4e937967909805b05c9ba761b855d01257dc88fb48cf9d1af13d53ec763da801"
 	},
 	"Accelerate": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "f7f77c5c43c5d014ff668e800ddf7c4367f89dedcddf8ea1f9bffd5b9d3760a1"
 	},
 	"Teuria.AdditionalVariants": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "8330f5aed78e4932c32b0d37a56ce9254b535d4af7f97ae5e9242a4b15357cb6"
 	},
 	"AIJimmy": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "50193c550f94d5604ee3bb2458aef7721361deec7cfe90459d9ddeb83d398049"
 	},
 	"AINova": {
 		"status": "works",
-		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09)."
+		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
+		"sha256": "d1b92fe6394e8932985840c529b013731130c5a62535c6411daa423b5a337049"
 	},
 	"Arcade": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "b49c2cc1d9b6dd2d827126bace8197092219c2bbaba9f1a9d02087a6172cac2a"
 	},
 	"Archer": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "56ef3b97adf97a981d74806c2c52076ed849aa19a4043d928dd34ef5f9a75994"
 	},
 	"ArrowBomb": {
 		"status": "broken",
@@ -85,12 +104,14 @@
 	"Arrows": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "fb74db1b2a6562cbe381f74146019f76fcec64c4fb10fc8121f8cb4e2a0c7716"
 	},
 	"Teuria.Ascencore": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.0.0"
+		"version": "1.0.0",
+		"sha256": "fbc56a5d8d571bd25ae233de8c678930f66c97c463bd8061a64a668667aaaa0a"
 	},
 	"Teuria.AutolockModifier": {
 		"status": "broken",
@@ -100,17 +121,20 @@
 	"Teuria.BaronMode": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "2.2.1"
+		"version": "2.2.1",
+		"sha256": "695c9c5eb0464cd910691a78c30cac30c8c74862de18444976ae7aa025be8d37"
 	},
 	"Kha.Bartizan": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "2.1.0"
+		"version": "2.1.0",
+		"sha256": "2a4ebb53405b456a4bd78708c53307851154cd0b1db5f7ac4717cd1081f53111"
 	},
 	"BlackHole": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "9eefb95adac6cf0a0f7515e3e743ffd79c2ea2167cb36df3fa84843e4f57c9b0"
 	},
 	"Corpse": {
 		"status": "broken",
@@ -120,32 +144,38 @@
 	"Teuria.Fortfeit": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.1"
+		"version": "1.1.1",
+		"sha256": "aeccc52b400b835cfe3049ab994f10f51420707f1703c0c8e29ecd5edb308771"
 	},
 	"Gravity": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "85bcdda5f8fd3c0bb82cba654d697ddc9a29a475839e0d4a05a4920cb7386d9c"
 	},
 	"Handicap": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "3022af62e13a8ae394b287710db3b518c08f6a566093c9e8f17fef4ddad1e7dc"
 	},
 	"Lava": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "1b548b830f23fcc75bcb981deb4d1108cdb8665226bab9b7e92e1a01e6658a58"
 	},
 	"LoaderAI": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "02d627ab8d2dcd93b0b5b47cc91d50c7d84a5aa8c94a8763826c171bec0ce5fb"
 	},
 	"MatchRecord": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "41d53af4ec494ee7156c153440452f3a70edf239f6afd74e31b999cde4602852"
 	},
 	"Teuria.MiasmaColors": {
 		"status": "broken",
@@ -155,37 +185,44 @@
 	"Teuria.MoreReplay": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "2.3.0"
+		"version": "2.3.0",
+		"sha256": "e26a9310fba15113e4c0b5ce3405914086624cc9b15dd7bd760a1ab336be6ad6"
 	},
 	"MoveOrDie": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "c4920c8f52f98ba6dab4ecb50646b7df7a646a8fb63e452b68ff64ccbfa28190"
 	},
 	"Teuria.MusicRestart": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "2.1.1"
+		"version": "2.1.1",
+		"sha256": "165f4ce96d5e7285fc1099fcea651eb70b08b9891be7e992da4606c2857ad830"
 	},
 	"PlayTag": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "876274115e9efc66658fe8e881a1c249fad998cd45be6be003c5f8b5798b324e"
 	},
 	"Power": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "2c755ef271a1969b1c3afdd3bf39a876076b6c564fecb6f2e4ce5b03fef4373c"
 	},
 	"Teuria.Profiles": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.1"
+		"version": "1.1.1",
+		"sha256": "ad1d17fb89b5a929952593fcbf147396d2fc88338391eb71af1dd1f5302569b4"
 	},
 	"Ebe1.Respawn": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "1b4047b024912605103833155c3ead347c482d29fce259f9a6d80128a270a982"
 	},
 	"Rotate": {
 		"status": "broken",
@@ -195,37 +232,44 @@
 	"Teuria.ScoreCounter": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "f4399b4b73da7780132c777e05b0a938a0223178bc5eed101f248a3f6079a1fe"
 	},
 	"Scroll": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "8339660448576994db60a3dfdc5154d2917d8c552c77bc5beb1168fa91d2a648"
 	},
 	"Soccer": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "567a3af8b8fd8cc9fd3ef63d655c1cb89071b966446cc5b24a2e150e25329293"
 	},
 	"Tournament": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "92b25d4ae8242f99f68f9fdc2093e11d6f575b692efaaae0af7347f6d3ca66fa"
 	},
 	"TF8Player": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "0.1.1"
+		"version": "0.1.1",
+		"sha256": "3c1350a22963fc84b7a9a650480854cc9517fda4972f2c98ac69f3633f9b7cec"
 	},
 	"VariantSpeed": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "54488cfa1898a978b92e6a610ba190e53356dcbf68f8e8ff1ab3a78317faf32b"
 	},
 	"Teuria.WiderSet": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "0.9.0"
+		"version": "0.9.0",
+		"sha256": "9299e85db1b69d472ad6fa64866b98e7856d8218572b7dbde86631aea317db70"
 	},
 	"WinCounters": {
 		"status": "broken",
@@ -255,12 +299,14 @@
 	"Teuria.ColoredDrillArrows": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.2.0"
+		"version": "1.2.0",
+		"sha256": "4fdeca7e194b7a87bf8ee152f7e2849319d484370a8c32e63454a78818a57c97"
 	},
 	"Teuria.MechReaperKingSkin": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.1.0"
+		"version": "1.1.0",
+		"sha256": "a30e05eb4caea787419644c09cd5ecf98cc9240097f412000cd52d01a9b39585"
 	},
 	"ChallenginChuck.BossPraticeTowers": {
 		"status": "broken",
@@ -270,11 +316,13 @@
 	"InfinityGauntlet": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "1.0.0"
+		"version": "1.0.0",
+		"sha256": "23953b8fa3055c191f175a7bdc9e4df8ab6e171317a1784cd396c9a9c1299382"
 	},
 	"TowerFallLocalization": {
 		"status": "works",
 		"note": "Loads and runs to the title screen without errors (automated check, 2026-10-09).",
-		"version": "0.2.0"
+		"version": "0.2.0",
+		"sha256": "8432d0e315b71168b76fb970a7026bcf4a5aede413056248a222103abd3d9ef5"
 	}
 }

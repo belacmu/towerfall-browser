@@ -4,7 +4,9 @@
 #   - Push to main, or a dispatch: rebuilds main, and the branch already in preview/ if it's still
 #     around (a dispatch can name another branch, or "none").
 #   - Push to any other branch: the Preview workflow (preview.yml) finishes and triggers this one,
-#     which puts that branch in preview/. The last branch pushed wins.
+#     which puts that branch in preview/. The last branch pushed wins, also when its deploy was
+#     cancelled by a newer run (e.g. a push to main): preview-state.json on the site says when the
+#     preview in it was asked for, and a newer Preview run takes its place.
 # Deploys always run from main's copy of this workflow (workflow_run runs the default branch's), the
 # branch GitHub Pages lets deploy. The site contains no game files: players supply their own.
 #
@@ -49,6 +51,7 @@ jobs:
       preview-sha: ${{ steps.plan.outputs.sha }}
       preview-tree: ${{ steps.plan.outputs.preview-tree }}
       preview-merged: ${{ steps.plan.outputs.merged }}
+      preview-requested: ${{ steps.plan.outputs.requested }}
     steps:
       - name: Pick the preview branch and what needs building
         id: plan
@@ -59,17 +62,29 @@ jobs:
           EVENT: ${{ github.event_name }}
           RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_AT: ${{ github.event.workflow_run.created_at }}
           INPUT: ${{ inputs.preview }}
           SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
           tree() { gh api "repos/$REPO/commits/$1" --jq .commit.tree.sha; }
-          branch="" sha=""
+          branch="" sha="" requested=""
           case "$EVENT" in
-            workflow_run) branch="$RUN_BRANCH" sha="$RUN_SHA" ;;
-            workflow_dispatch) branch="$INPUT" ;;
+            workflow_run) branch="$RUN_BRANCH" sha="$RUN_SHA" requested="$RUN_AT" ;;
+            workflow_dispatch) [ -n "$INPUT" ] && branch="$INPUT" requested=$(date -u +%Y-%m-%dT%H:%M:%SZ) ;;
           esac
-          # Otherwise keep the branch that's in preview/ now.
-          [ -n "$branch" ] || branch=$(curl -sSf "$SITE/preview/preview.json" | jq -r '.branch // empty') || branch=""
+          if [ -z "$requested" ]; then
+            # Otherwise the preview that was asked for last: the one on the site now, or a branch
+            # pushed since whose deploy didn't finish (cancelled by a newer run).
+            state=$(curl -sSf "$SITE/preview-state.json?t=$(date +%s)") || state='{}'
+            branch=$(jq -r '.branch // empty' <<<"$state") requested=$(jq -r '.requested // empty' <<<"$state")
+            # (Sites deployed before preview-state.json: the branch in preview/.)
+            [ -n "$requested" ] || branch=$(curl -sSf "$SITE/preview/preview.json?t=$(date +%s)" | jq -r '.branch // empty') || branch=""
+            read -r pushed pushed_at < <(gh api "repos/$REPO/actions/workflows/preview.yml/runs?per_page=1" --jq '.workflow_runs[0] | "\(.head_branch) \(.created_at)"' 2>/dev/null) || pushed=""
+            if [ -n "$pushed" ] && [[ "$pushed_at" > "${requested:-0}" ]]; then
+              [ "$pushed" != "$branch" ] && echo "Preview: $pushed was pushed at $pushed_at, after ${branch:-nothing} was asked for${requested:+ ($requested)}."
+              branch="$pushed" requested="$pushed_at"
+            fi
+          fi
           if [ "$branch" = none ] || [ "$branch" = main ]; then branch=""; fi
           if [ -n "$branch" ] && [ -z "$sha" ]; then
             # Its latest commit; a branch that's gone (merged and deleted) leaves preview/ empty.
@@ -99,6 +114,7 @@ jobs:
             echo "sha=$sha"
             echo "preview-tree=$preview_tree"
             echo "merged=$merged"
+            echo "requested=$requested"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -231,9 +247,12 @@ jobs:
           SHA: ${{ needs.plan.outputs.preview-sha }}
           PREVIEW_TREE: ${{ needs.plan.outputs.preview-tree }}
           MERGED: ${{ needs.plan.outputs.preview-merged }}
+          REQUESTED: ${{ needs.plan.outputs.preview-requested }}
         run: |
           sites="$RUNNER_TEMP/sites" site="$RUNNER_TEMP/site"
           mv "$sites/$MAIN_TREE" "$site"
+          # Which preview was asked for, and when (also "none"), for the next run's plan.
+          jq -n --arg branch "${BRANCH:-none}" --arg requested "$REQUESTED" '{branch: $branch, requested: $requested}' > "$site/preview-state.json"
           built=false
           # A merged preview is a copy of main; otherwise its own build, if it built.
           if [ -n "$BRANCH" ] && [ -d "$sites/$PREVIEW_TREE" -o "$MERGED" = true ]; then

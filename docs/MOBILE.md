@@ -9,9 +9,16 @@ don't do `webkitdirectory` or folder drops), so a phone can't import the game fi
 Instead the public site loads them from a private file host you run, `cloudflare/`:
 
 - an **R2 bucket** holds your TowerFall install (`tools/upload-gamefiles.sh`), laid out like
-  `tools/serve.py`'s private mode: `gamefiles/manifest.json` plus the files;
+  `tools/serve.py`'s private mode: `gamefiles/manifest.json` plus the files, and the game's files
+  (all but the music bank, 127 MB) once more as one pack under `gamefiles/packs/`
+  (`tools/pack-gamefiles.py`). The page reads the pack in about ten range requests of up to
+  16 MB, split into the files, where file by file took one request (and a round trip) for each of
+  ~1,200 files: with 0.2 s of latency, the first import went from 47 s to 26 s in a local test.
+  Files outside it, a pack that has gone, or a host that doesn't answer ranges load file by file;
 - a **Worker** (`cloudflare/worker.js`) serves it under `/<KEY>/gamefiles/*`, cross-origin (CORS),
-  where `KEY` is a long random secret. Every other path is a 404 that never touches the bucket;
+  where `KEY` is a long random secret (compared in constant time). Every other path is a 404 that
+  never touches the bucket. It answers ranges and conditional requests from R2, and packs (named by
+  their content) can be cached for good;
 - the **site** is told about the host once, by opening it with
   `#gamefiles=https://towerfall-private.<subdomain>.workers.dev/<KEY>/`. It remembers the host in
   that browser and imports from it, like private mode: the first visit copies the game into the
@@ -43,8 +50,9 @@ downloads it and starts the music (`BrowserHost.StartMusic`). Once it's stored, 
 music from the start. (Starting without it needed an FNA fix: a `WaveBank` whose constructor
 threw crashed the game from its finalizer; see `patches/FNA.patch`.)
 
-Costs: this fits Cloudflare's free tiers for one player. A first import on a device is about 1,600
-R2 reads and Worker requests, a later visit one of each (R2: 10M reads/month free; Workers free plan:
+Costs: this fits Cloudflare's free tiers for one player. A first import on a device is about a dozen
+R2 reads and Worker requests (and a preflight; ~1,200 for a page from before packs), a later visit
+one of each (R2: 10M reads/month free; Workers free plan:
 100k requests/day).
 
 ### What to try on each phone

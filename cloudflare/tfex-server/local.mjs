@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { Matchmaker } from "./matchmaker.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
-import { iceServers } from "./turn.js";
+import { iceServers, STUN_ONLY } from "./turn.js";
 import { SignalRoom } from "./signal.js";
 
 const args = process.argv.slice(2);
@@ -141,12 +141,14 @@ class Connection {
 }
 
 const server = createServer(async (req, res) => {
-	if (new URL(req.url, "http://localhost").pathname === "/turn") {
+	const url = new URL(req.url, "http://localhost");
+	if (url.pathname === "/turn") {
 		// Same as the Worker's /turn; TURN_KEY_ID and TURN_KEY_API_TOKEN from the environment.
 		const origin = req.headers.origin;
-		if (!originAllowed(origin, origins)) return res.writeHead(403).end();
-		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", ...(origin && { "Access-Control-Allow-Origin": origin }) });
-		return res.end(JSON.stringify({ iceServers: await iceServers(process.env) }));
+		if (!origin || !originAllowed(origin, origins)) return res.writeHead(403).end();
+		const member = matchmaker.isMember(url.searchParams.get("room"), (url.searchParams.get("peer") ?? "").toLowerCase());
+		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": origin });
+		return res.end(JSON.stringify({ iceServers: member ? await iceServers(process.env) : STUN_ONLY }));
 	}
 	res.writeHead(200, { "Content-Type": "text/plain" });
 	res.end("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
@@ -181,7 +183,7 @@ server.on("upgrade", (req, socket) => {
 				schedule();
 			},
 		);
-		matchmaker.open(conn, Date.now());
+		matchmaker.open(conn, Date.now(), req.socket.remoteAddress ?? null);
 		schedule();
 		return;
 	}
@@ -190,13 +192,13 @@ server.on("upgrade", (req, socket) => {
 	if (!room) rooms.set(roomKey, (room = new SignalRoom({ log: verbose ? console.log : () => {} })));
 	const conn = new Connection(
 		socket,
-		(c, text) => room.message(c, text),
+		(c, text) => room.message(c, text, Date.now()),
 		(c) => {
 			room.close(c);
 			if (room.isEmpty()) rooms.delete(roomKey);
 		},
 	);
-	room.open(conn, route.peer);
+	room.open(conn, route.peer, Date.now(), req.socket.remoteAddress ?? null);
 });
 
 // One timer for the matchmaker's keep-alives and lobby deadlines.

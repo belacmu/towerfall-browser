@@ -30,6 +30,19 @@ const TOWERS = 16; // TF.EX's netplay towers (Constants.cs): map ids 0..15, -1 r
 const TEAM_DEATHMATCH = 5; // TowerFall.Modes
 const MAX_SKIN_CHUNK = 320 * 1024; // 192 KiB per chunk, as base64
 
+// Limits for a server anyone can reach. TF.EX stays well inside them: its biggest message is a skin
+// chunk, and it sends a skin as up to 32 of them in a row.
+export const MAX_FRAME = MAX_SKIN_CHUNK + 16 * 1024;
+const MAX_LOBBY_JSON = 64 * 1024; // a lobby, serialized (it goes out with every update and listing)
+const MAX_SPECTATORS = 8;
+const MAX_CONNS_PER_IP = 16;
+// Messages per connection: a bucket of BURST that refills at RATE per second. Running dry closes it.
+const BURST = 100;
+const RATE = 20;
+// Wrong join codes per address before it has to wait (codes are 5 of 32 characters).
+const CODE_MISSES = 20;
+const CODE_MISS_WINDOW_MS = 10 * 60_000;
+
 const clean = (s, max) => String(s ?? "").slice(0, max);
 const int = (v, fallback = 0) => (Number.isInteger(v) ? v : fallback);
 const strings = (list, n, max) => (Array.isArray(list) ? list.slice(0, n).map((s) => clean(s, max)) : []);
@@ -42,12 +55,13 @@ export class Matchmaker {
 		this.rooms = new Map(); // RoomId -> { lobby, timers: { vote, seriesPick, quickStart } }
 		this.conns = new Map(); // conn.id -> conn
 		this.keepAliveAt = 0;
+		this.codeMisses = new Map(); // address -> { n, until }
 	}
 
 	// After a Durable Object wakes up: its lobbies from storage and the sockets still connected.
 	// Members whose connection is gone are removed (everyone, after a redeploy).
 	restore(rooms, conns) {
-		for (const conn of conns) this.conns.set(conn.id, conn);
+		for (const conn of conns) if (!conn.state.refused) this.conns.set(conn.id, conn);
 		for (const room of rooms) this.rooms.set(room.lobby.RoomId, room);
 		for (const room of [...this.rooms.values()]) {
 			const live = new Set(this.members(room).map((c) => c.state.peer));
@@ -55,9 +69,12 @@ export class Matchmaker {
 		}
 	}
 
-	open(conn, now = Date.now()) {
-		conn.state = { seen: now };
+	// `ip` is the client's address (for per-address limits), if known.
+	open(conn, now = Date.now(), ip = null) {
+		const refused = !!ip && [...this.conns.values()].filter((c) => c.state.ip === ip).length >= MAX_CONNS_PER_IP;
+		conn.state = { seen: now, ip, tokens: BURST, refused };
 		conn.save?.();
+		if (refused) return conn.close(4029, "too many connections");
 		this.conns.set(conn.id, conn);
 		if (this.keepAliveAt < now) this.keepAliveAt = now + KEEPALIVE_MS;
 		this.send(conn, "KeepAlive", {});
@@ -70,8 +87,16 @@ export class Matchmaker {
 	}
 
 	message(conn, text, now = Date.now()) {
+		if (conn.state.refused) return;
 		if (!this.conns.has(conn.id)) this.conns.set(conn.id, conn);
-		conn.state.seen = now;
+		const s = conn.state;
+		s.tokens = Math.min(BURST, (s.tokens ?? BURST) + ((now - (s.seen ?? now)) / 1000) * RATE) - 1;
+		s.seen = now;
+		if (s.tokens < 0 || text.length > MAX_FRAME) {
+			conn.close(4029, s.tokens < 0 ? "too many messages" : "message too big");
+			this.close(conn, now);
+			return;
+		}
 		let msg;
 		try {
 			msg = JSON.parse(text);
@@ -189,7 +214,17 @@ export class Matchmaker {
 			this.closeRoom(room);
 			return;
 		}
+		if (player && lobby.Kind === "QuickPlay" && !lobby.InGame) {
+			// A quick play lobby can't take anyone new: the one left is sent a lobby without a host,
+			// which takes TF.EX back to the online menu, and it closes.
+			this.sendAll(room, "LobbyUpdate", { lobby: { ...lobby, Players: [] } });
+			this.closeRoom(room);
+			return;
+		}
 		if (player && lobby.Series?.Status === "InProgress") this.abortSeries(room, "PLAYER LEFT");
+		// Someone leaving mid-match starts the end-of-match vote clock, so a lobby whose match ended
+		// that way (nobody sends MatchEnded) still goes back to archer select.
+		if (player && lobby.InGame) room.timers.vote ??= now + VOTE_MS;
 		if (player && room.timers.vote && this.votesComplete(lobby)) {
 			this.resolveVote(room, now);
 			return;
@@ -281,7 +316,7 @@ export class Matchmaker {
 
 	joinRefusal(room, asPlayer) {
 		if (!room) return "LOBBY NOT FOUND";
-		if (!asPlayer) return null;
+		if (!asPlayer) return room.lobby.Spectators.length >= MAX_SPECTATORS ? "LOBBY FULL" : null;
 		const lobby = room.lobby;
 		if (lobby.InGame || this.seriesInProgress(lobby)) return "MATCH ALREADY STARTED";
 		if (lobby.Players.length >= lobby.MaxPlayers) return "LOBBY FULL";
@@ -462,6 +497,31 @@ export class Matchmaker {
 		if (!this.maybeStartSeries(room, now)) this.changed(room);
 	}
 
+	// Whether `peer` is a player or spectator in lobby `roomId` (for handing out TURN credentials).
+	isMember(roomId, peer) {
+		const lobby = this.rooms.get(roomId)?.lobby;
+		return !!lobby && !!peer && [...lobby.Players, ...lobby.Spectators].some((m) => m.RoomPeerId === peer);
+	}
+
+	tooBig(lobby) {
+		return JSON.stringify(lobby).length > MAX_LOBBY_JSON;
+	}
+
+	// Wrong join codes from one address: true once it has used up its tries for a while.
+	codeLocked(conn, now, missed) {
+		const ip = conn.state.ip;
+		if (!ip) return false;
+		let m = this.codeMisses.get(ip);
+		if (m && now >= m.until) m = null;
+		if (missed) {
+			m ??= { n: 0, until: now + CODE_MISS_WINDOW_MS };
+			m.n++;
+			this.codeMisses.set(ip, m);
+			for (const [k, v] of this.codeMisses) if (now >= v.until) this.codeMisses.delete(k);
+		}
+		return !!m && m.n >= CODE_MISSES;
+	}
+
 	// ---- quick play ----
 
 	leaveQuickPlay(conn) {
@@ -526,8 +586,14 @@ const handlers = {
 		conn.state.name = clean(body.name, MAX_NAME);
 	},
 
+	// Without peer ids: they're what a match's signaling knows its players by, and TF.EX's lobby list
+	// doesn't use them (joining hands out the lobby with them).
 	GetLobbies(conn) {
-		const lobbies = [...this.rooms.values()].map((r) => r.lobby).filter((l) => l.Kind === "Standard");
+		const hide = (m) => ({ ...m, RoomPeerId: "" });
+		const lobbies = [...this.rooms.values()]
+			.map((r) => r.lobby)
+			.filter((l) => l.Kind === "Standard")
+			.map((l) => ({ ...l, Players: l.Players.map(hide), Spectators: l.Spectators.map(hide), EndGameChoice: l.EndGameChoice.map(hide) }));
 		this.send(conn, "GetLobbiesResponse", { lobbies });
 	},
 
@@ -562,6 +628,7 @@ const handlers = {
 			Series: null,
 			MissingVariants: [],
 		};
+		if (this.tooBig(lobby)) return fail("LOBBY TOO BIG");
 		const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null } };
 		this.rooms.set(roomId, room);
 		this.attach(conn, room, host.RoomPeerId);
@@ -581,8 +648,10 @@ const handlers = {
 	},
 
 	JoinPrivate(conn, body, now) {
+		if (this.codeLocked(conn, now, false)) return this.send(conn, "PrivateJoinResult", { success: false, message: "TOO MANY TRIES", room_peer_id: "", lobby: null });
 		const code = String(body.code ?? "").trim().toUpperCase();
 		const room = code.length === CODE_LENGTH ? [...this.rooms.values()].find((r) => r.lobby.JoinCode === code) : undefined;
+		if (!room) this.codeLocked(conn, now, true);
 		const asPlayer = body.is_player !== false;
 		const refusal = this.joinRefusal(room, asPlayer);
 		if (refusal) return this.send(conn, "PrivateJoinResult", { success: false, message: refusal, room_peer_id: "", lobby: null });
@@ -603,7 +672,12 @@ const handlers = {
 		const lobby = room.lobby;
 		const index = lobby.Players.findIndex((p) => p.RoomPeerId === conn.state.peer);
 		if (index < 0) return this.send(conn, "LobbyUpdate", { lobby });
-		lobby.Players[index] = this.player(body.player, lobby.Players[index]);
+		const before = lobby.Players[index];
+		lobby.Players[index] = this.player(body.player, before);
+		if (this.tooBig(lobby)) {
+			lobby.Players[index] = before;
+			return this.send(conn, "LobbyUpdate", { lobby });
+		}
 		if (lobby.Kind === "QuickPlay" && !lobby.InGame) room.timers.quickStart = this.allReady(lobby) ? now + QUICK_START_MS : null;
 		if (this.maybeStartSeries(room, now)) return;
 		this.changed(room);
@@ -614,10 +688,15 @@ const handlers = {
 		if (!room || !this.isHost(room, conn)) return;
 		const lobby = room.lobby;
 		if (lobby.InGame || lobby.Kind === "QuickPlay" || this.seriesInProgress(lobby)) return;
+		const before = { GameData: lobby.GameData, MaxPlayers: lobby.MaxPlayers, Mods: lobby.Mods };
 		lobby.GameData = this.gameData(body.game_data, lobby.GameData);
 		const minPlayers = Math.max(lobby.Players.length, lobby.GameData.Mode === TEAM_DEATHMATCH ? 3 : 2);
 		lobby.MaxPlayers = Math.min(MAX_PLAYERS, Math.max(minPlayers, int(body.max_players, lobby.MaxPlayers)));
 		if (Array.isArray(body.mods)) lobby.Mods = this.mods(body.mods);
+		if (this.tooBig(lobby)) {
+			Object.assign(lobby, before);
+			return this.send(conn, "LobbyUpdate", { lobby });
+		}
 		// New settings: everyone picks again (TF.EX un-joins a player the server un-readies).
 		for (const p of lobby.Players) p.Ready = false;
 		this.changed(room);
