@@ -30,6 +30,7 @@ public static unsafe class TouchGamepad
 
 	public static bool Enabled;
 	private static volatile bool shown;
+	public static bool Shown => shown;
 	private static volatile bool reassign;
 	private static bool attempted;
 	private static IntPtr joystick;

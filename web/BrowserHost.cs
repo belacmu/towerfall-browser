@@ -130,6 +130,7 @@ public static partial class BrowserHost
 			}
 			TouchGamepad.Init(game);
 			GameMusic.Init(game);
+			LoaderAi.Init(game);
 
 			// The constructor's GameData.CheckForDLC() also requires Steam to report the DLC as
 			// installed. In the browser, having the Dark World content is enough.
@@ -236,6 +237,7 @@ public static partial class BrowserHost
 			}
 			TouchGamepad.Update();
 			GameMusic.Update();
+			LoaderAi.Update();
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
 			frameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - frameStart;
@@ -333,7 +335,21 @@ public static partial class BrowserHost
 		return Task.CompletedTask;
 	}
 
+	// The AI opponents: "<player slots>|<LoaderAI's types, comma-separated>|<1 in versus archer select>"
+	// (no types without it, or until the game has loaded), and the page's picks: per slot from P1, a
+	// type or empty (see LoaderAi).
+	[JSExport]
+	internal static Task<string> GetAiSetup() => Task.FromResult($"{LoaderAi.Slots()}|{LoaderAi.Types()}|{(LoaderAi.OnArcherSelect ? 1 : 0)}");
+
+	[JSExport]
+	internal static Task SetAiOpponents(string[] slots)
+	{
+		LoaderAi.SetOpponents(slots);
+		return Task.CompletedTask;
+	}
+
 	// ?mode=versus|quest|darkworld|trials: once the main menu is up, do what that mode's button does.
+	// "menu" (the page's default) just opens the main menu, past the title screen.
 	[JSExport]
 	internal static Task SetStartMode(string mode)
 	{
@@ -379,6 +395,7 @@ public static partial class BrowserHost
 		{
 			state.SetValue(scene, Enum.Parse(state.PropertyType, "Main"));
 			mainMenuFrames = 0;
+			if (startMode == "menu") startMode = null;
 			return;
 		}
 		if (menuState != "Main")
@@ -410,7 +427,7 @@ public static partial class BrowserHost
 		};
 		if (rollcall == null)
 		{
-			Console.WriteLine($"[mode] unknown mode \"{mode}\" (versus, quest, darkworld, trials, online or quickplay)");
+			Console.WriteLine($"[mode] unknown mode \"{mode}\" (menu, versus, quest, darkworld, trials, online or quickplay)");
 			return;
 		}
 		Type menu = scene.GetType();
@@ -445,6 +462,13 @@ public static partial class BrowserHost
 				{
 					Console.WriteLine($"[keys] players: {string.Join(", ", players.Cast<object>().Select(p => p?.GetType().Name ?? "-"))}");
 				}
+				return;
+			}
+			if (words[0] == "ai")
+			{
+				// LoaderAI's slots; "ai JIMMY - NOVA" picks P2-P4's opponents like the page does (- for none).
+				if (words.Length > 1) LoaderAi.SetOpponents(words[1..].Select(w => w == "-" ? "" : w).Prepend("").ToArray());
+				Console.WriteLine($"[ai] {LoaderAi.Describe()}");
 				return;
 			}
 			if (words[0] == "patches")

@@ -31,3 +31,7 @@ Decided with the project owner on 2026-10-09.
   GameBanana and drop it in. A small Cloudflare Worker proxy could replace the mirror step later.
 - **Testing.** CI can't run the game (no game files). A local smoke test on a machine with the game
   boots each mod headlessly and records the result in `mods/overrides.json`.
+- **Mods that expect a keyboard get a page control.** LoaderAI (behind AIJimmy and AINova) sets up
+  its computer players with per-slot keys a phone doesn't have, so the page's AI button picks P2-P4's
+  opponents and the host joins them in versus archer select through LoaderAI's API
+  (`web/LoaderAi.cs`). The keyboard keys still work on desktop.

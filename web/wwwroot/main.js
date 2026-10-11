@@ -9,11 +9,30 @@ import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
 self.consoleLog = [];
+// Also handed each line while set (see showActivity).
+let onConsoleLine = null;
+// A .NET exception's stack getter calls back into C#, which isn't allowed on this thread and throws:
+// that mustn't take the logging (and fail(), which logs the error first) down with it.
+const logText = (a) => {
+	if (typeof a === "string") return a;
+	try {
+		return a?.stack ?? String(a);
+	} catch {
+		return String(a?.message ?? a);
+	}
+};
 for (const level of ["log", "info", "warn", "error", "debug"]) {
 	const original = console[level].bind(console);
 	console[level] = (...args) => {
-		self.consoleLog.push(`[${level}] ` + args.map((a) => (typeof a === "string" ? a : a?.stack ?? String(a))).join(" "));
+		// Progress reports from .NET (see FortRiseLauncher), for showActivity only.
+		if (typeof args[0] === "string" && args[0].startsWith("[progress] ")) {
+			onConsoleLine?.(args[0]);
+			return;
+		}
+		const line = `[${level}] ` + args.map(logText).join(" ");
+		self.consoleLog.push(line);
 		if (self.consoleLog.length > 2000) self.consoleLog.splice(0, 500);
+		onConsoleLine?.(line);
 		original(...args);
 	};
 }
@@ -27,7 +46,10 @@ function fail(err) {
 	console.error(err);
 	status("Something went wrong");
 	// ManagedError's stack getter calls back into C#, which isn't allowed on this thread.
-	$("error").textContent = String(err?.message ?? err) + "\n\n(See the browser console for details.)";
+	const message = String(err?.message ?? err);
+	$("error").textContent = /out of memory/i.test(message)
+		? "The browser ran out of memory for the game. Right after a reload, the previous page's memory may not be freed yet: close this tab and open the page in a new one."
+		: message + "\n\n(See the browser console for details.)";
 	showOverlay();
 }
 
@@ -180,6 +202,96 @@ $("touchToggle").addEventListener("click", () => {
 	$("canvas").focus();
 });
 applyTouch();
+
+// AI opponents. LoaderAI (behind the AIJimmy and AINova mods) sets its computer players up with
+// keys a phone doesn't have, so the AI button (shown in versus archer select) picks them instead: P2 on (to P4, or P8 with an
+// 8-player mod) each none or one of its AI types, joined in versus archer select by the host
+// (LoaderAi.cs). Remembered per browser.
+const OPPONENTS_KEY = "towerfall.opponents";
+let aiTypes = [];
+let aiSlots = 4;
+// From P2, up to P8.
+let opponents = (() => {
+	try {
+		const saved = JSON.parse(localStorage.getItem(OPPONENTS_KEY));
+		if (Array.isArray(saved)) return Array.from({ length: 7 }, (_, i) => (typeof saved[i] === "string" ? saved[i] : ""));
+	} catch {}
+	return Array(7).fill("");
+})();
+const aiName = (type) => (type ? type[0] + type.slice(1).toLowerCase() : "none");
+
+function renderOpponents() {
+	const shown = opponents.slice(0, aiSlots - 1);
+	const count = shown.filter((t) => aiTypes.includes(t)).length;
+	$("aiToggle").textContent = count ? `AI: ${count}` : "AI: off";
+	const panel = $("aiPanel");
+	panel.innerHTML = "";
+	panel.classList.toggle("wide", shown.length > 3);
+	shown.forEach((type, i) => {
+		const button = document.createElement("button");
+		button.textContent = `P${i + 2}: ${aiName(aiTypes.includes(type) ? type : "")}`;
+		button.addEventListener("click", () => {
+			const choices = ["", ...aiTypes];
+			opponents[i] = choices[(choices.indexOf(aiTypes.includes(type) ? type : "") + 1) % choices.length];
+			try {
+				localStorage.setItem(OPPONENTS_KEY, JSON.stringify(opponents));
+			} catch {}
+			renderOpponents();
+			sendOpponents();
+		});
+		panel.append(button);
+	});
+	const hint = document.createElement("div");
+	hint.className = "hint";
+	hint.textContent = "They join in Versus archer select (not online), if there are archers left for them.";
+	panel.append(hint);
+}
+
+function sendOpponents() {
+	host?.SetAiOpponents(["", ...opponents.slice(0, aiSlots - 1).map((t) => (aiTypes.includes(t) ? t : ""))]).catch(console.error);
+}
+
+let onArcherSelect = false;
+
+async function fetchAiSetup() {
+	const [slots, types, select] = (await host.GetAiSetup()).split("|");
+	aiSlots = Math.min(8, Math.max(2, Number(slots) || 4));
+	aiTypes = types ? types.split(",") : [];
+	onArcherSelect = select === "1";
+}
+
+// LoaderAI's AI types register once the game has loaded; then the button shows whenever the game
+// is in versus archer select (checked twice a second).
+async function watchAiTypes() {
+	for (let i = 0; i < 60 && !aiTypes.length; i++) {
+		await fetchAiSetup();
+		if (!aiTypes.length) await new Promise((resolve) => setTimeout(resolve, 1000));
+	}
+	if (!aiTypes.length) return;
+	renderOpponents();
+	sendOpponents();
+	for (;;) {
+		const button = $("aiToggle");
+		if (button.hidden === onArcherSelect) {
+			button.hidden = !onArcherSelect;
+			if (onArcherSelect) renderOpponents();
+			else $("aiPanel").hidden = true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		await fetchAiSetup();
+	}
+}
+
+// (Opening it checks the slots again: an 8-player mode can be turned on in the game.)
+$("aiToggle").addEventListener("click", async () => {
+	const panel = $("aiPanel");
+	panel.hidden = !panel.hidden;
+	$("canvas").focus();
+	if (panel.hidden) return;
+	await fetchAiSetup();
+	renderOpponents();
+	sendOpponents();
+});
 
 // --- Mods (see mods.js) ---------------------------------------------------------------------
 
@@ -397,6 +509,39 @@ function offerMusic(host) {
 	});
 }
 
+// For steps with no telling how long they take (FortRise patching TowerFall.exe the first time,
+// then loading each mod): shows the time passing and what it's doing, from its log, and how far
+// patching is while it patches.
+function showActivity(text) {
+	const started = performance.now();
+	let doing = "";
+	let patched = 100;
+	onConsoleLine = (line) => {
+		const report = /^\[progress\] patch (\d+)$/.exec(line);
+		if (report) {
+			patched = Number(report[1]);
+			$("bar").classList.toggle("busy", patched >= 100);
+			progress(patched / 100);
+			return;
+		}
+		const logged = /^\[log\] \[Information\]\[(?:FortRise|Mods)\] (?:\[\w+\] )?(.+)/.exec(line);
+		if (logged) doing = logged[1];
+	};
+	const tick = () => {
+		status(`${text} ${Math.floor((performance.now() - started) / 1000)} s`);
+		detail(patched < 100 ? `${doing} ${patched}%` : doing);
+	};
+	tick();
+	const timer = setInterval(tick, 250);
+	$("bar").classList.add("busy");
+	return () => {
+		clearInterval(timer);
+		onConsoleLine = null;
+		$("bar").classList.remove("busy");
+		detail("");
+	};
+}
+
 function showProgress(done, total) {
 	progress(done / total);
 	detail(`${formatMB(done)} / ${formatMB(total)}`);
@@ -567,7 +712,10 @@ async function main() {
 	catalog = await Mods.loadCatalog();
 	await renderMods();
 	const play = $("play");
-	const noIntro = new URLSearchParams(location.search).has("nointro");
+	// The game opens on the main menu: no intro, and past the title screen (see startMode below).
+	// ?intro starts it the way the desktop game does.
+	const showIntro = new URLSearchParams(location.search).has("intro");
+	const noIntro = !showIntro;
 	let autoplay = new URLSearchParams(location.search).has("autoplay");
 	for (;;) {
 		status("Ready");
@@ -606,11 +754,14 @@ async function main() {
 		status("Getting FortRise…");
 		$("bar").hidden = false;
 		const version = await syncFortRise(showProgress);
-		progress(1);
-		detail("");
-		// Patching TowerFall.exe takes a while the first time (it's cached afterwards).
-		status(`Starting FortRise ${version}…`);
-		await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+		// Patching TowerFall.exe takes a while the first time (it's cached afterwards), and so does
+		// loading the mods.
+		const stopActivity = showActivity(`Starting FortRise ${version}…`);
+		try {
+			await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+		} finally {
+			stopActivity();
+		}
 	} else {
 		await exports.BrowserHost.Init(noIntro, null, null, null);
 	}
@@ -619,6 +770,7 @@ async function main() {
 	host = exports.BrowserHost;
 	if (pendingMusic) offerMusic(host);
 	await applyTouch();
+	if (useFortRise()) watchAiTypes().catch(console.error);
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
 	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).
@@ -635,7 +787,7 @@ async function main() {
 		const text = e.clipboardData?.getData("text");
 		if (text) exports.BrowserHost.SetClipboardText(text);
 	});
-	const startMode = new URLSearchParams(location.search).get("mode");
+	const startMode = new URLSearchParams(location.search).get("mode") ?? (showIntro ? null : "menu");
 	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
