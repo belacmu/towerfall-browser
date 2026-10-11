@@ -26,6 +26,13 @@ if (typeof window === 'undefined') {
         if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
             return;
         }
+        // (towerfall-browser) Only documents and worker scripts need the headers: they're what
+        // becomes cross-origin isolated. Everything else the page loads is same-origin or CORS
+        // (game files, the music bank, mods, the private file host), which COEP allows as it is, so
+        // it goes straight to the network instead of being streamed through this worker.
+        if (r.mode !== "navigate" && r.destination !== "worker" && r.destination !== "sharedworker") {
+            return;
+        }
 
         const request = (coepCredentialless && r.mode === "no-cors")
             ? new Request(r, {
