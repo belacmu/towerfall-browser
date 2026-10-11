@@ -190,6 +190,8 @@ public static partial class BrowserHost
 				Invoke("BeforeLoop");
 				typeof(Game).GetField("gameTimer", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(game, System.Diagnostics.Stopwatch.StartNew());
 				started = true;
+				// (TFGame.Initialize, run by DoInitialize, loaded the save.)
+				UnlockArchers();
 				TfexPatches.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
@@ -263,6 +265,35 @@ public static partial class BrowserHost
 			return Task.FromException<bool>(e);
 		}
 		return Task.FromResult((bool)runApplication.GetValue(game));
+	}
+
+	// Every archer can be picked from the start. The four secret ones (White, Yellow, Cyan, Purple:
+	// UnlockData.GetArcherUnlocked 4-7) count as found and introduced, as if earned, so no unlock
+	// sequence plays later either. Only their flags change; towers, variants and stats don't. The
+	// save keeps them once the game next writes it.
+	private static void UnlockArchers()
+	{
+		try
+		{
+			object save = towerFall.GetType("TowerFall.SaveData")?.GetField("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+			object unlocks = save?.GetType().GetField("Unlocks")?.GetValue(save);
+			if (unlocks == null) return;
+			int changed = 0;
+			foreach (string flag in new[] { "WhiteArcherRevealed", "WhiteArcherIntro", "YellowArcherRevealed", "YellowArcherIntro", "CyanArcherIntro", "PurpleArcherRevealed", "PurpleArcherIntro" })
+			{
+				FieldInfo field = unlocks.GetType().GetField(flag);
+				if (field?.GetValue(unlocks) is false)
+				{
+					field.SetValue(unlocks, true);
+					changed++;
+				}
+			}
+			if (changed > 0) Console.WriteLine("[unlocks] All archers unlocked.");
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[unlocks] {e}");
+		}
 	}
 
 	// Text the player pasted on the page (Ctrl+V), for the game's clipboard: SDL's is internal to
