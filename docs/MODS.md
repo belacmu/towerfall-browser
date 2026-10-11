@@ -16,7 +16,10 @@ Decided with the project owner on 2026-10-09.
 - **We keep the catalog.** `tools/update-catalog.py` builds `mods/catalog.json` from GameBanana:
   latest file, checksums, license, the FortRise metadata inside each zip, and whether the mod
   needs Harmony or native code. A scheduled CI job keeps it current. Our own per-mod verdicts
-  (after testing) go in `mods/overrides.json`.
+  (after testing) go in `mods/overrides.json`. A verdict that offers a mod ("works",
+  "experimental") holds only for the exact zip tested (its SHA-256): mod code runs on the site's
+  origin, so a re-uploaded file (even under the same version) is "untested" and off the page until
+  it's tested again. A mod GameBanana fails to answer for keeps yesterday's entry.
 - **The page shows only mods that work in the browser**, as a list on the Play screen, outside the
   game: mods must be in place before FortRise starts. FortRise turns on automatically when any mod
   is enabled, and dependencies are enabled with the mods that need them. FortRise's in-game Mods
