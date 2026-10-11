@@ -1,7 +1,20 @@
 # A TowerFall decompilation: investigation
 
-Status: investigating (2026-10-11). The question is whether a "true" decompilation (C# source that
-rebuilds the game) would help the browser port, PC mods, and deeper mods on the Switch version.
+Status: **shelved (2026-10-11): not worth pursuing.** The question was whether a "true"
+decompilation (C# source that rebuilds the game) would help the browser port, PC mods, and deeper
+mods on the Switch version. It works, but it unlocks nothing we can't already do:
+- **Performance:** rebuilt C# is still IL, interpreted just like the original.
+  - Rewriting hot code is already possible by patching the player's exe in the browser:
+    MonoMod patch classes are plain C#.
+  - Compiling to WebAssembly (docs/COMPILATION.md options B and C) works on the patched IL, not
+    on source.
+- **PC mods:** FortRise and Harmony already reach everything, and ILSpy already gives readable
+  code. A rebuild that doesn't match breaks FortRise's IL rules, and matching exactly would take
+  the 2013 compiler plus hand-tuning, only to recreate the original exe.
+- **Switch:** the build is native, so what helps is a readable map of the code, and ILSpy output
+  already is one. Rebuildable source adds nothing.
+
+The rest of this page is the investigation, kept so nobody redoes it.
 
 ## Ground rule
 
