@@ -1,7 +1,8 @@
 // Getting the player's own TowerFall files into OPFS (mounted at /libsdl in .NET), as:
 //   game/TowerFall.exe, game/Content/**, game/DarkWorldContent/** (optional)
 //
-// Sources, all reduced to a flat list of { path, size, open() -> Promise<Blob | Response> }:
+// Sources, all reduced to a flat list of { path, size, open() -> Promise<Blob | Response> } (plus
+// `pack` from a server that has the files in a pack, see fromServer):
 //   - a folder the player picks or drops (public site: no game files are hosted), or
 //   - gamefiles/manifest.json on a server that hosts the files: this one (tools/serve.py's private
 //     mode) or a private file host elsewhere (cloudflare/, given as a base URL).
@@ -29,6 +30,10 @@ export async function fromServer(base = "") {
 	return manifest.files.map((f) => ({
 		path: f.path,
 		size: f.size,
+		// tools/upload-gamefiles.sh also puts the game's files (all but the music) one after another
+		// in a pack, so a first import is a few big range requests instead of one per file (~1,600,
+		// each a round trip); copyFiles uses it, and open() for anything it can't.
+		pack: f.pack ? { url: base + "gamefiles/" + f.pack, offset: f.offset } : null,
 		open: async () => {
 			const r = await fetch(base + "gamefiles/" + f.path.split("/").map(encodeURIComponent).join("/"));
 			if (!r.ok) throw new Error(`Failed to fetch ${f.path}: ${r.status}`);
@@ -166,15 +171,33 @@ async function gameRoot(create = true) {
 	return opfs.getDirectoryHandle("game", { create });
 }
 
-async function existingSize(root, path) {
+async function existingSize(root, path, dirs = new Map()) {
 	const parts = path.split("/");
 	const name = parts.pop();
 	try {
-		const dir = await getDir(root, parts, false);
-		return (await (await dir.getFileHandle(name)).getFile()).size;
+		const key = parts.join("/");
+		let dir = dirs.get(key);
+		if (!dir) dirs.set(key, (dir = getDir(root, parts, false)));
+		return (await (await (await dir).getFileHandle(name)).getFile()).size;
 	} catch {
 		return -1;
 	}
+}
+
+// The entries of content whose file in browser storage doesn't have the right size (missing or
+// cut short), looking up many at once and each folder once.
+async function notStored(root, content) {
+	const dirs = new Map();
+	const sizes = new Array(content.length);
+	let next = 0;
+	const worker = async () => {
+		while (next < content.length) {
+			const i = next++;
+			sizes[i] = await existingSize(root, content[i].to, dirs);
+		}
+	};
+	await Promise.all(Array.from({ length: 32 }, worker));
+	return content.filter((c, i) => sizes[i] !== c.from.size);
 }
 
 // The imported game, or null if there isn't a complete one.
@@ -208,12 +231,7 @@ export async function importGame(located, source, onProgress) {
 
 // The entries of content that aren't (completely) in browser storage yet.
 export async function missingFiles(content) {
-	const root = await gameRoot(true);
-	const out = [];
-	for (const c of content) {
-		if ((await existingSize(root, c.to)) !== c.from.size) out.push(c);
-	}
-	return out;
+	return notStored(await gameRoot(true), content);
 }
 
 // The located music bank if it isn't (completely) in browser storage yet, else null.
@@ -246,39 +264,146 @@ async function writeMarker(root, info) {
 
 async function copyFiles(root, content, onProgress) {
 	const total = content.reduce((n, c) => n + c.from.size, 0);
-	let done = 0;
-	const todo = [];
-	for (const c of content) {
-		if ((await existingSize(root, c.to)) === c.from.size) done += c.from.size;
-		else todo.push(c);
-	}
+	const todo = await notStored(root, content);
+	let done = total - todo.reduce((n, c) => n + c.from.size, 0);
 	onProgress(done, total);
-	// Biggest first: the music bank alone is most of the bytes, so it starts right away while the
-	// many small files share the other connections. Over the network each file costs a round trip
-	// (~0.2 s to the private host), so keep plenty in flight.
-	todo.sort((a, b) => b.from.size - a.from.size);
+	const progress = (bytes) => onProgress((done += bytes), total);
+	const dirs = new Map();
+	const create = async (c) => {
+		const parts = c.to.split("/");
+		const name = parts.pop();
+		const key = parts.join("/");
+		let dir = dirs.get(key);
+		if (!dir) dirs.set(key, (dir = getDir(root, parts, true)));
+		return (await (await dir).getFileHandle(name, { create: true })).createWritable();
+	};
 
+	// Packed files: a few range requests, each split into the files it holds. Whatever a range
+	// couldn't deliver goes file by file below.
+	const [failed] = await Promise.all([
+		copyPacked(todo.filter((c) => c.from.pack), create, progress),
+		copyLoose(todo.filter((c) => !c.from.pack), create, progress),
+	]);
+	await copyLoose(failed, create, progress);
+}
+
+// One file at a time per connection, biggest first: the music bank alone is most of the bytes, so it
+// starts right away while the many small files share the other connections. Over the network each
+// file costs a round trip (~0.2 s to the private host), so keep plenty in flight.
+async function copyLoose(todo, create, progress) {
+	todo.sort((a, b) => b.from.size - a.from.size);
 	let next = 0;
 	const worker = async () => {
 		while (next < todo.length) {
 			const c = todo[next++];
-			const parts = c.to.split("/");
-			const name = parts.pop();
-			const dir = await getDir(root, parts, true);
-			const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
+			if (c.copied) continue;
+			c.copied = true;
+			const writable = await create(c);
 			const data = await c.from.open();
 			const reader = (data.body ?? data.stream()).getReader();
 			for (;;) {
 				const { done: eof, value } = await reader.read();
 				if (eof) break;
 				await writable.write(value);
-				done += value.byteLength;
-				onProgress(done, total);
+				progress(value.byteLength);
 			}
 			await writable.close();
 		}
 	};
 	await Promise.all(Array.from({ length: 16 }, worker));
+}
+
+// Packed files grouped into runs of neighbours (bridging small gaps of files already stored or not
+// needed), each run one range request, a few in flight. Resolves to the files left to copy on their
+// own (a pack the server no longer has, or that came back without a range).
+const RUN_BYTES = 16 << 20;
+const RUN_GAP = 256 << 10;
+async function copyPacked(todo, create, progress) {
+	const runs = [];
+	const byPack = new Map();
+	for (const c of todo) byPack.set(c.from.pack.url, [...(byPack.get(c.from.pack.url) ?? []), c]);
+	for (const [url, files] of byPack) {
+		files.sort((a, b) => a.from.pack.offset - b.from.pack.offset);
+		let run = null;
+		for (const c of files) {
+			const start = c.from.pack.offset;
+			const end = start + c.from.size;
+			if (run && start - run.end <= RUN_GAP && end - run.start <= RUN_BYTES) {
+				run.files.push(c);
+				run.end = end;
+			} else runs.push((run = { url, start, end, files: [c] }));
+		}
+	}
+	const failed = [];
+	let next = 0;
+	const worker = async () => {
+		while (next < runs.length) {
+			const run = runs[next++];
+			try {
+				await copyRun(run, create, progress);
+			} catch (e) {
+				console.warn(`[import] ${run.url} ${run.start}-${run.end}: ${e.message ?? e}; getting those files one by one`);
+				failed.push(...run.files.filter((c) => !c.copied));
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: 6 }, worker));
+	return failed;
+}
+
+async function copyRun(run, create, progress) {
+	const res = await fetch(run.url, { headers: { Range: `bytes=${run.start}-${run.end - 1}` } });
+	if (res.status !== 206) {
+		res.body?.cancel();
+		throw new Error(`HTTP ${res.status}, not a range`);
+	}
+	const reader = res.body.getReader();
+	let at = run.start; // pack offset of the next byte from the reader
+	let i = 0; // the file being written, or the next one
+	let writable = null;
+	let written = 0;
+	try {
+		for (;;) {
+			const { done: eof, value } = await reader.read();
+			if (eof) break;
+			let chunk = value;
+			while (chunk.byteLength > 0 && i < run.files.length) {
+				const c = run.files[i];
+				const start = c.from.pack.offset;
+				if (at < start) {
+					// A gap: bytes of files that aren't wanted.
+					const skip = Math.min(start - at, chunk.byteLength);
+					chunk = chunk.subarray(skip);
+					at += skip;
+					continue;
+				}
+				writable ??= await create(c);
+				const take = Math.min(start + c.from.size - at, chunk.byteLength);
+				await writable.write(chunk.subarray(0, take));
+				chunk = chunk.subarray(take);
+				at += take;
+				written += take;
+				progress(take);
+				if (at === start + c.from.size) {
+					await writable.close();
+					writable = null;
+					c.copied = true;
+					i++;
+				}
+			}
+		}
+		// Empty files at the end of the run.
+		for (; i < run.files.length && run.files[i].from.size === 0 && at === run.files[i].from.pack.offset; i++) {
+			await (await create(run.files[i])).close();
+			run.files[i].copied = true;
+		}
+		if (i < run.files.length) throw new Error("the range ended early");
+	} catch (e) {
+		await writable?.abort().catch(() => {});
+		// Take back what this run counted for files that will be copied again.
+		progress(-run.files.filter((c) => !c.copied).reduce((n, c) => n + Math.max(0, Math.min(c.from.size, at - c.from.pack.offset)), 0));
+		throw e;
+	}
 }
 
 // --- FortRise -----------------------------------------------------------------------------
