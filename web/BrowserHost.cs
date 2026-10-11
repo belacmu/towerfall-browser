@@ -72,6 +72,53 @@ public static partial class BrowserHost
 		});
 	}
 
+	private static Task prePatch;
+	private static bool fortRisePrepared;
+
+	// Patching TowerFall.exe for FortRise takes a while the first time (12 s on a fast Mac, far longer
+	// on a phone; cached afterwards), so the page starts it in the background while the player is
+	// still on its start screen, as soon as FortRise will run. Init then finds it done, or waits for
+	// the rest. Returns at once; arguments as for Init.
+	[JSExport]
+	internal static Task PrePatch(string fortriseVersion, string frameworkUrl, string[] assemblies)
+	{
+		prePatch ??= Task.Run(() =>
+		{
+			LinkFolders();
+			PrepareFortRise(frameworkUrl, assemblies);
+			ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
+			FortRisePatcher.EnsurePatched(GameAssembly, FortRiseDir, fortriseVersion, loggers, FortRiseLauncher.ReportPatchProgress);
+		});
+		return Task.CompletedTask;
+	}
+
+	private static void LinkFolders()
+	{
+		Directory.CreateDirectory(SaveDir);
+		foreach (string dir in new[] { GameDir, FortRiseDir })
+		{
+			string target = Root + dir;
+			Directory.CreateDirectory(target);
+			if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
+		}
+	}
+
+	// What patching needs: the app's assemblies where Cecil looks, and TowerFall.exe's references
+	// beside it.
+	private static void PrepareFortRise(string frameworkUrl, string[] assemblies)
+	{
+		if (fortRisePrepared) return;
+		MountAssemblies(frameworkUrl, assemblies);
+		// MonoMod resolves TowerFall.exe's references from the FortRise folder.
+		foreach (string dll in new[] { "FNA.dll", "Steamworks.NET.dll" })
+		{
+			File.Copy("/bin/" + dll, Path.Combine(FortRiseDir, dll), overwrite: true);
+		}
+		// ...and the framework from /bin.
+		Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
+		fortRisePrepared = true;
+	}
+
 	// fortriseVersion: null for the plain game. frameworkUrl/assemblies (FortRise only): where the
 	// app's assemblies are served and their "served-name|assembly-name.dll" pairs, for Cecil.
 	[JSExport]
@@ -79,13 +126,17 @@ public static partial class BrowserHost
 	{
 		try
 		{
-			Directory.CreateDirectory(SaveDir);
-			foreach (string dir in new[] { GameDir, FortRiseDir })
+			// A patch started ahead (PrePatch) must finish first: it works in the FortRise folder as
+			// the current directory. If it failed, launching patches again (and reports why).
+			try
 			{
-				string target = Root + dir;
-				Directory.CreateDirectory(target);
-				if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
+				prePatch?.Wait();
 			}
+			catch (Exception e)
+			{
+				Console.Error.WriteLine($"[fortrise] Patching ahead failed; patching again: {e.InnerException ?? e}");
+			}
+			LinkFolders();
 			// TFGame.GetSavePath() (Linux branch) resolves to $XDG_DATA_HOME/TowerFall. This must
 			// be set before anything touches TFGame, whose static fields capture the save path.
 			Environment.SetEnvironmentVariable("XDG_DATA_HOME", SaveDir);
@@ -112,14 +163,7 @@ public static partial class BrowserHost
 			}
 			else
 			{
-				MountAssemblies(frameworkUrl, assemblies);
-				// MonoMod resolves TowerFall.exe's references from the FortRise folder.
-				foreach (string dll in new[] { "FNA.dll", "Steamworks.NET.dll" })
-				{
-					File.Copy("/bin/" + dll, Path.Combine(FortRiseDir, dll), overwrite: true);
-				}
-				// ...and the framework from /bin.
-				Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
+				PrepareFortRise(frameworkUrl, assemblies);
 				// The provider decides what's shown (see PlainConsoleLoggerProvider); don't filter before it.
 				ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
 				ModInstaller.Apply(FortRiseDir, loggers.CreateLogger("Mods"));
@@ -190,6 +234,8 @@ public static partial class BrowserHost
 				Invoke("BeforeLoop");
 				typeof(Game).GetField("gameTimer", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(game, System.Diagnostics.Stopwatch.StartNew());
 				started = true;
+				// (TFGame.Initialize, run by DoInitialize, loaded the save.)
+				UnlockArchers();
 				TfexPatches.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
@@ -263,6 +309,35 @@ public static partial class BrowserHost
 			return Task.FromException<bool>(e);
 		}
 		return Task.FromResult((bool)runApplication.GetValue(game));
+	}
+
+	// Every archer can be picked from the start. The four secret ones (White, Yellow, Cyan, Purple:
+	// UnlockData.GetArcherUnlocked 4-7) count as found and introduced, as if earned, so no unlock
+	// sequence plays later either. Only their flags change; towers, variants and stats don't. The
+	// save keeps them once the game next writes it.
+	private static void UnlockArchers()
+	{
+		try
+		{
+			object save = towerFall.GetType("TowerFall.SaveData")?.GetField("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+			object unlocks = save?.GetType().GetField("Unlocks")?.GetValue(save);
+			if (unlocks == null) return;
+			int changed = 0;
+			foreach (string flag in new[] { "WhiteArcherRevealed", "WhiteArcherIntro", "YellowArcherRevealed", "YellowArcherIntro", "CyanArcherIntro", "PurpleArcherRevealed", "PurpleArcherIntro" })
+			{
+				FieldInfo field = unlocks.GetType().GetField(flag);
+				if (field?.GetValue(unlocks) is false)
+				{
+					field.SetValue(unlocks, true);
+					changed++;
+				}
+			}
+			if (changed > 0) Console.WriteLine("[unlocks] All archers unlocked.");
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[unlocks] {e}");
+		}
 	}
 
 	// Text the player pasted on the page (Ctrl+V), for the game's clipboard: SDL's is internal to
