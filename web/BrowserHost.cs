@@ -335,10 +335,11 @@ public static partial class BrowserHost
 		return Task.CompletedTask;
 	}
 
-	// The AI opponents: "<player slots>|<LoaderAI's types, comma-separated>" (no types without it, or
-	// until the game has loaded), and the page's picks: per slot from P1, a type or empty (see LoaderAi).
+	// The AI opponents: "<player slots>|<LoaderAI's types, comma-separated>|<1 in versus archer select>"
+	// (no types without it, or until the game has loaded), and the page's picks: per slot from P1, a
+	// type or empty (see LoaderAi).
 	[JSExport]
-	internal static Task<string> GetAiSetup() => Task.FromResult($"{LoaderAi.Slots()}|{LoaderAi.Types()}");
+	internal static Task<string> GetAiSetup() => Task.FromResult($"{LoaderAi.Slots()}|{LoaderAi.Types()}|{(LoaderAi.OnArcherSelect ? 1 : 0)}");
 
 	[JSExport]
 	internal static Task SetAiOpponents(string[] slots)

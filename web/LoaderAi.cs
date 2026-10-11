@@ -110,6 +110,9 @@ public static class LoaderAi
 	// The player slots LoaderAI serves: 4, or up to 8 with an 8-player mod.
 	public static int Slots() => game == null ? 0 : (int)module.GetProperty("PlayerSlots", Any).GetValue(null);
 
+	// Whether the game is in versus archer select, offline (where the page offers the picker).
+	public static bool OnArcherSelect { get; private set; }
+
 	// Per slot (P1 first): an AI type, or empty for none.
 	public static void SetOpponents(string[] slots) => wanted = slots.Select(s => string.IsNullOrEmpty(s) ? null : s).ToArray();
 
@@ -119,6 +122,7 @@ public static class LoaderAi
 		if (game == null) return;
 		if (Online())
 		{
+			OnArcherSelect = false;
 			joined.Clear();
 			return;
 		}
@@ -126,6 +130,7 @@ public static class LoaderAi
 		bool versusRollcall = scene?.GetType().FullName == "TowerFall.MainMenu"
 			&& scene.GetType().GetProperty("State").GetValue(scene).ToString() == "Rollcall"
 			&& rollcallMode.GetValue(null).ToString() == "Versus";
+		OnArcherSelect = versusRollcall;
 		if (!versusRollcall)
 		{
 			rollcallFrames = 0;

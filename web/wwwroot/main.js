@@ -204,7 +204,7 @@ $("touchToggle").addEventListener("click", () => {
 applyTouch();
 
 // AI opponents. LoaderAI (behind the AIJimmy and AINova mods) sets its computer players up with
-// keys a phone doesn't have, so the AI button picks them instead: P2 on (to P4, or P8 with an
+// keys a phone doesn't have, so the AI button (shown in versus archer select) picks them instead: P2 on (to P4, or P8 with an
 // 8-player mod) each none or one of its AI types, joined in versus archer select by the host
 // (LoaderAi.cs). Remembered per browser.
 const OPPONENTS_KEY = "towerfall.opponents";
@@ -251,22 +251,35 @@ function sendOpponents() {
 	host?.SetAiOpponents(["", ...opponents.slice(0, aiSlots - 1).map((t) => (aiTypes.includes(t) ? t : ""))]).catch(console.error);
 }
 
+let onArcherSelect = false;
+
 async function fetchAiSetup() {
-	const [slots, types] = (await host.GetAiSetup()).split("|");
+	const [slots, types, select] = (await host.GetAiSetup()).split("|");
 	aiSlots = Math.min(8, Math.max(2, Number(slots) || 4));
 	aiTypes = types ? types.split(",") : [];
+	onArcherSelect = select === "1";
 }
 
-// LoaderAI's AI types register once the game has loaded; the button shows when there are some.
+// LoaderAI's AI types register once the game has loaded; then the button shows whenever the game
+// is in versus archer select (checked twice a second).
 async function watchAiTypes() {
 	for (let i = 0; i < 60 && !aiTypes.length; i++) {
 		await fetchAiSetup();
 		if (!aiTypes.length) await new Promise((resolve) => setTimeout(resolve, 1000));
 	}
 	if (!aiTypes.length) return;
-	$("aiToggle").hidden = false;
 	renderOpponents();
 	sendOpponents();
+	for (;;) {
+		const button = $("aiToggle");
+		if (button.hidden === onArcherSelect) {
+			button.hidden = !onArcherSelect;
+			if (onArcherSelect) renderOpponents();
+			else $("aiPanel").hidden = true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		await fetchAiSetup();
+	}
 }
 
 // (Opening it checks the slots again: an 8-player mode can be turned on in the game.)
