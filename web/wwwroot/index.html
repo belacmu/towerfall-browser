@@ -100,17 +100,21 @@
 				padding: 0;
 			}
 			/* Sound and Controls buttons. */
+			/* A row of buttons, with the AI button and its picker below it when they show. */
 			#corner {
 				position: fixed;
 				top: max(8px, env(safe-area-inset-top));
 				right: max(8px, env(safe-area-inset-right));
 				z-index: 10;
 				display: flex;
+				flex-direction: column;
+				align-items: flex-end;
 				gap: 8px;
 				/* Only its buttons take taps, not the space between them. */
 				pointer-events: none;
 			}
-			#corner > * { pointer-events: auto; }
+			#corner .row { display: flex; gap: 8px; }
+			#corner button, #aiPanel { pointer-events: auto; }
 			/* Styled like the on-screen controls' Back and Pause buttons (#touch .back, below). */
 			#corner button {
 				height: calc(min(19vmin, 88px) * 0.45 + 4px); /* + the borders, which .tbutton adds outside */
@@ -124,21 +128,8 @@
 			}
 			#corner button:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 			#corner button:disabled { cursor: default; }
-			/* Portrait: on a row below the on-screen controls' Back and Pause buttons, in the room
-			   above the game. */
-			@media (orientation: portrait) {
-				#corner {
-					top: calc(max(8px, env(safe-area-inset-top)) + min(19vmin, 88px) * 0.45 + 16px);
-					left: max(8px, env(safe-area-inset-left));
-					flex-wrap: wrap;
-					justify-content: flex-end;
-				}
-			}
-			/* The AI opponents picker (the AI button; see main.js), under the buttons. */
+			/* The AI opponents picker (the AI button; see main.js). */
 			#aiPanel {
-				position: absolute;
-				top: calc(100% + 8px);
-				right: 0;
 				display: grid;
 				grid-template-columns: auto;
 				gap: 6px;
@@ -263,10 +254,12 @@
 			<canvas id="canvas" class="canvas" tabindex="0"></canvas>
 		</div>
 		<div id="corner">
+			<div class="row">
+				<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
+				<button id="music" title="Download the game's music" hidden></button>
+				<button id="mute" title="Toggle sound">Sound: on</button>
+			</div>
 			<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
-			<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
-			<button id="music" title="Download the game's music" hidden></button>
-			<button id="mute" title="Toggle sound">Sound: on</button>
 			<div id="aiPanel" hidden></div>
 		</div>
 		<div id="overlay">
