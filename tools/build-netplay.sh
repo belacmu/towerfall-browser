@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-GGRS_FFI_COMMIT=16859a599ecf73475a90cd9596c7d9c0d52a8beb
+GGRS_FFI_COMMIT=cf60182621fa96d1f6541f66038350eaf14a8da6
 GGRS_COMMIT=12a2d476653873042df38496386415124693acb9
 # A nightly on LLVM 19, like Emscripten 3.1.56: newer LLVMs tag objects with WebAssembly features
 # (bulk-memory-opt, call-indirect-overlong) that its wasm-opt doesn't know.
