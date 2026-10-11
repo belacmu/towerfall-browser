@@ -18,13 +18,14 @@ public static class FortRiseLauncher
 		ILogger log = loggers.CreateLogger("FortRise");
 		// The page shows patching's progress from these lines (and leaves them out of the console).
 		int shown = -1;
-		string patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, fraction =>
+		void Progress(double fraction)
 		{
 			int percent = (int)(fraction * 100);
 			if (percent == shown) return;
 			shown = percent;
 			Console.WriteLine($"[progress] patch {percent}");
-		});
+		}
+		string patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, Progress);
 
 		// FortRiseHandler.LoadAssembly: dependencies not in the app resolve from the FortRise folder.
 		AssemblyLoadContext.Default.Resolving += (context, name) =>
@@ -33,7 +34,19 @@ public static class FortRiseLauncher
 			return File.Exists(path) ? context.LoadFromAssemblyPath(path) : null;
 		};
 		// Loaded from a path (not bytes) because RiseCore finds its folder via Assembly.Location.
-		Assembly game = Assembly.LoadFrom(patchFile);
+		Assembly game;
+		try
+		{
+			game = Assembly.LoadFrom(patchFile);
+		}
+		catch (BadImageFormatException e)
+		{
+			// A damaged cached patch would otherwise fail every start: patch again, once.
+			log.LogWarning("TowerFall.Patch.dll didn't load ({Error}); patching again.", e.Message);
+			shown = -1;
+			patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, Progress, force: true);
+			game = Assembly.LoadFrom(patchFile);
+		}
 		Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath));
 
 		// The patched TFGame.Main, up to `new TFGame(noIntro).Run()`.

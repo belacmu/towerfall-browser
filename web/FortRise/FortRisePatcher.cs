@@ -25,18 +25,29 @@ public static class FortRisePatcher
 
 	// fortriseDir holds TowerFall.FortRise.mm.dll plus the assemblies TowerFall.exe references
 	// (FNA.dll, Steamworks.NET.dll); MonoMod resolves dependencies from the working directory.
-	// progress, if given, is told how far patching is (0 to 1) as it goes.
-	public static string EnsurePatched(string exePath, string fortriseDir, string fortriseVersion, ILoggerFactory loggers, Action<double> progress = null)
+	// progress, if given, is told how far patching is (0 to 1) as it goes. force: patch even if the
+	// cached one looks up to date (it didn't load).
+	public static string EnsurePatched(string exePath, string fortriseDir, string fortriseVersion, ILoggerFactory loggers, Action<double> progress = null, bool force = false)
 	{
 		ILogger log = loggers.CreateLogger("FortRise");
 		string patchFile = Path.Combine(fortriseDir, PatchFile);
 		string stampFile = patchFile + ".inputs";
 		string stamp = $"{fortriseVersion} fixups{FixupsVersion} {Sha256(exePath)} {Sha256(Path.Combine(fortriseDir, PatchModule))}";
-		if (File.Exists(patchFile) && File.Exists(stampFile) && File.ReadAllText(stampFile) == stamp)
+		// The stamp also has the patch's size, which catches one cut short (the browser's storage
+		// doesn't promise to keep writes to different files in order if the page dies).
+		if (!force && File.Exists(patchFile) && File.Exists(stampFile))
 		{
-			log.LogInformation("TowerFall.Patch.dll is up to date, skipping patch.");
-			return patchFile;
+			string saved = File.ReadAllText(stampFile);
+			string sized = $"{stamp} {new FileInfo(patchFile).Length}";
+			// (Stamps from before the size was added are trusted once and given it.)
+			if (saved == stamp) File.WriteAllText(stampFile, saved = sized);
+			if (saved == sized)
+			{
+				log.LogInformation("TowerFall.Patch.dll is up to date, skipping patch.");
+				return patchFile;
+			}
 		}
+		File.Delete(stampFile);
 
 		log.LogInformation("Patching TowerFall.exe (once per FortRise version)...");
 		using var exe = new MemoryStream(File.ReadAllBytes(exePath));
@@ -52,7 +63,7 @@ public static class FortRisePatcher
 		{
 			Directory.SetCurrentDirectory(previousDir);
 		}
-		File.WriteAllText(stampFile, stamp);
+		File.WriteAllText(stampFile, $"{stamp} {new FileInfo(patchFile).Length}");
 		return patchFile;
 	}
 
