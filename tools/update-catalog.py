@@ -8,9 +8,12 @@ may host a copy), and a download URL the page can fetch cross-origin. GameBanana
 redirect through a host without CORS headers, so the final mirror URL is resolved here; the page
 falls back to asking the player for the zip if a mirror has moved.
 
-mods/overrides.json holds test results per mod name: "status", "note" and the "version" tested
-(written by tools/smoke-mods.mjs, or by hand). A result only applies to the version it was for;
-once a mod updates on GameBanana it's "untested" again until retested.
+mods/overrides.json holds test results per mod name: "status", "note", and the "version" and
+"sha256" (of the zip) tested (written by tools/smoke-mods.mjs, or by hand). A result that offers the
+mod on the page ("works", "experimental") only applies to that exact file: authors can re-upload a
+zip under the same version, and the page installs whatever the catalog lists, so a changed file is
+"untested" (not offered) until retested. Other results ("broken") apply to the version.
+A mod GameBanana fails to answer for keeps its previous catalog entry.
 Downloads are cached in vendor/mod-cache/.
 Usage: tools/update-catalog.py [--limit N]
        tools/update-catalog.py --offline   (re-apply mods/overrides.json to the existing catalog)
@@ -153,14 +156,18 @@ def status_of(m):
     return "untested", "Not tested in the browser yet."
 
 
-def apply_status(m, overrides):
+OFFERED = ("works", "experimental")
+
+
+def apply_status(m, overrides, sha256):
     status, note = status_of(m)
     o = overrides.get(m["name"])
     if o and status != "unsupported":
-        if o.get("version") in (None, m["version"]):
+        tested = o.get("sha256") == sha256 if o.get("status") in OFFERED else o.get("version") in (None, m["version"])
+        if tested:
             status, note = o.get("status", status), o.get("note", note)
         else:
-            note = f"Updated since it was last tested ({o['version']}: {o.get('status')})."
+            note = f"Updated since it was last tested ({o.get('version')}: {o.get('status')})."
     m["status"], m["note"] = status, note
 
 
@@ -179,16 +186,18 @@ def main():
         entries = json.load(open(OUT))["mods"]
         for e in entries:
             for m in e["mods"]:
-                apply_status(m, overrides)
+                apply_status(m, overrides, e["file"]["sha256"])
         write(entries)
         print(f"Re-applied {OVERRIDES} to {OUT}")
         return
     # GameBanana hands out a different mirror host per request; keep the previous one for an
     # unchanged file while it still serves it, so the catalog only changes when something did.
     previous = {}
+    previous_entries = {}
     if os.path.exists(OUT):
         for e in json.load(open(OUT))["mods"]:
             previous[e["file"]["md5"]] = e["file"].get("mirror")
+            previous_entries[e["gamebanana"]] = e
     entries = []
     records = list_mods()[:limit]
     for i, rec in enumerate(records, 1):
@@ -227,12 +236,15 @@ def main():
                 "mods": [],
             }
             for m in mods:
-                apply_status(m, overrides)
+                apply_status(m, overrides, entry["file"]["sha256"])
                 entry["mods"].append(m)
             entries.append(entry)
             print(f"[{i}/{len(records)}] {rec['_sName']}: " + ", ".join(f"{m['name']} {m['version']} ({m['status']})" for m in mods))
         except Exception as e:
             print(f"[{i}/{len(records)}] {rec.get('_sName')}: error {e}", file=sys.stderr)
+            # A timeout shouldn't take a mod off the page until tomorrow: keep what was there.
+            if gb_id in previous_entries:
+                entries.append(previous_entries[gb_id])
         time.sleep(0.3)  # be polite to GameBanana
     write(entries)
     print(f"Wrote {OUT}: {len(entries)} GameBanana entries, {sum(len(e['mods']) for e in entries)} mods")
