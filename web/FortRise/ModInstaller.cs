@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Mono.Cecil;
 
 namespace TowerFallBrowser;
 
@@ -77,11 +79,12 @@ public static class ModInstaller
 
 		foreach ((string folder, var w) in wanted)
 		{
-			if (installed.TryGetValue(folder, out string sha) && sha == w.Sha && Directory.Exists(Path.Combine(modsDir, folder)))
-			{
-				continue;
-			}
 			string target = Path.Combine(modsDir, folder);
+			if (installed.TryGetValue(folder, out string sha) && sha == w.Sha && Directory.Exists(target))
+			{
+				if (!CallsMissingHostCode(target, log)) continue;
+				log.LogInformation("Mod {Folder} was adapted by another build of the page; installing it again.", folder);
+			}
 			if (Directory.Exists(target) && !installed.ContainsKey(folder))
 			{
 				log.LogWarning("Mods/{Folder} already exists and wasn't installed by the page; leaving it alone.", folder);
@@ -131,6 +134,41 @@ public static class ModInstaller
 	}
 
 	private const string Partial = "partial";
+
+	// Whether a DLL in the folder calls into this host (TowerFallBrowser) for something it doesn't
+	// have. The host rewrites some mods' code to call its own (StateSpeedups) in place, and every
+	// build of the page shares the site's storage (the main site and the branch preview too), so a
+	// mod adapted by a newer build fails in an older one, when the call is first made (in a match).
+	private static bool CallsMissingHostCode(string folder, ILogger log)
+	{
+		Assembly host = typeof(ModInstaller).Assembly;
+		string hostName = host.GetName().Name;
+		foreach (string dll in Directory.EnumerateFiles(folder, "*.dll", SearchOption.AllDirectories))
+		{
+			try
+			{
+				// (Only the metadata is read, not the whole file.)
+				using var module = ModuleDefinition.ReadModule(dll, new ReaderParameters { ReadingMode = ReadingMode.Deferred });
+				if (!module.AssemblyReferences.Any(r => r.Name == hostName)) continue;
+				foreach (MemberReference member in module.GetTypeReferences().Cast<MemberReference>().Concat(module.GetMemberReferences()))
+				{
+					TypeReference type = member as TypeReference ?? member.DeclaringType;
+					while (type.IsNested) type = type.DeclaringType;
+					if ((type.Scope as AssemblyNameReference)?.Name != hostName) continue;
+					Type found = host.GetType(member is TypeReference ? member.FullName.Replace('/', '+') : member.DeclaringType.GetElementType().FullName.Replace('/', '+'));
+					if (found == null || member is not TypeReference && found.GetMember(member.Name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance).Length == 0)
+					{
+						log.LogInformation("{Dll} uses {Member}, which this build doesn't have.", Path.GetFileName(dll), member.FullName);
+						return true;
+					}
+				}
+			}
+			catch (BadImageFormatException)
+			{
+			}
+		}
+		return false;
+	}
 
 	// A JSON file this reads back, or null if it's missing or unreadable (a crash while writing it).
 	private static T ReadJson<T>(string path, ILogger log) where T : class
