@@ -26,12 +26,17 @@ if (typeof window === 'undefined') {
         if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
             return;
         }
-        // (towerfall-browser) Only documents and worker scripts need the headers: they're what
-        // becomes cross-origin isolated. Everything else the page loads is same-origin or CORS
-        // (game files, the music bank, mods, the private file host), which COEP allows as it is, so
-        // it goes straight to the network instead of being streamed through this worker.
+        // (towerfall-browser) The big downloads go straight to the network instead of being streamed
+        // through this worker: game files from a server (gamefiles/, or the private file host),
+        // FortRise's files, hosted mods, and anything from another site (mods from GameBanana).
+        // They're same-origin or CORS, which COEP allows as they are. Everything else (the page,
+        // its workers, the .NET runtime) is handled as before: passing the runtime's files through
+        // too made starting .NET much slower on an iPhone (2026-10-11, not understood yet).
         if (r.mode !== "navigate" && r.destination !== "worker" && r.destination !== "sharedworker") {
-            return;
+            const url = new URL(r.url);
+            if (url.origin !== self.location.origin || /\/(gamefiles|fortrise|hosted-mods)\//.test(url.pathname)) {
+                return;
+            }
         }
 
         const request = (coepCredentialless && r.mode === "no-cors")

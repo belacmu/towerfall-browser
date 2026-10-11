@@ -749,6 +749,22 @@ async function main() {
 		status("Setting up…");
 		await new Promise((resolve) => setTimeout(resolve, 5000));
 	}
+	// The worker can also take control of this page before it reloads it (clients.claim), and then
+	// no reload comes: the page is controlled but was loaded without the headers. Reload once.
+	// (Without session storage, no reload: it couldn't tell it had already tried.)
+	const RELOADED = "towerfall.coiReload";
+	const session = (f) => {
+		try {
+			return f(sessionStorage);
+		} catch {
+			return null;
+		}
+	};
+	if (!self.crossOriginIsolated && navigator.serviceWorker?.controller && session((s) => s.getItem(RELOADED) !== "1" && (s.setItem(RELOADED, "1"), true))) {
+		location.reload();
+		return;
+	}
+	session((s) => s.removeItem(RELOADED));
 	if (!self.crossOriginIsolated) {
 		// coi-serviceworker.js reloads the page once it's installed; if we're still not isolated,
 		// the browser blocked it (e.g. private browsing) or the page isn't on https/localhost.
