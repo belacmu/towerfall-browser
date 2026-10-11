@@ -69,7 +69,10 @@ SERVER option (Mod options) to its `wss://` address.
   sockets stay open while the object sleeps, connection state rides along as socket attachments,
   and lobbies are stored (`room:<id>`) so they survive. Changed lobbies are written at most every
   5 s (an object only hibernates after some seconds without events, so nothing is lost to it). A
-  redeploy disconnects everyone.
+  redeploy disconnects everyone, and TF.EX ends a match whose signaling drops (that's its design;
+  we don't paper over it), so `tools/deploy-tfex-server.sh` deploys only when `GET /status` (counts
+  of connections, lobbies and matches; `Authorization: Bearer <STATUS_KEY>`, the key in
+  `~/.config/towerfall-tfex.env`) shows no match running, or with `--wait` once there's none.
 - `turn.js`: `GET /turn?room=<roomId>&peer=<peerId>` (CORS, same origins as above, and an Origin
   is required: only browsers ask) returns `{"iceServers": [...]}` for the browser's peer
   connections. For a peer that is a player or spectator in that lobby: Cloudflare STUN plus TURN

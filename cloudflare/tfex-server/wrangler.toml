@@ -1,5 +1,5 @@
 # The TF.EX-compatible matchmaking + signaling server (see worker.js and docs/MULTIPLAYER.md).
-# Deploy: cd cloudflare/tfex-server && npx wrangler deploy
+# Deploy: tools/deploy-tfex-server.sh (waits until nobody is in a match; a redeploy disconnects everyone)
 # Local, the same code in workerd: npx wrangler dev --port 3000 (or: node local.mjs, no install)
 # More allowed page origins: npx wrangler secret put ALLOWED_ORIGINS (comma-separated)
 name = "tfex-server"
