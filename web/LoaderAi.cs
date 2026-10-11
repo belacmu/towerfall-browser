@@ -19,6 +19,11 @@ namespace TowerFallBrowser;
 // Also: when the game reassigns the players' inputs (a controller plugged in, or the on-screen
 // controls turned on or off), LoaderAI's AI slots would come back empty and it would keep giving
 // P1 the input it saved at launch; Resync puts its state back in line with the new inputs.
+//
+// LoaderAI can't take part in TF.EX's online play or its replays (Online): it would hand players'
+// seats to its AI at the start of each match (SetAllPLayerInput), its AI would act again in every
+// rolled-back frame, and its input objects ignore the inputs TF.EX feeds through KeyboardInput.
+// While those are on, this does nothing and LoaderAI's own patches stand aside.
 public static class LoaderAi
 {
 	private const string Human = "HUMAN";
@@ -29,13 +34,18 @@ public static class LoaderAi
 	private static object api; // LoaderAI's ApiImplementation
 	private static FieldInfo playerInputs, players, characters, altSelect, rollcallMode;
 	private static MethodInfo characterTaken, archerDataGet;
-	private static PropertyInfo darkWorldDlc;
+	private static PropertyInfo darkWorldDlc, archerAmount;
+	private static FieldInfo saveData;
+	private static FieldInfo captureActive, replayMode, versusSettings;
+	private static MethodInfo isNetplay;
 	private static readonly Random random = new();
 
 	// Per slot: the AI type the page wants there, or null. Set from the page's thread.
 	private static volatile string[] wanted = Array.Empty<string>();
 	// The archer select elements this joined, and as what.
 	private static readonly Dictionary<object, string> joined = new();
+	// Ones it couldn't join for want of an archer (said once).
+	private static readonly HashSet<object> full = new();
 	private static int rollcallFrames;
 
 	// After the mods have loaded. Does nothing unless LoaderAI is one of them.
@@ -58,16 +68,32 @@ public static class LoaderAi
 			rollcallMode = tf.GetType("TowerFall.MainMenu", throwOnError: true).GetField("RollcallMode", Any);
 			archerDataGet = tf.GetType("TowerFall.ArcherData", throwOnError: true).GetMethods(Any).First(m => m.Name == "Get" && m.GetParameters().Length == 2);
 			darkWorldDlc = tf.GetType("TowerFall.GameData", throwOnError: true).GetProperty("DarkWorldDLC", Any);
+			archerAmount = tf.GetType("TowerFall.ArcherData", throwOnError: true).GetProperty("Amount", Any);
+			saveData = tf.GetType("TowerFall.SaveData", throwOnError: true).GetField("Instance", Any);
 			aiInput = module.Assembly.GetType("TFModFortRiseLoaderAI.Input", throwOnError: true);
+			FindTfex(tf);
 			api = Instance().GetType().GetProperty("LoaderAIModApi", Any).GetValue(Instance());
 			new Harmony("TowerFallBrowser.LoaderAi").Patch(
 				tf.GetType("TowerFall.PlayerInput", throwOnError: true).GetMethod("AssignInputs", Any),
 				postfix: new HarmonyMethod(typeof(LoaderAi).GetMethod(nameof(Resync), Any)) { priority = Priority.Last });
+			var harmony = new Harmony("TowerFallBrowser.LoaderAi");
+			Type rollcallPatches = module.Assembly.GetType("TFModFortRiseLoaderAI.MyRollcallElement", throwOnError: true);
+			Type levelPatches = module.Assembly.GetType("TFModFortRiseLoaderAI.MyLevel", throwOnError: true);
 			// The keyboard keys it shows next to AI slots in archer select mean nothing with the
 			// on-screen controls.
-			new Harmony("TowerFallBrowser.LoaderAi").Patch(
-				module.Assembly.GetType("TFModFortRiseLoaderAI.MyRollcallElement", throwOnError: true).GetMethod("Keys_postfix", Any),
-				prefix: new HarmonyMethod(typeof(LoaderAi).GetMethod(nameof(KeysPrefix), Any)));
+			harmony.Patch(rollcallPatches.GetMethod("Keys_postfix", Any), prefix: new HarmonyMethod(typeof(LoaderAi).GetMethod(nameof(KeysPrefix), Any)));
+			// Online and in replays: no AI seats at the start of a match, no switching a seat to AI in
+			// archer select, no AI in levels.
+			var offline = new HarmonyMethod(typeof(LoaderAi).GetMethod(nameof(OnlyOffline), Any));
+			foreach (MethodInfo m in new[] { rollcallPatches.GetMethod("SetAllPLayerInput", Any), rollcallPatches.GetMethod("NotJoinedUpdate_patch", Any), levelPatches.GetMethod("Update_patch", Any), levelPatches.GetMethod("ctor_patch", Any) })
+			{
+				harmony.Patch(m, prefix: offline);
+			}
+			// Its archer select setup hands seats their launch inputs and renames AI seats; online,
+			// undo that afterwards (it also sets up the arrows its archer select drawing needs).
+			harmony.Patch(rollcallPatches.GetMethod("ctor_patch", Any),
+				prefix: new HarmonyMethod(typeof(LoaderAi).GetMethod(nameof(RollcallSetupPrefix), Any)),
+				postfix: new HarmonyMethod(typeof(LoaderAi).GetMethod(nameof(RollcallSetupPostfix), Any)));
 			game = tfGame;
 		}
 		catch (Exception e)
@@ -81,6 +107,9 @@ public static class LoaderAi
 	// without LoaderAI.
 	public static string Types() => game == null ? "" : string.Join(",", (string[])Call(api, "GetAgentTypes"));
 
+	// The player slots LoaderAI serves: 4, or up to 8 with an 8-player mod.
+	public static int Slots() => game == null ? 0 : (int)module.GetProperty("PlayerSlots", Any).GetValue(null);
+
 	// Per slot (P1 first): an AI type, or empty for none.
 	public static void SetOpponents(string[] slots) => wanted = slots.Select(s => string.IsNullOrEmpty(s) ? null : s).ToArray();
 
@@ -88,6 +117,11 @@ public static class LoaderAi
 	public static void Update()
 	{
 		if (game == null) return;
+		if (Online())
+		{
+			joined.Clear();
+			return;
+		}
 		object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
 		bool versusRollcall = scene?.GetType().FullName == "TowerFall.MainMenu"
 			&& scene.GetType().GetProperty("State").GetValue(scene).ToString() == "Rollcall"
@@ -96,6 +130,7 @@ public static class LoaderAi
 		{
 			rollcallFrames = 0;
 			joined.Clear();
+			full.Clear();
 			return;
 		}
 		// Once the portraits have come in.
@@ -127,6 +162,15 @@ public static class LoaderAi
 
 	private static void Join(object element, int slot, object state, string type)
 	{
+		// Joining takes an archer, and then the game moves every slot that hasn't joined off it,
+		// looking for one that's free: with none left (few archers unlocked, and an 8-player mod
+		// that keeps archers unique), that search never ends. So leave one free.
+		if (FreeArchers() < 2)
+		{
+			if (!full.Contains(element)) Console.WriteLine($"[ai] P{slot + 1}: no archer left for it (unlock more archers)");
+			full.Add(element);
+			return;
+		}
 		if (!SetType(slot, type)) return;
 		// A random archer that's free (and unlocked, and installed): what the slot's left/right keys
 		// would pick. ChangeSelectionRight skips taken and locked archers, so only call it while
@@ -145,6 +189,14 @@ public static class LoaderAi
 		state.GetType().GetProperty("State").SetValue(state, 1);
 		joined[element] = type;
 		Console.WriteLine($"[ai] P{slot + 1}: {type}");
+	}
+
+	// Unlocked archers nobody has joined as (by the game's rule, which mods change).
+	private static int FreeArchers()
+	{
+		object unlocks = Get(saveData.GetValue(null), "Unlocks");
+		return Enumerable.Range(0, (int)archerAmount.GetValue(null))
+			.Count(i => (bool)Call(unlocks, "GetArcherUnlocked", i) && !(bool)characterTaken.Invoke(null, new object[] { i }));
 	}
 
 	private static bool Shared(object element, int slot)
@@ -199,7 +251,8 @@ public static class LoaderAi
 	{
 		try
 		{
-			if (game == null || !(bool)module.GetField("isHumanPlayerTypeSaved", Any).GetValue(null)) return;
+			// (TF.EX seats online and replay players itself, in the seats left empty.)
+			if (game == null || Online() || !(bool)module.GetField("isHumanPlayerTypeSaved", Any).GetValue(null)) return;
 			var inputs = (Array)playerInputs.GetValue(null);
 			var types = (IDictionary)module.GetField("currentPlayerType", Any).GetValue(null);
 			var saved = (IDictionary)module.GetField("savedHumanPlayerInput", Any).GetValue(null);
@@ -232,6 +285,47 @@ public static class LoaderAi
 
 	private static bool KeysPrefix() => !TouchGamepad.Shown;
 
+	private static bool OnlyOffline() => !Online();
+
+	// LoaderAI's RollcallElement constructor postfix (element, player index), online: what it changes.
+	private static void RollcallSetupPrefix(object[] __args, out object[] __state)
+	{
+		__state = null;
+		if (!Online()) return;
+		int slot = (int)__args[1];
+		object profiles = Instance().GetType().GetProperty("ProfilesModApi", Any).GetValue(Instance());
+		__state = new[] { ((Array)playerInputs.GetValue(null)).GetValue(slot), Get(__args[0], "input"), profiles == null ? null : Call(profiles, "GetPlayerName", slot) };
+	}
+
+	private static void RollcallSetupPostfix(object[] __args, object[] __state)
+	{
+		if (__state == null) return;
+		int slot = (int)__args[1];
+		((Array)playerInputs.GetValue(null)).SetValue(__state[0], slot);
+		__args[0].GetType().GetField("input", Any).SetValue(__args[0], __state[1]);
+		object profiles = Instance().GetType().GetProperty("ProfilesModApi", Any).GetValue(Instance());
+		if (profiles != null && __state[2] is string name) Call(profiles, "SetPlayerName", slot, name);
+	}
+
+	// TF.EX's online play (from its lobby through the match) or its replay playback.
+	private static void FindTfex(Assembly tf)
+	{
+		Type flags = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("TF.EX.Domain.Context.ExFlags", throwOnError: false)).FirstOrDefault(t => t != null);
+		if (flags == null) return;
+		captureActive = flags.GetField("IsCaptureActive", Any);
+		replayMode = flags.GetField("IsReplayMode", Any);
+		isNetplay = flags.Assembly.GetType("TF.EX.Domain.Extensions.VersusModeExtensions")?.GetMethod("IsNetplay", Any);
+		versusSettings = tf.GetType("TowerFall.MainMenu").GetField("VersusMatchSettings", Any);
+	}
+
+	private static bool Online()
+	{
+		if (captureActive == null) return false;
+		if ((bool)captureActive.GetValue(null) || (bool)replayMode.GetValue(null)) return true;
+		object settings = versusSettings?.GetValue(null);
+		return settings != null && isNetplay != null && (bool)isNetplay.Invoke(null, new[] { Get(settings, "Mode") });
+	}
+
 	// For the "ai" command: what LoaderAI has in each slot.
 	public static string Describe()
 	{
@@ -241,7 +335,19 @@ public static class LoaderAi
 		string[] want = wanted;
 		var slots = Enumerable.Range(0, inputs.Length).Select(i =>
 			$"P{i + 1} {(types.Contains(i) ? types[i] : "?")} ({inputs.GetValue(i)?.GetType().Name ?? "-"}){(i < want.Length && want[i] != null ? $" wants {want[i]}" : "")}");
-		return $"types {Types()}; {string.Join(", ", slots)}";
+		string elements = "";
+		object scene = game.GetType().GetProperty("Scene")?.GetValue(game);
+		if (scene?.GetType().FullName == "TowerFall.MainMenu")
+		{
+			var layers = (IDictionary)scene.GetType().GetProperty("Layers").GetValue(scene);
+			var entities = ((IList)layers[-1].GetType().GetProperty("Entities").GetValue(layers[-1])).Cast<object>().Where(rollcall.IsInstanceOfType);
+			elements = "; archer select: " + string.Join(", ", entities.Select(e =>
+			{
+				object state = Get(e, "state");
+				return $"P{(int)Get(e, "playerIndex") + 1} state {state.GetType().GetProperty("State").GetValue(state)} archer {Get(e, "CharacterIndex")}";
+			}));
+		}
+		return $"types {Types()}; {string.Join(", ", slots)}{elements}";
 	}
 
 	private static object Instance() => module.GetField("Instance", Any).GetValue(null);
