@@ -1,7 +1,10 @@
 # Keeps the hosted TF.EX (online play) on its latest release: the official server only lets the
-# latest version play online. Hourly, tools/update-tfex.py checks for a new release; when it's safe
-# to adopt (same ggrs-ffi as the browser build, FortRise requirement met) the pin is committed and
-# the site redeployed, otherwise an issue says what needs doing.
+# latest version play online. Hourly, tools/update-tfex.py checks for a new release. When it's safe
+# to adopt (same ggrs-ffi as the browser build, FortRise requirement met, lobby protocol unchanged),
+# the new pin goes on a branch, tfex-<version>, which is put in the site's preview/ and announced in
+# an issue with a link to open its pull request: the site runs TF.EX's code, so a person merges it.
+# Otherwise an issue says what needs doing. (Workflows here can't open pull requests themselves:
+# the repository's "Allow GitHub Actions to create and approve pull requests" setting is off.)
 name: TF.EX
 
 on:
@@ -26,17 +29,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/update-tfex.py
 
-      - name: Commit and redeploy
+      - name: Put it on a branch for review, in preview/
         if: steps.check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+          REPO: ${{ github.repository }}
         run: |
+          [[ "$VERSION" =~ ^v?[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]] || { echo "Unexpected version: $VERSION"; exit 1; }
+          branch="tfex-$VERSION"
+          # Done in an earlier run (this runs hourly until the pin is merged).
+          if git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
+            echo "$branch is waiting for review."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "TF.EX ${{ steps.check.outputs.version }} (online play)" tools/fetch-tfex.sh
-          git push
+          git switch -c "$branch"
+          git commit -m "TF.EX $VERSION (online play)" tools/fetch-tfex.sh
+          git push origin "$branch"
           # Pushes made with the workflow token don't trigger other workflows; dispatches do.
-          gh workflow run deploy.yml --ref main
+          gh workflow run deploy.yml --ref main -f preview="$branch"
+          gh issue create --title "TF.EX $VERSION is ready to adopt (online play)" --body "TF.EX $VERSION passed tools/update-tfex.py's checks (same ggrs-ffi as the browser build, FortRise requirement met, lobby protocol unchanged). Branch \`$branch\` pins it and is in the site's preview/ (in a few minutes): try online play there, then [open its pull request](https://github.com/$REPO/compare/main...$branch?expand=1) and merge it.
+
+          The official TF.EX server only lets the latest version play online, so desktop players move to it quickly." 
 
       - name: Open an issue if it can't be adopted
         if: steps.check.outputs.blocked != ''

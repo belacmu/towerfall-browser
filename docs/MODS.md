@@ -10,9 +10,10 @@ Decided with the project owner on 2026-10-09.
   version. `tools/fetch-tfex.sh` pins a release, removes its native libraries (the browser links its
   own build of ggrs_ffi, see `netplay/`) and publishes it under `hosted-mods/`. A hosted mod
   replaces GameBanana's entry of the same name. The official server only lets the latest TF.EX
-  play online, so `.github/workflows/tfex.yml` checks hourly (`tools/update-tfex.py`) and adopts
-  a new release automatically when it uses the same ggrs-ffi as the browser build and our
-  FortRise; otherwise it opens an issue.
+  play online, so `.github/workflows/tfex.yml` checks hourly (`tools/update-tfex.py`). A new
+  release that uses the same ggrs-ffi as the browser build and our FortRise, with an unchanged
+  lobby protocol, goes on a branch in the site's preview/ with an issue linking its pull request
+  (the site runs TF.EX's code, so a person merges it); otherwise the issue says what needs doing.
 - **We keep the catalog.** `tools/update-catalog.py` builds `mods/catalog.json` from GameBanana:
   latest file, checksums, license, the FortRise metadata inside each zip, and whether the mod
   needs Harmony or native code. A scheduled CI job keeps it current. Our own per-mod verdicts
