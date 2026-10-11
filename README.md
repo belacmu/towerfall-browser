@@ -101,5 +101,7 @@ Keyboard: arrows move/aim, C jump/confirm, X shoot/cancel, Shift dodge/catch (re
 
 For reading the game's code locally, decompile your own copy into the gitignored `reference/`:
 `ilspycmd -p -o reference/decompile --nested-directories -r <dir> <dir>/TowerFall.exe`.
+`tools/decomp-rebuild.sh` also rebuilds the game from that source and compares it with the original
+(see [docs/DECOMP.md](docs/DECOMP.md)).
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the projects this builds on.
