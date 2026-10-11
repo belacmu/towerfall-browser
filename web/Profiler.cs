@@ -158,8 +158,11 @@ public static class Profiler
 		{
 			string[] parts = spec.Split("::");
 			Type type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(parts[0])).FirstOrDefault(t => t != null);
-			MethodInfo target = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-				.FirstOrDefault(m => m.Name == parts[^1] && !m.ContainsGenericParameters);
+			const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+			// Type::.ctor for its (first) constructor.
+			MethodBase target = parts[^1] == ".ctor"
+				? type?.GetConstructors(all).FirstOrDefault()
+				: type?.GetMethods(all).FirstOrDefault(m => m.Name == parts[^1] && !m.ContainsGenericParameters);
 			if (target == null) return $"{spec}: not found;";
 			method = $"{type.Name}.{target.Name}";
 			const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;

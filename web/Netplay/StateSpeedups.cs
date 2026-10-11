@@ -146,6 +146,103 @@ public static class StateSpeedups
 		harmony.Patch(capture,
 			prefix: new HarmonyMethod(typeof(StateSpeedups).GetMethod(nameof(BeginCapture), flags)),
 			finalizer: new HarmonyMethod(typeof(StateSpeedups).GetMethod(nameof(EndCapture), flags)));
+
+		// The sound and match-stats snapshots TF.State takes with every save. (Mods live in FortRise's
+		// own load context, so TF.State.Domain is loaded through that.)
+		try
+		{
+			var context = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(api.Assembly);
+			AssemblyName domainName = api.Assembly.GetReferencedAssemblies().FirstOrDefault(n => n.Name == "TF.State.Domain");
+			Assembly domain = domainName == null ? null : context.LoadFromAssemblyName(domainName);
+			foreach (string service in new[] { "TF.State.Domain.Services.SFXService", "TF.State.Domain.Services.MatchStatsService" })
+			{
+				MethodInfo save = domain?.GetType(service)?.GetMethod("SaveSnapshot", BindingFlags.Public | BindingFlags.Instance);
+				if (save == null) continue;
+				harmony.Patch(save, transpiler: new HarmonyMethod(typeof(StateSpeedups).GetMethod(nameof(CheaperPrune), flags)));
+			}
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[netplay] TF.State's snapshot pruning stays unoptimized: {e.Message}");
+		}
+	}
+
+	// SaveSnapshot(frame, ...) keeps 960 frames of snapshots in a Dictionary<int, ...> and, on every save,
+	// finds the ones to drop with `foreach (var stale in dict.Keys.Where(f => f < cutoff).ToList())
+	// dict.Remove(stale);`, a scan of all 960 keys. Here the list comes from StaleKeys instead: the same
+	// keys, found by checking only the frames below the cutoff that could still be there. The loop
+	// that removes them is unchanged, so the dictionary ends up the same.
+	private static IEnumerable<CodeInstruction> CheaperPrune(IEnumerable<CodeInstruction> instructions, MethodBase __originalMethod)
+	{
+		var code = instructions.ToList();
+		// [dict] callvirt get_Keys; ldloc closure; ...the lambda's delegate (cached in the closure)...;
+		// call Where; call ToList
+		int keysAt = code.FindIndex(c => c.operand is MethodInfo { Name: "get_Keys", DeclaringType: { IsGenericType: true } d }
+			&& d.GetGenericTypeDefinition() == typeof(Dictionary<,>) && d.GetGenericArguments()[0] == typeof(int));
+		int toListAt = keysAt < 0 ? -1 : code.FindIndex(keysAt, c => c.operand is MethodInfo { Name: "ToList" });
+		FieldInfo cutoff = keysAt < 0 || toListAt < 0 ? null : code.Skip(keysAt).Take(toListAt - keysAt)
+			.Select(c => (c.operand as MemberInfo)?.DeclaringType?.GetField("cutoff"))
+			.FirstOrDefault(f => f?.FieldType == typeof(int));
+		if (cutoff != null && toListAt - keysAt <= 16 && code[keysAt + 1].IsLdloc()
+			&& code[toListAt - 1].operand is MethodInfo { Name: "Where" }
+			&& code.Skip(keysAt + 2).Take(toListAt - keysAt - 2).All(c => c.labels.Count == 0 || code.Skip(keysAt).Take(toListAt - keysAt).Any(b => b.operand is System.Reflection.Emit.Label l && c.labels.Contains(l))))
+		{
+			// [dict] ldloc closure; ldfld cutoff; ldarg.1 (frame); call StaleKeys
+			CodeInstruction closure = code[keysAt + 1].Clone();
+			closure.labels.AddRange(code[keysAt].labels);
+			code.RemoveRange(keysAt, toListAt - keysAt + 1);
+			code.InsertRange(keysAt, new[]
+			{
+				closure,
+				new CodeInstruction(System.Reflection.Emit.OpCodes.Ldfld, cutoff),
+				new CodeInstruction(System.Reflection.Emit.OpCodes.Ldarg_1),
+				new CodeInstruction(System.Reflection.Emit.OpCodes.Call, typeof(StateSpeedups).GetMethod(nameof(StaleKeys))),
+			});
+			return code;
+		}
+		Console.Error.WriteLine($"[netplay] {__originalMethod.DeclaringType?.Name}.SaveSnapshot changed; its snapshot pruning stays unoptimized.");
+		return code;
+	}
+
+	private sealed class Pruned
+	{
+		public bool Started;
+		public int Lowest = int.MaxValue; // no key is below this
+	}
+
+	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, Pruned> pruned = new();
+
+	// The keys below cutoff in a Dictionary<int, ...> that only ever gains `frame` between calls.
+	public static List<int> StaleKeys(object dictionary, int cutoff, int frame)
+	{
+		var dict = (IDictionary)dictionary;
+		Pruned state = pruned.GetValue(dictionary, static _ => new Pruned());
+		if (!state.Started)
+		{
+			foreach (object key in dict.Keys) state.Lowest = Math.Min(state.Lowest, (int)key);
+			state.Started = true;
+		}
+		if (frame < state.Lowest) state.Lowest = frame;
+		var stale = new List<int>();
+		if (cutoff > state.Lowest)
+		{
+			if ((long)cutoff - state.Lowest <= dict.Count)
+			{
+				for (int f = state.Lowest; f < cutoff; f++)
+				{
+					if (dict.Contains(f)) stale.Add(f);
+				}
+			}
+			else
+			{
+				foreach (object key in dict.Keys)
+				{
+					if ((int)key < cutoff) stale.Add((int)key);
+				}
+			}
+			state.Lowest = cutoff; // the caller removes them all
+		}
+		return stale;
 	}
 
 	private static void BeginCapture()
