@@ -2,14 +2,15 @@
 // use WebSocket hibernation so idle connections (players sitting in menus) cost nothing.
 //  - /ws: one Matchmaker object holds every lobby, join code and quick play queue.
 //  - /room/<id>, /ping_measurement/<id>: one SignalRoom object per room.
-//  - GET /turn: ICE servers (STUN, and Cloudflare TURN credentials when configured) for browsers.
+//  - GET /turn?room=<id>&peer=<uuid>: ICE servers (STUN, and Cloudflare TURN credentials when
+//    configured) for browser pages whose peer is in that lobby.
 // The logic lives in matchmaker.js and signal.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
-import { Matchmaker } from "./matchmaker.js";
-import { SignalRoom } from "./signal.js";
+import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
+import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
-import { iceServers } from "./turn.js";
+import { iceServers, STUN_ONLY } from "./turn.js";
 
 export default {
 	async fetch(request, env) {
@@ -28,20 +29,37 @@ export default {
 			return new Response("Forbidden", { status: 403 });
 		}
 		const name = route.kind === "ws" ? "matchmaker" : `${route.kind}:${route.roomId}`;
+		// The client's address, for per-address limits (the Durable Object only sees the Worker).
+		request = new Request(request);
+		request.headers.set("X-Client-IP", clientIp(request) ?? "");
 		const ns = route.kind === "ws" ? env.MATCHMAKER : env.ROOMS;
 		return ns.get(ns.idFromName(name)).fetch(request);
 	},
 };
 
+// Only browsers ask (desktop TF.EX has its own ICE servers), and relay credentials only go to a
+// page whose peer is in the lobby it names: anyone else gets STUN.
 async function turn(request, env) {
 	const origin = request.headers.get("Origin");
-	if (!originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
-	const headers = { "Cache-Control": "no-store", Vary: "Origin" };
-	if (origin) headers["Access-Control-Allow-Origin"] = origin;
+	if (!origin || !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
 	if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "GET" } });
 	if (request.method !== "GET") return new Response("Method not allowed", { status: 405, headers });
-	return Response.json({ iceServers: await iceServers(env) }, { headers });
+	const params = new URL(request.url).searchParams;
+	const room = params.get("room") ?? "";
+	const peer = (params.get("peer") ?? "").toLowerCase();
+	let member = false;
+	if (/^[A-Za-z0-9_-]{1,64}$/.test(room) && /^[0-9a-f-]{36}$/.test(peer)) {
+		const query = new URL("https://matchmaker/member");
+		query.search = new URLSearchParams({ room, peer }).toString();
+		member = (await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch(query)).ok;
+	}
+	return Response.json({ iceServers: member ? await iceServers(env) : STUN_ONLY }, { headers });
 }
+
+const clientIp = (request) => request.headers.get("CF-Connecting-IP");
+// A frame's size before decoding it.
+const frameSize = (message) => (typeof message === "string" ? message.length : message.byteLength);
 
 // Wraps hibernatable WebSockets as the core's connections. Each socket's state rides along as its
 // attachment (at most 2 KB), so it survives hibernation.
@@ -87,6 +105,8 @@ class Sockets {
 	}
 }
 
+const FLUSH_MS = 5000;
+
 const text = (message) => (typeof message === "string" ? message : new TextDecoder().decode(message));
 
 export class MatchmakerObject extends DurableObject {
@@ -94,10 +114,21 @@ export class MatchmakerObject extends DurableObject {
 		super(ctx, env);
 		this.sockets = new Sockets(ctx);
 		this.alarmAt = null;
+		// Lobbies change on every pick in archer select; storage gets each changed one at most every
+		// few seconds (the free plan allows 100,000 row writes a day). A Durable Object only
+		// hibernates after some seconds without events, so the last changes are written before.
+		this.dirty = new Map(); // RoomId -> room
+		this.flushTimer = null;
 		this.core = new Matchmaker({
 			persist: {
-				save: (room) => ctx.storage.put(`room:${room.lobby.RoomId}`, room),
-				remove: (roomId) => ctx.storage.delete(`room:${roomId}`),
+				save: (room) => {
+					this.dirty.set(room.lobby.RoomId, room);
+					this.flushTimer ??= setTimeout(() => this.flush(), FLUSH_MS);
+				},
+				remove: (roomId) => {
+					this.dirty.delete(roomId);
+					ctx.storage.delete(`room:${roomId}`);
+				},
 			},
 		});
 		ctx.blockConcurrencyWhile(async () => {
@@ -107,15 +138,30 @@ export class MatchmakerObject extends DurableObject {
 		});
 	}
 
-	async fetch() {
+	async fetch(request) {
+		const url = new URL(request.url);
+		if (url.pathname === "/member") {
+			const member = this.core.isMember(url.searchParams.get("room"), url.searchParams.get("peer"));
+			return new Response(null, { status: member ? 204 : 404 });
+		}
 		const { client, conn } = this.sockets.accept();
-		this.core.open(conn, Date.now());
+		this.core.open(conn, Date.now(), request.headers.get("X-Client-IP") || null);
 		this.schedule();
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
+	flush() {
+		this.flushTimer = null;
+		for (const [id, room] of this.dirty) this.ctx.storage.put(`room:${id}`, room);
+		this.dirty.clear();
+	}
+
 	webSocketMessage(ws, message) {
-		this.core.message(this.sockets.wrap(ws), text(message), Date.now());
+		const conn = this.sockets.wrap(ws);
+		if (frameSize(message) > MAX_FRAME) {
+			conn.close(1009, "message too big");
+			this.core.close(conn, Date.now());
+		} else this.core.message(conn, text(message), Date.now());
 		this.schedule();
 	}
 
@@ -158,12 +204,16 @@ export class SignalRoomObject extends DurableObject {
 
 	async fetch(request) {
 		const { client, conn } = this.sockets.accept();
-		this.room.open(conn, new URL(request.url).searchParams.get("peer"));
+		this.room.open(conn, new URL(request.url).searchParams.get("peer"), Date.now(), request.headers.get("X-Client-IP") || null);
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
 	webSocketMessage(ws, message) {
-		this.room.message(this.sockets.wrap(ws), text(message));
+		const conn = this.sockets.wrap(ws);
+		if (frameSize(message) > MAX_SIGNAL_FRAME) {
+			conn.close(1009, "message too big");
+			this.room.close(conn);
+		} else this.room.message(conn, text(message), Date.now());
 	}
 
 	webSocketClose(ws, code, reason) {
