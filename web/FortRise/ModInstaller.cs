@@ -82,7 +82,7 @@ public static class ModInstaller
 			string target = Path.Combine(modsDir, folder);
 			if (installed.TryGetValue(folder, out string sha) && sha == w.Sha && Directory.Exists(target))
 			{
-				if (!CallsMissingHostCode(target, log)) continue;
+				if (!CallsMissingHostCode(target, log) && !StateSpeedups.NeedsFreshCopy(target)) continue;
 				log.LogInformation("Mod {Folder} was adapted by another build of the page; installing it again.", folder);
 			}
 			if (Directory.Exists(target) && !installed.ContainsKey(folder))
