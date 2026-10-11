@@ -30,15 +30,17 @@ var LibraryTFNet = {
 		ice: null, // { url, at, servers: Promise } from the last /turn request
 		GATHER_WAIT_MS: 1000, // longest wait for ICE gathering before sending an offer or answer (see gathered)
 
-		// The ICE servers for a room URL, from its server's /turn. Credentials last 6 hours; reused
-		// for one.
+		// The ICE servers for a room URL (.../room/<id>?peer=<uuid>), from its server's /turn, which
+		// only gives relay credentials to a peer in that lobby. Credentials last 6 hours; reused for one.
 		iceServersFor(roomUrl) {
 			let url;
 			try {
 				const u = new URL(roomUrl);
+				const room = u.pathname.split("/").pop();
+				const peer = u.searchParams.get("peer") ?? "";
 				u.protocol = u.protocol === "wss:" ? "https:" : "http:";
 				u.pathname = "/turn";
-				u.search = "";
+				u.search = new URLSearchParams({ room, peer }).toString();
 				url = u.href;
 			} catch {
 				return Promise.resolve(TFNet.iceServers);
