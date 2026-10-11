@@ -38,7 +38,13 @@ public static class StateSpeedups
 			? Directory.EnumerateFiles(modsDir, ExtensionsDll, SearchOption.AllDirectories).FirstOrDefault(p => !p.Contains("_RelinkerCache"))
 			: null;
 		if (path == null) return;
-		using var module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(path)));
+		// The game (for DirectFields to find entities' fields), FNA and the framework.
+		using var resolver = new DefaultAssemblyResolver();
+		foreach (string dir in new[] { BrowserHost.GameDir, BrowserHost.FortRiseDir, "/bin", Path.GetDirectoryName(path) })
+		{
+			if (Directory.Exists(dir)) resolver.AddSearchDirectory(dir);
+		}
+		using var module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(path)), new ReaderParameters { AssemblyResolver = resolver });
 		TypeDefinition extensions = module.GetType(LevelExtensions);
 		MethodDefinition Generic(string name) => extensions?.Methods
 			.FirstOrDefault(m => m.Name == name && m.HasGenericParameters && m.Parameters.Count == 1);
@@ -111,6 +117,14 @@ public static class StateSpeedups
 			il.InsertBefore(first, il.Create(OpCodes.Ret));
 			changed = true;
 		}
+		try
+		{
+			changed |= DirectFields.Rewrite(module, log) > 0;
+		}
+		catch (Exception e)
+		{
+			log.LogWarning($"Direct field access not set up: {e.Message}");
+		}
 		if (!changed) return;
 		module.Write(path);
 		File.Delete(Path.ChangeExtension(path, ".pdb")); // no longer matches
@@ -146,6 +160,18 @@ public static class StateSpeedups
 		harmony.Patch(capture,
 			prefix: new HarmonyMethod(typeof(StateSpeedups).GetMethod(nameof(BeginCapture), flags)),
 			finalizer: new HarmonyMethod(typeof(StateSpeedups).GetMethod(nameof(EndCapture), flags)));
+
+		// The fields DirectFields reads and writes directly, checked against the types as loaded.
+		try
+		{
+			AssemblyName extensionsName = api.Assembly.GetReferencedAssemblies().FirstOrDefault(n => n.Name == Path.GetFileNameWithoutExtension(ExtensionsDll));
+			var extensionsContext = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(api.Assembly);
+			DirectFields.Validate(extensionsName == null ? null : extensionsContext.LoadFromAssemblyName(extensionsName));
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[netplay] Direct field access stays off: {e.Message}");
+		}
 
 		// The sound and match-stats snapshots TF.State takes with every save. (Mods live in FortRise's
 		// own load context, so TF.State.Domain is loaded through that.)
