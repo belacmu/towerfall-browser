@@ -103,6 +103,42 @@
       "env": {
         "TOWERFALL_WWW": "web/bin/baseline-publish/wwwroot"
       }
+    },
+    {
+      "name": "switch-main",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8085"
+      ],
+      "port": 8085,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/baseline-publish/wwwroot"
+      }
+    },
+    {
+      "name": "switch-branch",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8085"
+      ],
+      "port": 8085,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/variant-publish/wwwroot"
+      }
+    },
+    {
+      "name": "switch-site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8086"
+      ],
+      "port": 8086,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/site"
+      }
     }
   ]
 }
