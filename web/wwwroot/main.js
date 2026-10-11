@@ -709,8 +709,22 @@ function tfexServer() {
 
 async function startDotnet() {
 	status("Starting .NET runtime…");
+	// The bar follows the runtime's files (the app, the framework and the WebAssembly) as they
+	// arrive, then shows it's busy while the runtime compiles and starts, which takes a while on a
+	// phone and can't be measured.
+	$("bar").hidden = false;
+	progress(0);
 	const { dotnet } = await import("./_framework/dotnet.js");
-	let builder = dotnet.withConfig({});
+	let builder = dotnet.withConfig({}).withModuleConfig({
+		onDownloadResourceProgress: (loaded, total) => {
+			progress(loaded / total);
+			detail(`${loaded} / ${total} files`);
+			if (loaded >= total) {
+				$("bar").classList.add("busy");
+				detail("");
+			}
+		},
+	});
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
 	const server = tfexServer();
 	if (server.url) builder = builder.withEnvironmentVariable("TFEX_SERVER", server.url).withEnvironmentVariable("TFEX_SERVER_FORCE", server.force ? "1" : "0");
@@ -739,6 +753,8 @@ async function startDotnet() {
 
 	await runtime.runMain();
 	await exports.BrowserHost.PreInit();
+	$("bar").classList.remove("busy");
+	detail("");
 	return exports;
 }
 
