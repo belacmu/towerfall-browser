@@ -1,10 +1,10 @@
 # Keeps the hosted TF.EX (online play) on its latest release: the official server only lets the
 # latest version play online. Hourly, tools/update-tfex.py checks for a new release. When it's safe
 # to adopt (same ggrs-ffi as the browser build, FortRise requirement met, lobby protocol unchanged),
-# the new pin goes on a branch, tfex-<version>, which is put in the site's preview/ and announced in
-# an issue with a link to open its pull request: the site runs TF.EX's code, so a person merges it.
-# Otherwise an issue says what needs doing. (Workflows here can't open pull requests themselves:
-# the repository's "Allow GitHub Actions to create and approve pull requests" setting is off.)
+# the new pin goes on a branch, tfex-<version>, which is put in the site's preview/ with a pull
+# request to merge it: the site runs TF.EX's code, so a person merges it. (Opening the pull request
+# needs the repository setting "Allow GitHub Actions to create and approve pull requests"; without
+# it, an issue links to it instead.) Otherwise an issue says what needs doing.
 name: TF.EX
 
 on:
@@ -16,6 +16,7 @@ permissions:
   contents: write
   actions: write
   issues: write
+  pull-requests: write
 
 jobs:
   update:
@@ -50,9 +51,15 @@ jobs:
           git push origin "$branch"
           # Pushes made with the workflow token don't trigger other workflows; dispatches do.
           gh workflow run deploy.yml --ref main -f preview="$branch"
-          gh issue create --title "TF.EX $VERSION is ready to adopt (online play)" --body "TF.EX $VERSION passed tools/update-tfex.py's checks (same ggrs-ffi as the browser build, FortRise requirement met, lobby protocol unchanged). Branch \`$branch\` pins it and is in the site's preview/ (in a few minutes): try online play there, then [open its pull request](https://github.com/$REPO/compare/main...$branch?expand=1) and merge it.
+          body="TF.EX $VERSION passed tools/update-tfex.py's checks (same ggrs-ffi as the browser build, FortRise requirement met, lobby protocol unchanged). This branch pins it and is in the site's preview/ (in a few minutes): try online play there, then merge.
 
-          The official TF.EX server only lets the latest version play online, so desktop players move to it quickly." 
+          The official TF.EX server only lets the latest version play online, so desktop players move to it quickly."
+          title="TF.EX $VERSION (online play)"
+          if ! gh pr create --base main --head "$branch" --title "$title" --body "$body"; then
+            gh issue create --title "TF.EX $VERSION is ready to adopt (online play)" --body "$body
+
+          [Open its pull request](https://github.com/$REPO/compare/main...$branch?expand=1) (this workflow couldn't: see the comment at the top of .github/workflows/tfex.yml)."
+          fi
 
       - name: Open an issue if it can't be adopted
         if: steps.check.outputs.blocked != ''
