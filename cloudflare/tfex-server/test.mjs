@@ -680,6 +680,15 @@ test("core: a player leaving mid-match still gets the lobby back to archer selec
 	assert(!A.last("LobbyUpdate").lobby.InGame, "not in game");
 });
 
+test("core: stats count connections, lobbies and matches (for safe redeploys)", async () => {
+	const mm = await core();
+	eq(mm.stats(), { connections: 0, lobbies: 0, matches: 0, playersInMatches: 0, searching: 0 }, "empty");
+	started(mm);
+	const S = new FakeConn(mm, "SEARCH");
+	S.do({ EnterQuickPlay: { name: "SEARCH", is_wide: false } });
+	eq(mm.stats(), { connections: 3, lobbies: 1, matches: 1, playersInMatches: 2, searching: 1 }, "one match, one searching");
+});
+
 test("core: quick play lobbies close when a player leaves before the match", async () => {
 	const mm = await core();
 	const A = new FakeConn(mm, "ALICE");

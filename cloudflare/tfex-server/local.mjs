@@ -142,6 +142,11 @@ class Connection {
 
 const server = createServer(async (req, res) => {
 	const url = new URL(req.url, "http://localhost");
+	if (url.pathname === "/status") {
+		// The Worker's /status, without its key (this server listens on localhost by default).
+		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+		return res.end(JSON.stringify(matchmaker.stats()));
+	}
 	if (url.pathname === "/turn") {
 		// Same as the Worker's /turn; TURN_KEY_ID and TURN_KEY_API_TOKEN from the environment.
 		const origin = req.headers.origin;

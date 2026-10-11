@@ -2,6 +2,8 @@
 // use WebSocket hibernation so idle connections (players sitting in menus) cost nothing.
 //  - /ws: one Matchmaker object holds every lobby, join code and quick play queue.
 //  - /room/<id>, /ping_measurement/<id>: one SignalRoom object per room.
+//  - GET /status (Authorization: Bearer <STATUS_KEY>): counts of connections, lobbies and matches,
+//    so a redeploy can wait until nobody is playing (tools/deploy-tfex-server.sh).
 //  - GET /turn?room=<id>&peer=<uuid>: ICE servers (STUN, and Cloudflare TURN credentials when
 //    configured) for browser pages whose peer is in that lobby.
 // The logic lives in matchmaker.js and signal.js; local.mjs runs the same code under Node.
@@ -18,6 +20,7 @@ export default {
 		const route = parseRoute(url);
 		if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
 			if (url.pathname === "/turn") return turn(request, env);
+			if (url.pathname === "/status") return status(request, env);
 			if (url.pathname === "/") {
 				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
 			}
@@ -55,6 +58,17 @@ async function turn(request, env) {
 		member = (await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch(query)).ok;
 	}
 	return Response.json({ iceServers: member ? await iceServers(env) : STUN_ONLY }, { headers });
+}
+
+// Only for whoever has STATUS_KEY (a wrangler secret); without it the endpoint doesn't exist.
+async function status(request, env) {
+	const given = new TextEncoder().encode(request.headers.get("Authorization") ?? "");
+	const expected = new TextEncoder().encode(`Bearer ${env.STATUS_KEY}`);
+	if (!env.STATUS_KEY || env.STATUS_KEY.length < 16 || given.byteLength !== expected.byteLength || !crypto.subtle.timingSafeEqual(given, expected)) {
+		return new Response("Not found", { status: 404 });
+	}
+	const stats = await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch("https://matchmaker/stats");
+	return new Response(stats.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
 const clientIp = (request) => request.headers.get("CF-Connecting-IP");
@@ -140,6 +154,7 @@ export class MatchmakerObject extends DurableObject {
 
 	async fetch(request) {
 		const url = new URL(request.url);
+		if (url.pathname === "/stats") return Response.json(this.core.stats());
 		if (url.pathname === "/member") {
 			const member = this.core.isMember(url.searchParams.get("room"), url.searchParams.get("peer"));
 			return new Response(null, { status: member ? 204 : 404 });

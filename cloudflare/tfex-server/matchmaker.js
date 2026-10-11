@@ -497,6 +497,20 @@ export class Matchmaker {
 		if (!this.maybeStartSeries(room, now)) this.changed(room);
 	}
 
+	// Counts only (no names or ids), for checking that nobody is mid-match before a redeploy, which
+	// disconnects everyone (tools/deploy-tfex-server.sh).
+	stats() {
+		const lobbies = [...this.rooms.values()].map((r) => r.lobby);
+		const matches = lobbies.filter((l) => l.InGame);
+		return {
+			connections: this.conns.size,
+			lobbies: lobbies.length,
+			matches: matches.length,
+			playersInMatches: matches.reduce((n, l) => n + l.Players.length, 0),
+			searching: this.queued().length,
+		};
+	}
+
 	// Whether `peer` is a player or spectator in lobby `roomId` (for handing out TURN credentials).
 	isMember(roomId, peer) {
 		const lobby = this.rooms.get(roomId)?.lobby;
