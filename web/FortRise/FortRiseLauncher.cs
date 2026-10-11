@@ -13,19 +13,21 @@ namespace TowerFallBrowser;
 // TFGame.Main do on desktop, minus the blocking Game.Run(): the host ticks the returned game.
 public static class FortRiseLauncher
 {
+	private static int shownPercent = -1;
+
+	// The page shows patching's progress from these lines (and leaves them out of the console).
+	public static void ReportPatchProgress(double fraction)
+	{
+		int percent = (int)(fraction * 100);
+		if (percent == shownPercent) return;
+		shownPercent = percent;
+		Console.WriteLine($"[progress] patch {percent}");
+	}
+
 	public static Game Start(string exePath, string fortriseDir, string fortriseVersion, bool noIntro, ILoggerFactory loggers)
 	{
 		ILogger log = loggers.CreateLogger("FortRise");
-		// The page shows patching's progress from these lines (and leaves them out of the console).
-		int shown = -1;
-		void Progress(double fraction)
-		{
-			int percent = (int)(fraction * 100);
-			if (percent == shown) return;
-			shown = percent;
-			Console.WriteLine($"[progress] patch {percent}");
-		}
-		string patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, Progress);
+		string patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, ReportPatchProgress);
 
 		// FortRiseHandler.LoadAssembly: dependencies not in the app resolve from the FortRise folder.
 		AssemblyLoadContext.Default.Resolving += (context, name) =>
@@ -43,8 +45,8 @@ public static class FortRiseLauncher
 		{
 			// A damaged cached patch would otherwise fail every start: patch again, once.
 			log.LogWarning("TowerFall.Patch.dll didn't load ({Error}); patching again.", e.Message);
-			shown = -1;
-			patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, Progress, force: true);
+			shownPercent = -1;
+			patchFile = FortRisePatcher.EnsurePatched(exePath, fortriseDir, fortriseVersion, loggers, ReportPatchProgress, force: true);
 			game = Assembly.LoadFrom(patchFile);
 		}
 		Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath));
