@@ -72,6 +72,53 @@ public static partial class BrowserHost
 		});
 	}
 
+	private static Task prePatch;
+	private static bool fortRisePrepared;
+
+	// Patching TowerFall.exe for FortRise takes a while the first time (12 s on a fast Mac, far longer
+	// on a phone; cached afterwards), so the page starts it in the background while the player is
+	// still on its start screen, as soon as FortRise will run. Init then finds it done, or waits for
+	// the rest. Returns at once; arguments as for Init.
+	[JSExport]
+	internal static Task PrePatch(string fortriseVersion, string frameworkUrl, string[] assemblies)
+	{
+		prePatch ??= Task.Run(() =>
+		{
+			LinkFolders();
+			PrepareFortRise(frameworkUrl, assemblies);
+			ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
+			FortRisePatcher.EnsurePatched(GameAssembly, FortRiseDir, fortriseVersion, loggers, FortRiseLauncher.ReportPatchProgress);
+		});
+		return Task.CompletedTask;
+	}
+
+	private static void LinkFolders()
+	{
+		Directory.CreateDirectory(SaveDir);
+		foreach (string dir in new[] { GameDir, FortRiseDir })
+		{
+			string target = Root + dir;
+			Directory.CreateDirectory(target);
+			if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
+		}
+	}
+
+	// What patching needs: the app's assemblies where Cecil looks, and TowerFall.exe's references
+	// beside it.
+	private static void PrepareFortRise(string frameworkUrl, string[] assemblies)
+	{
+		if (fortRisePrepared) return;
+		MountAssemblies(frameworkUrl, assemblies);
+		// MonoMod resolves TowerFall.exe's references from the FortRise folder.
+		foreach (string dll in new[] { "FNA.dll", "Steamworks.NET.dll" })
+		{
+			File.Copy("/bin/" + dll, Path.Combine(FortRiseDir, dll), overwrite: true);
+		}
+		// ...and the framework from /bin.
+		Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
+		fortRisePrepared = true;
+	}
+
 	// fortriseVersion: null for the plain game. frameworkUrl/assemblies (FortRise only): where the
 	// app's assemblies are served and their "served-name|assembly-name.dll" pairs, for Cecil.
 	[JSExport]
@@ -79,13 +126,17 @@ public static partial class BrowserHost
 	{
 		try
 		{
-			Directory.CreateDirectory(SaveDir);
-			foreach (string dir in new[] { GameDir, FortRiseDir })
+			// A patch started ahead (PrePatch) must finish first: it works in the FortRise folder as
+			// the current directory. If it failed, launching patches again (and reports why).
+			try
 			{
-				string target = Root + dir;
-				Directory.CreateDirectory(target);
-				if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
+				prePatch?.Wait();
 			}
+			catch (Exception e)
+			{
+				Console.Error.WriteLine($"[fortrise] Patching ahead failed; patching again: {e.InnerException ?? e}");
+			}
+			LinkFolders();
 			// TFGame.GetSavePath() (Linux branch) resolves to $XDG_DATA_HOME/TowerFall. This must
 			// be set before anything touches TFGame, whose static fields capture the save path.
 			Environment.SetEnvironmentVariable("XDG_DATA_HOME", SaveDir);
@@ -112,14 +163,7 @@ public static partial class BrowserHost
 			}
 			else
 			{
-				MountAssemblies(frameworkUrl, assemblies);
-				// MonoMod resolves TowerFall.exe's references from the FortRise folder.
-				foreach (string dll in new[] { "FNA.dll", "Steamworks.NET.dll" })
-				{
-					File.Copy("/bin/" + dll, Path.Combine(FortRiseDir, dll), overwrite: true);
-				}
-				// ...and the framework from /bin.
-				Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
+				PrepareFortRise(frameworkUrl, assemblies);
 				// The provider decides what's shown (see PlainConsoleLoggerProvider); don't filter before it.
 				ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
 				ModInstaller.Apply(FortRiseDir, loggers.CreateLogger("Mods"));

@@ -357,6 +357,24 @@ async function renderMods() {
 		: "off (plain TowerFall)";
 	const missing = Mods.missingDependencies(catalog, enabledCatalogMods());
 	$("modWarning").textContent = missing.length ? `Also needs mods that aren't available here: ${missing.join(", ")}.` : "";
+	patchAhead();
+}
+
+// Patching TowerFall.exe for FortRise takes a while the first time (cached afterwards: 12 s on a
+// fast Mac, much longer on a phone), and doesn't depend on the mods picked. So once FortRise will
+// run, it starts in the background (BrowserHost.PrePatch) while the player is still on this
+// screen, and Play only waits for what's left. Resolves to the FortRise version.
+let fortRiseReady = null;
+function patchAhead() {
+	if (fortRiseReady || !useFortRise() || !self.wasm?.exports) return;
+	fortRiseReady = syncFortRise(() => {}).then(async (version) => {
+		await self.wasm.exports.BrowserHost.PrePatch(version, new URL("_framework/", location.href).href, assemblyFiles());
+		return version;
+	});
+	fortRiseReady.catch((e) => {
+		console.warn("[fortrise] Couldn't start patching ahead:", e);
+		fortRiseReady = null;
+	});
 }
 
 $("modList").addEventListener("change", (e) => {
@@ -790,7 +808,7 @@ async function main() {
 	if (useFortRise()) {
 		status("Getting FortRise…");
 		$("bar").hidden = false;
-		const version = await syncFortRise(showProgress);
+		const version = await (fortRiseReady ?? Promise.reject()).catch(() => syncFortRise(showProgress));
 		// Patching TowerFall.exe takes a while the first time (it's cached afterwards), and so does
 		// loading the mods.
 		const stopActivity = showActivity(`Starting FortRise ${version}…`);
