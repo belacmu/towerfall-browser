@@ -118,6 +118,12 @@ function applySound() {
 		on: "Sound and music are on",
 	}[sound];
 	if (navigator.audioSession) navigator.audioSession.type = sound === "on" ? "playback" : "ambient";
+	applyGain();
+}
+
+// The gain node part, which the frame loop also checks, since SDL creates its audio output lazily
+// (cheaply: it changes nothing once the node is in place).
+function applyGain() {
 	const SDL3 = self.wasm?.Module?.SDL3;
 	const ctx = SDL3?.audioContext;
 	const node = SDL3?.audio_playback?.scriptProcessorNode;
@@ -128,7 +134,8 @@ function applySound() {
 		node.disconnect();
 		node.connect(node.muteGain);
 	}
-	node.muteGain.gain.value = sound === "off" ? 0 : 1;
+	const gain = sound === "off" ? 0 : 1;
+	if (node.muteGain.gain.value !== gain) node.muteGain.gain.value = gain;
 }
 
 $("mute").addEventListener("click", () => {
@@ -278,7 +285,10 @@ async function watchAiTypes() {
 			else $("aiPanel").hidden = true;
 		}
 		await new Promise((resolve) => setTimeout(resolve, 500));
-		await fetchAiSetup();
+		await fetchAiSetup().catch((e) => {
+			console.error(e);
+			onArcherSelect = false;
+		});
 	}
 }
 
@@ -372,8 +382,16 @@ $("modList").addEventListener("click", (e) => {
 });
 $("addMod").addEventListener("click", () => $("modFile").click());
 $("modFile").addEventListener("change", async () => {
+	$("error").textContent = "";
 	for (const file of $("modFile").files) {
-		const added = await Mods.addZip(file);
+		let added;
+		try {
+			added = await Mods.addZip(file);
+		} catch (e) {
+			console.error(e);
+			$("error").textContent = String(e?.message ?? e);
+			continue;
+		}
 		// A zip matching a catalog file (e.g. after a failed download) just fills that in.
 		if (!catalog.some((m) => m.entry.file.sha256 === added.sha256) && !modState.custom.some((c) => c.sha256 === added.sha256)) {
 			modState.custom.push({ ...added, enabled: true });
@@ -434,6 +452,19 @@ function gameFilesHost() {
 // Servers that host the game files (a private file host, or this one in private mode) win;
 // otherwise use what the player imported before, or ask them for their TowerFall folder. An
 // unreachable file host falls back to the copy already imported from it.
+// Asks the browser to keep the site's storage (the imported game, mods and saves) instead of
+// clearing it when space runs low, or (Safari) after a week without a visit. Browsers decide
+// themselves whether to grant it; asking again changes nothing once granted.
+async function keepStorage() {
+	try {
+		if (navigator.storage?.persist && !(await navigator.storage.persisted())) {
+			console.log(`[storage] persistent: ${await navigator.storage.persist()}`);
+		}
+	} catch (e) {
+		console.warn("[storage]", e);
+	}
+}
+
 async function ensureGameFiles() {
 	status("Checking game files…");
 	const server = await fromServer(gameFilesHost());
@@ -736,14 +767,20 @@ async function main() {
 			await prepareMods();
 			break;
 		} catch (e) {
-			if (!(e instanceof Mods.ModDownloadError)) throw e;
 			$("bar").hidden = true;
+			if (e instanceof Mods.StorageFullError) {
+				$("error").textContent = e.message;
+				continue;
+			}
+			if (!(e instanceof Mods.ModDownloadError)) throw e;
 			$("error").innerHTML = `${escapeHtml(e.message)} Download it from <a href="${escapeHtml(e.mod.entry.page)}" target="_blank" rel="noopener">its GameBanana page</a> and add it with "Add a mod zip", then press Play again.`;
 		}
 	}
 	$("change").hidden = true;
 	$("dw").hidden = true;
 	stopDarkWorldOffer();
+	// (After a click: some browsers only grant it to a page the player has interacted with.)
+	keepStorage();
 
 	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch; with sound
 	// set to effects, the game's music stays off from the start.
@@ -812,7 +849,7 @@ async function main() {
 			return;
 		}
 		// SDL creates its AudioContext lazily, so keep the sound setting applied.
-		applySound();
+		applyGain();
 		if (keepRunning) {
 			requestAnimationFrame(frame);
 		} else if (await exports.BrowserHost.WantsRestart()) {
