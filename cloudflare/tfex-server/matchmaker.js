@@ -1,4 +1,4 @@
-// Matchmaking at /ws, compatible with TF.EX's client (v0.19.1: src/network/TF.EX.Domain/Services/
+// Matchmaking at /ws, compatible with TF.EX's client (v0.19.1, checked against v0.19.2: src/network/TF.EX.Domain/Services/
 // MatchmakingService.cs and the menus that call it). The protocol is read from that client; the
 // official server isn't open source, so where the client leaves room the choices here are ours
 // (docs/MULTIPLAYER.md lists them).

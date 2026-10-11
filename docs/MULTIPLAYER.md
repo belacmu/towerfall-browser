@@ -34,8 +34,9 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
   0.19.1 release (2026-10-10, ~08:00 UTC) a handshake carrying an `Origin` header gets 403 (by
   ~09:00 UTC, 400), whatever the origin, while the same request without one gets 101. Browsers
   always send Origin and desktop TF.EX never does. Earlier that day two browsers met and played
-  there. We don't route around it (no Origin-stripping proxy); allowing browsers is the
-  operator's call. So **the site runs its own TF.EX-compatible server** (below), and the page
+  there. Still so on 2026-10-11 with TF.EX 0.19.2 out: 400 with the site's or a localhost Origin,
+  101 without. (0.19.2 is a client release; it changes nothing about this.) We don't route around
+  it (no Origin-stripping proxy); allowing browsers is the operator's call. So **the site runs its own TF.EX-compatible server** (below), and the page
   points browser players at it.
 
 ## Our server (`cloudflare/tfex-server`)
@@ -43,7 +44,8 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 Deployed at **`wss://tfex-server.tf-bd1030ec.workers.dev`** (2026-10-10), the site's default. A
 server implementing what TF.EX's client uses, written from TF.EX's GPL client source at
 v0.19.1 (`src/network/TF.EX.Domain/Services/MatchmakingService.cs`, the message models in
-`Models/WebSocket/`, and the menus that drive them). The official server isn't open source, so
+`Models/WebSocket/`, and the menus that drive them), and checked against v0.19.2 (no message
+changes: its `MatchmakingService.cs` change only shows desync warnings at match start). The official server isn't open source, so
 where the client leaves room the choices below are ours. Desktop TF.EX can use it too: set TF.EX's
 SERVER option (Mod options) to its `wss://` address.
 
