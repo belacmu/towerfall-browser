@@ -24,8 +24,8 @@ public static class TickCatchUp
 	private static bool off = Environment.GetEnvironmentVariable("TOWERFALL_TICK_CAP") == "0";
 	private static int lookAgain;
 
-	// Time dropped since the last report, for the [perf] line.
-	public static double DroppedMs;
+	// Time dropped since the last report, for the [perf] line, and in all (the Stats panel).
+	public static double DroppedMs, DroppedTotalMs;
 
 	// Game thread, before each frame.
 	public static void BeforeFrame()
@@ -38,6 +38,7 @@ public static class TickCatchUp
 		TimeSpan owed = acc + (now - last);
 		if (owed <= Cap) return;
 		DroppedMs += (owed - Cap).TotalMilliseconds;
+		DroppedTotalMs += (owed - Cap).TotalMilliseconds;
 		if (acc > Cap)
 		{
 			accumulator.SetValue(null, Cap);

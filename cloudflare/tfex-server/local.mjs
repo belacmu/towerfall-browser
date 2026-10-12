@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import { Matchmaker } from "./matchmaker.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
+import { MAX_REPORT, MemoryReports, parseReport, RateLimit } from "./reports.js";
 import { SignalRoom } from "./signal.js";
 
 const args = process.argv.slice(2);
@@ -140,8 +141,34 @@ class Connection {
 	}
 }
 
+// Performance reports (reports.js), in memory; GET /reports needs no key here (localhost).
+const reportStore = new MemoryReports();
+const reportLimit = new RateLimit();
+
 const server = createServer(async (req, res) => {
 	const url = new URL(req.url, "http://localhost");
+	if (url.pathname === "/report") {
+		const origin = req.headers.origin;
+		if (!origin || !originAllowed(origin, origins)) return res.writeHead(403).end();
+		const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
+		if (req.method === "OPTIONS") return res.writeHead(204, { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" }).end();
+		if (req.method !== "POST") return res.writeHead(405, headers).end();
+		let body = "";
+		for await (const chunk of req) {
+			body += chunk;
+			if (body.length > MAX_REPORT) return res.writeHead(413, headers).end();
+		}
+		if (!reportLimit.allow(req.socket.remoteAddress ?? "")) return res.writeHead(429, headers).end();
+		const report = parseReport(body);
+		if (!report) return res.writeHead(400, headers).end();
+		reportStore.add(report);
+		if (verbose) console.log(`[tfex-server] report: ${report.slice(0, 200)}`);
+		return res.writeHead(204, headers).end();
+	}
+	if (url.pathname === "/reports") {
+		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+		return res.end(JSON.stringify({ reports: reportStore.list(Number(url.searchParams.get("since") ?? 0) || 0) }));
+	}
 	if (url.pathname === "/status") {
 		// The Worker's /status, without its key (this server listens on localhost by default).
 		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });

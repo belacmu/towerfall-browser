@@ -5,6 +5,7 @@
 import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
+import { startStats } from "./stats.js";
 
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
@@ -876,6 +877,9 @@ async function main() {
 	});
 	const startMode = new URLSearchParams(location.search).get("mode") ?? (showIntro ? null : "menu");
 	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
+	// The Stats panel and performance reports (stats.js).
+	const server = tfexServer();
+	startStats(exports.BrowserHost, { serverUrl: server.url, official: server.url === TFEX_SERVERS.official, version: new URL(import.meta.url).searchParams.get("v") ?? "" });
 	// ?slowcpu=N (or towerfallSlowCpu(N) from the console), for testing: run like an N times slower computer.
 	self.towerfallSlowCpu = (factor) => exports.BrowserHost.SetSlowCpu(factor);
 	const slowCpu = Number(new URLSearchParams(location.search).get("slowcpu"));
