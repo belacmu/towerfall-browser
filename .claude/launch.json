@@ -139,6 +139,30 @@
       "env": {
         "TOWERFALL_WWW": "web/bin/site"
       }
+    },
+    {
+      "name": "ab-base",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8080"
+      ],
+      "port": 8080,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/ab-base"
+      }
+    },
+    {
+      "name": "ab-new",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8080"
+      ],
+      "port": 8080,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/ab-new"
+      }
     }
   ]
 }

@@ -296,9 +296,23 @@ public static partial class BrowserHost
 			TouchGamepad.Update();
 			GameMusic.Update();
 			LoaderAi.Update();
+			TickCatchUp.BeforeFrame();
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
-			frameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - frameStart;
+			if (slowCpu > 1)
+			{
+				// Busy for (slowCpu - 1) times as long again, as if this computer were that much slower.
+				long until = frameStart + (long)((System.Diagnostics.Stopwatch.GetTimestamp() - frameStart) * slowCpu);
+				while (System.Diagnostics.Stopwatch.GetTimestamp() < until) { }
+			}
+			long frameEnd = System.Diagnostics.Stopwatch.GetTimestamp();
+			frameTicks += frameEnd - frameStart;
+			int collections = GC.CollectionCount(0);
+			if (frameEnd - frameStart > worstFrameTicks) (worstFrameTicks, worstFrameGc) = (frameEnd - frameStart, collections != frameCollections);
+			frameCollections = collections;
+			if (lastFrameStart != 0) worstGapTicks = Math.Max(worstGapTicks, frameStart - lastFrameStart);
+			if (frameEnd - frameStart > System.Diagnostics.Stopwatch.Frequency / 60) longFrames++;
+			lastFrameStart = frameStart;
 			ReportFrameRate();
 		}
 		catch (Exception e)
@@ -455,6 +469,19 @@ public static partial class BrowserHost
 		return Task.CompletedTask;
 	}
 
+	// ?slowcpu=N, for testing: the game thread takes N times as long for every frame, like a slower
+	// computer's (busy waiting after each frame). Chrome's DevTools CPU throttling can't do this: it
+	// only slows the page's main thread, not the worker the game runs on.
+	[JSExport]
+	internal static Task SetSlowCpu(double factor)
+	{
+		slowCpu = factor;
+		Console.WriteLine($"[slowcpu] the game thread runs {factor:0.#}x slower");
+		return Task.CompletedTask;
+	}
+
+	private static double slowCpu = 1;
+
 	private static string startMode;
 	private static int mainMenuFrames;
 	private const string QuickPlaySearch = " quickplay search"; // (not a mode anyone can type)
@@ -588,7 +615,8 @@ public static partial class BrowserHost
 			}
 			if (words[0] == "bench")
 			{
-				Bench.Run();
+				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);
+				else Bench.Run();
 				return;
 			}
 			if (words[0] == "netplay")
@@ -680,6 +708,14 @@ public static partial class BrowserHost
 	private static readonly System.Diagnostics.Stopwatch fpsClock = System.Diagnostics.Stopwatch.StartNew();
 	private static int fpsFrames;
 	private static long frameTicks;
+	// Hitches, which the average hides: the longest frame, the longest time from one frame's start to
+	// the next's, and how many frames took longer than a 60 Hz frame.
+	private static long worstFrameTicks, worstGapTicks, lastFrameStart;
+	private static bool worstFrameGc; // a garbage collection ran during the worst frame
+	private static FieldInfo currentFrame;
+	private static int lastNetplayFrame;
+	private static int frameCollections;
+	private static int longFrames;
 	private static int lastGen0, lastGen1, lastGen2;
 	private static TimeSpan lastPaused;
 	private static double lastAllocatedMb;
@@ -695,9 +731,22 @@ public static partial class BrowserHost
 			TimeSpan paused = GC.GetTotalPauseDuration();
 			string gc = $", GC {gen0 - lastGen0}/{gen1 - lastGen1}/{gen2 - lastGen2} (gen 0/1/2), {(paused - lastPaused).TotalMilliseconds:0} ms paused, {GC.GetTotalAllocatedBytes() / 1048576.0 - lastAllocatedMb:0} MB allocated";
 			(lastGen0, lastGen1, lastGen2, lastPaused, lastAllocatedMb) = (gen0, gen1, gen2, paused, GC.GetTotalAllocatedBytes() / 1048576.0);
-			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{gc}{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
+			double ms(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+			string hitches = $", worst {ms(worstFrameTicks):0} ms{(worstFrameGc ? " with a GC" : "")} (gap {ms(worstGapTicks):0} ms), {longFrames} over 16.7 ms";
+			// Online: how fast the match runs (240 ticks/s is full speed) and catch-up time dropped.
+			currentFrame ??= AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name?.StartsWith("TF.EX", StringComparison.Ordinal) == true)
+				.SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+				.FirstOrDefault(t => t.Name == "ExFlags")?.GetField("CurrentFrame", BindingFlags.Public | BindingFlags.Static);
+			if (currentFrame?.GetValue(null) is int frame && frame != lastNetplayFrame)
+			{
+				if (frame > lastNetplayFrame && lastNetplayFrame > 0) hitches += $", online {(frame - lastNetplayFrame) / seconds:0} ticks/s, {TickCatchUp.DroppedMs:0} ms of catch-up dropped";
+				lastNetplayFrame = frame;
+			}
+			TickCatchUp.DroppedMs = 0;
+			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{hitches}{gc}{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
 			fpsFrames = 0;
 			frameTicks = 0;
+			(worstFrameTicks, worstGapTicks, longFrames) = (0, 0, 0);
 			fpsClock.Restart();
 		}
 	}

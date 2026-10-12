@@ -8,10 +8,14 @@
 //   curl 'localhost:9400/A/console?from=0'       console output of all threads (works while hung)
 //   curl 'localhost:9400/A/eval' --data 'js'     evaluate in the page
 //   curl 'localhost:9400/A/evalworkers' --data 'js'  evaluate in every worker thread
-//   curl 'localhost:9400/A/cpuprofile?s=10'      sample the workers' CPU; each one's functions by self time
+//   curl 'localhost:9400/A/cpuprofile?s=10'      sample the page's and workers' CPU; each one's functions by self time
+//                                                (&callers=N adds the call paths of the N busiest;
+//                                                &hitches=N the N longest busy stretches and what ran)
 //   curl 'localhost:9400/A/catch', then 'localhost:9400/A/pauses'   stacks of uncaught exceptions in workers
 //   curl 'localhost:9400/quit'
-// Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400]
+// Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400] [--no-cache]
+// (--no-cache: no HTTP cache or service worker, for comparing builds served at the same address.)
+// (Add slowcpu=4 to the URL to make a player run like a 4x slower computer.)
 // (Another driver at the same time: a different --port and different player names, which name
 // the profiles.)
 import { spawn } from "node:child_process";
@@ -25,6 +29,7 @@ const opt = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) +
 const url = opt("--url", "http://localhost:8080/?mute&nointro&autoplay&mods=TF.EX");
 const names = opt("--players", "A,B").split(",");
 const port = Number(opt("--port", "9400"));
+const noCache = args.includes("--no-cache");
 const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 // The real GPU where Chrome can use it headless (Metal on macOS); software rendering elsewhere,
 // which costs several CPU cores per running game.
@@ -116,14 +121,16 @@ async function launch(name, debugPort) {
 		});
 	// Samples every worker's CPU for `seconds` and returns each one's functions by self time
 	// (wasm functions show by name where the module has a name section).
-	const cpuProfile = async (seconds) => {
-		await Promise.all(workerSessions.map(async (s) => {
-			await sessionSend(s, "Profiler.enable");
-			await sessionSend(s, "Profiler.setSamplingInterval", { interval: 200 });
-			await sessionSend(s, "Profiler.start");
+	const cpuProfile = async (seconds, callers = 0, hitches = 0) => {
+		// The page's main thread first (it paces the frames), then every worker.
+		const targets = [(m, p) => send(m, p), ...workerSessions.map((s) => (m, p) => sessionSend(s, m, p))];
+		await Promise.all(targets.map(async (t) => {
+			await t("Profiler.enable");
+			await t("Profiler.setSamplingInterval", { interval: 200 });
+			await t("Profiler.start");
 		}));
 		await sleep(seconds * 1000);
-		const profiles = await Promise.all(workerSessions.map((s) => sessionSend(s, "Profiler.stop")));
+		const profiles = await Promise.all(targets.map((t) => t("Profiler.stop")));
 		const out = [];
 		profiles.forEach((r, i) => {
 			const prof = r.profile;
@@ -136,7 +143,51 @@ async function launch(name, debugPort) {
 				self.set(name, (self.get(name) ?? 0) + 1);
 			}
 			const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 40);
-			out.push(`== worker ${i}: ${prof.samples.length} samples`, ...top.map(([n, c]) => `${(100 * c / prof.samples.length).toFixed(1).padStart(5)}%  ${n}`));
+			out.push(`== ${i ? `worker ${i}` : "page"}: ${prof.samples.length} samples`, ...top.map(([n, c]) => `${(100 * c / prof.samples.length).toFixed(1).padStart(5)}%  ${n}`));
+			// ?hitches=N: the N longest stretches of back-to-back busy samples (a hitch), with what ran.
+			if (hitches) {
+				const parent = new Map();
+				for (const n of prof.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+				const nameOf = (n) => n.callFrame.functionName || `(${n.callFrame.url.split("/").pop() || "anonymous"})`;
+				const idle = (id) => ["(idle)", "(program)", "(garbage collector)"].includes(nameOf(byId.get(id)));
+				const stretches = [];
+				let t = 0, start = -1, startT = 0;
+				prof.samples.forEach((id, k) => {
+					t += prof.timeDeltas[k] / 1000;
+					if (!idle(id) && start < 0) [start, startT] = [k, t];
+					if (idle(id) && start >= 0) {
+						stretches.push({ from: start, to: k, ms: t - startT, at: startT });
+						start = -1;
+					}
+				});
+				for (const h of stretches.sort((a, b) => b.ms - a.ms).slice(0, hitches)) {
+					const paths = new Map();
+					for (let k = h.from; k < h.to; k++) {
+						const chain = [];
+						for (let p = prof.samples[k]; p && chain.length < 8; p = parent.get(p)) chain.push(nameOf(byId.get(p)));
+						const key = chain.join(" < ");
+						paths.set(key, (paths.get(key) ?? 0) + 1);
+					}
+					out.push(`   busy ${h.ms.toFixed(0)} ms at ${(h.at / 1000).toFixed(1)} s, ${h.to - h.from} samples:`, ...[...paths].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, c]) => `      ${c}  ${k}`));
+				}
+			}
+			// ?callers=N: for the N busiest functions, the call paths (5 frames up) that reach them.
+			if (callers) {
+				const parent = new Map();
+				for (const n of prof.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+				const nameOf = (n) => n.callFrame.functionName || `(${n.callFrame.url.split("/").pop() || "anonymous"})`;
+				for (const [fn] of top.filter(([n]) => n !== "(idle)" && n !== "(program)").slice(0, callers)) {
+					const paths = new Map();
+					for (const id of prof.samples) {
+						if (nameOf(byId.get(id)) !== fn) continue;
+						const chain = [];
+						for (let p = parent.get(id); p && chain.length < 5; p = parent.get(p)) chain.push(nameOf(byId.get(p)));
+						const key = chain.join(" < ");
+						paths.set(key, (paths.get(key) ?? 0) + 1);
+					}
+					out.push(`   ${fn} called from:`, ...[...paths].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, c]) => `      ${c}  < ${k}`));
+				}
+			}
 		});
 		return out.join("\n") || "no profile";
 	};
@@ -163,6 +214,12 @@ async function launch(name, debugPort) {
 	});
 	await send("Runtime.enable");
 	await send("Network.enable");
+	if (noCache) {
+		// Comparing builds served one after another at the same address: the HTTP cache or the service
+		// worker could otherwise hand the page the previous build's files.
+		await send("Network.setCacheDisabled", { cacheDisabled: true });
+		await send("Network.setBypassServiceWorker", { bypass: true });
+	}
 	await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
 	// The page main thread's stack right now (for hangs): pause, read, resume.
 	const stack = async () => {
@@ -237,7 +294,7 @@ http.createServer(async (req, res) => {
 		} else if (action === "pauses") {
 			res.end(JSON.stringify(p.pauses, null, 1) + "\n");
 		} else if (action === "cpuprofile") {
-			res.end(await p.cpuProfile(Number(u.searchParams.get("s") ?? 10)) + "\n");
+			res.end(await p.cpuProfile(Number(u.searchParams.get("s") ?? 10), Number(u.searchParams.get("callers") ?? 0), Number(u.searchParams.get("hitches") ?? 0)) + "\n");
 		} else if (action === "evalworkers") {
 			res.end(JSON.stringify(await p.evalWorkers(body), null, 1) + "\n");
 		} else if (action === "eval") {
