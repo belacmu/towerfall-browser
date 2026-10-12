@@ -296,6 +296,7 @@ public static partial class BrowserHost
 			TouchGamepad.Update();
 			GameMusic.Update();
 			LoaderAi.Update();
+			TickCatchUp.BeforeFrame();
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
 			if (slowCpu > 1)
@@ -711,6 +712,8 @@ public static partial class BrowserHost
 	// the next's, and how many frames took longer than a 60 Hz frame.
 	private static long worstFrameTicks, worstGapTicks, lastFrameStart;
 	private static bool worstFrameGc; // a garbage collection ran during the worst frame
+	private static FieldInfo currentFrame;
+	private static int lastNetplayFrame;
 	private static int frameCollections;
 	private static int longFrames;
 	private static int lastGen0, lastGen1, lastGen2;
@@ -730,6 +733,16 @@ public static partial class BrowserHost
 			(lastGen0, lastGen1, lastGen2, lastPaused, lastAllocatedMb) = (gen0, gen1, gen2, paused, GC.GetTotalAllocatedBytes() / 1048576.0);
 			double ms(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 			string hitches = $", worst {ms(worstFrameTicks):0} ms{(worstFrameGc ? " with a GC" : "")} (gap {ms(worstGapTicks):0} ms), {longFrames} over 16.7 ms";
+			// Online: how fast the match runs (240 ticks/s is full speed) and catch-up time dropped.
+			currentFrame ??= AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name?.StartsWith("TF.EX", StringComparison.Ordinal) == true)
+				.SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+				.FirstOrDefault(t => t.Name == "ExFlags")?.GetField("CurrentFrame", BindingFlags.Public | BindingFlags.Static);
+			if (currentFrame?.GetValue(null) is int frame && frame != lastNetplayFrame)
+			{
+				if (frame > lastNetplayFrame && lastNetplayFrame > 0) hitches += $", online {(frame - lastNetplayFrame) / seconds:0} ticks/s, {TickCatchUp.DroppedMs:0} ms of catch-up dropped";
+				lastNetplayFrame = frame;
+			}
+			TickCatchUp.DroppedMs = 0;
 			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{hitches}{gc}{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
 			fpsFrames = 0;
 			frameTicks = 0;
