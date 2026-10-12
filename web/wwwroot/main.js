@@ -876,6 +876,10 @@ async function main() {
 	});
 	const startMode = new URLSearchParams(location.search).get("mode") ?? (showIntro ? null : "menu");
 	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
+	// ?slowcpu=N (or towerfallSlowCpu(N) from the console), for testing: run like an N times slower computer.
+	self.towerfallSlowCpu = (factor) => exports.BrowserHost.SetSlowCpu(factor);
+	const slowCpu = Number(new URLSearchParams(location.search).get("slowcpu"));
+	if (slowCpu > 1) await exports.BrowserHost.SetSlowCpu(slowCpu);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}
