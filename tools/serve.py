@@ -221,7 +221,15 @@ class Handler(SimpleHTTPRequestHandler):
             super().log_message(fmt, *args)
 
 
+class Server(ThreadingHTTPServer):
+    # The default backlog of 5 waiting connections is too few for a page starting .NET (hundreds of
+    # requests at once, more with two test players starting together): the rest get reset, and a
+    # worker thread whose script load is reset never starts, which hangs the runtime's start.
+    request_queue_size = 256
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     port = int(next((a for a in sys.argv[1:] if a.isdigit()), 8080))
     print(f"Serving TowerFall on http://localhost:{port}")
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    Server(("127.0.0.1", port), Handler).serve_forever()
