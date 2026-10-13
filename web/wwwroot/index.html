@@ -100,7 +100,7 @@
 				padding: 0;
 			}
 			/* Sound and Controls buttons. */
-			/* A row of buttons, with the AI button and its picker below it when they show. */
+			/* A row of buttons; under it the AI and Stats buttons, then their panels, when they show. */
 			#corner {
 				position: fixed;
 				top: max(8px, env(safe-area-inset-top));
@@ -276,9 +276,11 @@
 				<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
 				<button id="music" title="Download the game's music" hidden></button>
 				<button id="mute" title="Toggle sound">Sound: on</button>
+			</div>
+			<div class="row">
+				<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
 				<button id="statsToggle" title="Performance numbers (frame times, online ticks, ping…)" hidden>Stats</button>
 			</div>
-			<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
 			<div id="aiPanel" hidden></div>
 			<div id="statsPanel" hidden>
 				<pre></pre>
