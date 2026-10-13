@@ -195,3 +195,48 @@ identical to each other.
 - **Arrows' own positions,** and anything with two or more players (kills, catches, stomps).
 - **Slow motion** (`TimeRate` < 1, where `pow` matters).
 - **Real hardware,** for the FPCR value and timings.
+
+## 4. Rollback snapshots on the Switch: how much memory (census, 2026-10-13)
+
+The browser side can snapshot state by fields (TF.EX already does). The Switch build is native
+code with no reflection to lean on, so the cheapest rollback there would copy raw memory: every
+object the game allocates, plus the globals. This step measures that memory and how much of it
+changes per frame. It only reads memory; nothing was saved or restored yet.
+
+**Where the objects live.** The game uses the Boehm GC (bdwgc). `GC_add_to_heap` (+0x2857ed0)
+records each heap section as `{start, bytes}` at `GC_arrays + 0x68e0`. The pointer to `GC_arrays`
+is at +0x483b648, and the pointer to `GC_n_heap_sects` is at +0x483b6e8. Every managed object lives
+in those sections. The game's statics and Boehm's own state live in the main module's
+`.data`/`.bss`.
+
+**Measured** in Trials, 120 frames into the level (Ryujinx, probe `tools/switch-probe`):
+
+| | Size | Pages changed per frame |
+|---|---|---|
+| GC heap, 13 sections | 61 MB | 40–46 (160–184 KB) |
+| Main module globals | 4 MB | 5–6 (20–24 KB) |
+
+The figures for 7 frames in a row were about the same as for 1 frame: 46 pages. So the same pages
+change every frame.
+
+**What it means.**
+- **The changing state is small:** about 200 KB per frame, about 1.6 MB for an 8-frame rollback
+  window.
+- **The total is too big to copy or scan every frame:** 65 MB is on the order of 10 ms of memory
+  bandwidth on a Switch. Rollback needs to know which pages changed without reading all of them.
+  The options, in order of preference:
+  1. **Hot set plus guard.** Learn the set of pages that change during a match. Snapshot that set
+     every frame, and check the cold pages' hashes a slice at a time across frames (or at each
+     rollback) to catch anything missed.
+  2. **Boehm's dirty-page tracking** (incremental mode), if this build has it compiled in.
+  3. **Field snapshots, as on the browser:** native per-type save and load code for the few
+     classes that matter (Player, Arrow, the level's entity lists, `Calc.Random`, the session
+     scores).
+- **Not measured yet:**
+  - A versus match with four archers and arrows (more allocation).
+  - What a garbage collection during the window does: it touches many pages, and a snapshot must
+    include Boehm's free lists and mark bits, all in the heap and globals measured here.
+
+**Next, still safe:** the restore self-test. Snapshot the hot set and the globals at frame N, run
+8 frames, restore, run the same 8 frames again, and compare the logged trajectories. It runs only
+in the emulator, with the save data backed up and checked as before.
