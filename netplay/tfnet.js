@@ -67,7 +67,7 @@ var LibraryTFNet = {
 		// Packet timing for the page's Stats panel (stats.js reads and resets it): how long each
 		// received packet waited on the page before the game took it (tfnet_recv_all). (How long the
 		// browser held it before the handler ran can't be read: the event is stamped at dispatch.)
-		stats: { packets: 0, wait: null, path: "", rtt: null },
+		stats: { packets: 0, wait: null, path: "", rtt: null, routes: "" },
 
 		// The connection's path and WebRTC's own round-trip time (its connectivity checks, so the
 		// network alone, without either game in it), from a peer connection's stats. Safari doesn't
@@ -86,9 +86,32 @@ var LibraryTFNet = {
 			const remote = stats.get(pair.remoteCandidateId);
 			const relayed = local?.candidateType === "relay" || remote?.candidateType === "relay";
 			return {
-				path: relayed ? `through the relay (${local?.relayProtocol ?? local?.protocol ?? "?"})` : `directly (${local?.candidateType ?? "?"} to ${remote?.candidateType ?? "?"})`,
+				path: relayed ? `through the relay (${local?.relayProtocol ?? local?.protocol ?? "?"}, ${local?.candidateType ?? "?"} to ${remote?.candidateType ?? "?"})` : `directly (${local?.candidateType ?? "?"} to ${remote?.candidateType ?? "?"})`,
 				rttMs: typeof pair.currentRoundTripTime === "number" ? pair.currentRoundTripTime * 1000 : null,
 			};
+		},
+		// Which routes each side found and how far each kind of pair got, to tell why a connection
+		// went through the relay: for example "this side srflx4 relay4; other side host-mdns relay4;
+		// srflx4-relay4 succeeded, relay4-relay4 succeeded". host is a local address (mdns: hidden
+		// behind a .local name), srflx the public address STUN saw (4 or 6: IPv4 or IPv6), relay the
+		// TURN relay's. No addresses are kept.
+		routes(stats) {
+			const kind = (c) => {
+				if (!c) return "?";
+				const a = c.address ?? c.ip ?? "";
+				return c.candidateType + (a.endsWith(".local") ? "-mdns" : a.includes(":") ? "6" : a ? "4" : "");
+			};
+			const sides = { "local-candidate": new Set(), "remote-candidate": new Set() };
+			stats.forEach((x) => sides[x.type]?.add(kind(x)));
+			const rank = { frozen: 0, waiting: 1, "in-progress": 2, failed: 3, succeeded: 4 };
+			const pairs = new Map();
+			stats.forEach((x) => {
+				if (x.type !== "candidate-pair") return;
+				const name = `${kind(stats.get(x.localCandidateId))}-${kind(stats.get(x.remoteCandidateId))}`;
+				if ((rank[x.state] ?? -1) >= (rank[pairs.get(name)] ?? -1)) pairs.set(name, x.state);
+			});
+			const list = (set) => [...set].sort().join(" ") || "none";
+			return `this side ${list(sides["local-candidate"])}; other side ${list(sides["remote-candidate"])}; ${[...pairs].map(([n, st]) => `${n} ${st}`).join(", ") || "no pairs"}`;
 		},
 		timing() {
 			return { n: 0, sum: 0, max: 0, over4: 0, over16: 0 };
@@ -187,7 +210,13 @@ var LibraryTFNet = {
 				};
 				const started = performance.now();
 				pc.onconnectionstatechange = async () => {
-					if (pc.connectionState === "failed") console.warn(`[tfnet] couldn't connect to peer ${uuid}`);
+					if (pc.connectionState === "failed") {
+						let routes = "";
+						try {
+							routes = `: ${TFNet.routes(await pc.getStats())}`;
+						} catch {}
+						console.warn(`[tfnet] couldn't connect to peer ${uuid}${routes}`);
+					}
 					if (pc.connectionState !== "connected") return;
 					// Direct or through the TURN relay, for reports of slow or failed connections.
 					let path = "";
@@ -197,6 +226,14 @@ var LibraryTFNet = {
 					} catch {}
 					console.log(`[tfnet] connected to peer ${uuid}${path} in ${Math.round(performance.now() - started)} ms`);
 					TFNet.stats.path = path.trim().replace(/, network.*/, "");
+					// (Pairs still being checked a moment later are mostly settled.)
+					setTimeout(async () => {
+						if (pc.connectionState !== "connected") return; // (closed: a ping measurement's)
+						try {
+							TFNet.stats.routes = TFNet.routes(await pc.getStats());
+							console.log(`[tfnet] routes to peer ${uuid}: ${TFNet.stats.routes}`);
+						} catch {}
+					}, 3000);
 					// While connected, the path (it can change) and WebRTC's round trip every 2 s, for the
 					// Stats panel and reports (stats.js), next to the game's own ping.
 					clearInterval(peer.sampler);

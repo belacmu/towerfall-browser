@@ -37,7 +37,11 @@ noted; desktop .NET is faster, but the costs grow the same way.
 - **Measured (one player's game thread 4x slower, `?slowcpu=4`):** 5.5 frames a second, then 0.6,
   0.2, 0.1, with 10-21 s frames. With a cap of 8 ticks a frame: 13-16.5 frames a second, the match
   at about 73% speed (the other player waits for it, as GGRS does for any slow player).
-- **Fix:** cap the accumulator (for example at 8 ticks' worth) and drop the excess time.
+- **Fix:** cap the accumulator (for example at 8 ticks' worth) and drop the excess time, except
+  while the round-end instant replay plays (`InstantReplayFootage.IsPaused`): that's how the time
+  spent building the replay gets made up. Dropping it too left the builder behind after every
+  round and the other player slowed down for 28% of a match instead of 17% (one player at
+  `?slowcpu=2`, 3 matches each).
 - **Ours:** `web/Netplay/TickCatchUp.cs` (PR #51).
 
 ## 4. A hitch whenever a new kind of entity first appears (MonoMod's DynamicData, used by TF.EX)
