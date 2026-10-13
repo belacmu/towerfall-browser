@@ -10,13 +10,17 @@ Decided with the project owner on 2026-10-09.
   version. `tools/fetch-tfex.sh` pins a release, removes its native libraries (the browser links its
   own build of ggrs_ffi, see `netplay/`) and publishes it under `hosted-mods/`. A hosted mod
   replaces GameBanana's entry of the same name. The official server only lets the latest TF.EX
-  play online, so `.github/workflows/tfex.yml` checks hourly (`tools/update-tfex.py`) and adopts
-  a new release automatically when it uses the same ggrs-ffi as the browser build and our
-  FortRise; otherwise it opens an issue.
+  play online, so `.github/workflows/tfex.yml` checks hourly (`tools/update-tfex.py`). A new
+  release that uses the same ggrs-ffi as the browser build and our FortRise, with an unchanged
+  lobby protocol, goes on a branch in the site's preview/ with an issue linking its pull request
+  (the site runs TF.EX's code, so a person merges it); otherwise the issue says what needs doing.
 - **We keep the catalog.** `tools/update-catalog.py` builds `mods/catalog.json` from GameBanana:
   latest file, checksums, license, the FortRise metadata inside each zip, and whether the mod
   needs Harmony or native code. A scheduled CI job keeps it current. Our own per-mod verdicts
-  (after testing) go in `mods/overrides.json`.
+  (after testing) go in `mods/overrides.json`. A verdict that offers a mod ("works",
+  "experimental") holds only for the exact zip tested (its SHA-256): mod code runs on the site's
+  origin, so a re-uploaded file (even under the same version) is "untested" and off the page until
+  it's tested again. A mod GameBanana fails to answer for keeps yesterday's entry.
 - **The page shows only mods that work in the browser**, as a list on the Play screen, outside the
   game: mods must be in place before FortRise starts. FortRise turns on automatically when any mod
   is enabled, and dependencies are enabled with the mods that need them. FortRise's in-game Mods
@@ -31,3 +35,7 @@ Decided with the project owner on 2026-10-09.
   GameBanana and drop it in. A small Cloudflare Worker proxy could replace the mirror step later.
 - **Testing.** CI can't run the game (no game files). A local smoke test on a machine with the game
   boots each mod headlessly and records the result in `mods/overrides.json`.
+- **Mods that expect a keyboard get a page control.** LoaderAI (behind AIJimmy and AINova) sets up
+  its computer players with per-slot keys a phone doesn't have, so the page's AI button picks P2-P4's
+  opponents and the host joins them in versus archer select through LoaderAI's API
+  (`web/LoaderAi.cs`). The keyboard keys still work on desktop.

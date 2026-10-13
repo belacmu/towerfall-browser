@@ -2,18 +2,38 @@
 //  1. Get the player's game files into OPFS (see gamefiles.js), which .NET mounts at /libsdl.
 //  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
 
-import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
+import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, fromZip, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
+import { startStats } from "./stats.js";
 
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
 self.consoleLog = [];
+// Also handed each line while set (see showActivity).
+let onConsoleLine = null;
+// A .NET exception's stack getter calls back into C#, which isn't allowed on this thread and throws:
+// that mustn't take the logging (and fail(), which logs the error first) down with it.
+const logText = (a) => {
+	if (typeof a === "string") return a;
+	try {
+		return a?.stack ?? String(a);
+	} catch {
+		return String(a?.message ?? a);
+	}
+};
 for (const level of ["log", "info", "warn", "error", "debug"]) {
 	const original = console[level].bind(console);
 	console[level] = (...args) => {
-		self.consoleLog.push(`[${level}] ` + args.map((a) => (typeof a === "string" ? a : a?.stack ?? String(a))).join(" "));
+		// Progress reports from .NET (see FortRiseLauncher), for showActivity only.
+		if (typeof args[0] === "string" && args[0].startsWith("[progress] ")) {
+			onConsoleLine?.(args[0]);
+			return;
+		}
+		const line = `[${level}] ` + args.map(logText).join(" ");
+		self.consoleLog.push(line);
 		if (self.consoleLog.length > 2000) self.consoleLog.splice(0, 500);
+		onConsoleLine?.(line);
 		original(...args);
 	};
 }
@@ -27,7 +47,10 @@ function fail(err) {
 	console.error(err);
 	status("Something went wrong");
 	// ManagedError's stack getter calls back into C#, which isn't allowed on this thread.
-	$("error").textContent = String(err?.message ?? err) + "\n\n(See the browser console for details.)";
+	const message = String(err?.message ?? err);
+	$("error").textContent = /out of memory/i.test(message)
+		? "The browser ran out of memory for the game. Right after a reload, the previous page's memory may not be freed yet: close this tab and open the page in a new one."
+		: message + "\n\n(See the browser console for details.)";
 	showOverlay();
 }
 
@@ -60,24 +83,53 @@ fetch("preview.json", { cache: "no-store" })
 		document.title = `TowerFall (preview: ${p.branch})`;
 	})
 	.catch(() => {});
+// The faint corner link on the start screen: to the branch preview, or from it back to the main site.
+if (/\/preview\/$/.test(location.pathname.replace(/index\.html$/, ""))) {
+	$("otherBuild").href = "../";
+	$("otherBuild").title = $("otherBuild").ariaLabel = "Main site";
+}
 
-// Mute is remembered per browser. ?mute / ?unmute in the URL override it.
-const MUTE_KEY = "towerfall.muted";
-let muted = (() => {
+// The Sound button steps through off, effects and on, remembered per browser; ?mute, ?effects and
+// ?unmute in the URL override it. "Effects" is the game's sound effects without its music, to play
+// over music from another app (GameMusic.cs turns the game's music off).
+const SOUND_KEY = "towerfall.sound";
+const SOUNDS = ["off", "effects", "on"];
+let sound = (() => {
 	const params = new URLSearchParams(location.search);
-	if (params.has("mute")) return true;
-	if (params.has("unmute")) return false;
+	if (params.has("mute")) return "off";
+	if (params.has("effects")) return "effects";
+	if (params.has("unmute")) return "on";
 	try {
-		return localStorage.getItem(MUTE_KEY) !== "0";
-	} catch {
-		return true;
-	}
+		const saved = localStorage.getItem(SOUND_KEY);
+		if (SOUNDS.includes(saved)) return saved;
+		// Before "effects", the button was on/off.
+		if (localStorage.getItem("towerfall.muted") === "0") return "on";
+	} catch {}
+	return "off";
 })();
 
-// Muting zeroes a gain node between SDL's output and the speakers instead of suspending the
-// AudioContext, so the game's audio keeps running (and stays in sync) while silent.
-function applyMute() {
-	$("mute").textContent = muted ? "Sound: off" : "Sound: on";
+// Sound off zeroes a gain node between SDL's output and the speakers instead of suspending the
+// AudioContext, so the game's audio keeps running (and stays in sync) while silent. On iPhone the
+// audio session follows the setting (Safari 17+): with sound on, "playback", like a media app, so
+// the silent switch doesn't mute the game (the Sound button does); otherwise "ambient", which mixes
+// with other apps' audio (as "playback", the game stopped music playing in other apps, even while
+// silent). Ambient sound obeys the silent switch, so "effects" is silent on a phone set to silent:
+// Safari has no session type that both mixes and ignores the switch.
+function applySound() {
+	const button = $("mute");
+	button.textContent = { off: "Sound: off", effects: "Sound: effects", on: "Sound: on" }[sound];
+	button.title = {
+		off: "Sound is off",
+		effects: "Sound effects only, without the game's music, mixed with audio from other apps (on iPhone, the silent switch mutes them)",
+		on: "Sound and music are on",
+	}[sound];
+	if (navigator.audioSession) navigator.audioSession.type = sound === "on" ? "playback" : "ambient";
+	applyGain();
+}
+
+// The gain node part, which the frame loop also checks, since SDL creates its audio output lazily
+// (cheaply: it changes nothing once the node is in place).
+function applyGain() {
 	const SDL3 = self.wasm?.Module?.SDL3;
 	const ctx = SDL3?.audioContext;
 	const node = SDL3?.audio_playback?.scriptProcessorNode;
@@ -88,18 +140,20 @@ function applyMute() {
 		node.disconnect();
 		node.connect(node.muteGain);
 	}
-	node.muteGain.gain.value = muted ? 0 : 1;
+	const gain = sound === "off" ? 0 : 1;
+	if (node.muteGain.gain.value !== gain) node.muteGain.gain.value = gain;
 }
 
 $("mute").addEventListener("click", () => {
-	muted = !muted;
+	sound = SOUNDS[(SOUNDS.indexOf(sound) + 1) % SOUNDS.length];
 	try {
-		localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+		localStorage.setItem(SOUND_KEY, sound);
 	} catch {}
-	applyMute();
+	applySound();
+	host?.SetGameMusic(sound !== "effects").catch(console.error);
 	$("canvas").focus();
 });
-applyMute();
+applySound();
 
 // Safari (iPhone especially) only starts audio from inside a tap, click or key press: an
 // AudioContext created or resumed anywhere else stays suspended. SDL creates its own after Play and
@@ -122,9 +176,6 @@ function unlockAudio() {
 for (const type of ["pointerup", "touchend", "click", "keydown"]) {
 	document.addEventListener(type, unlockAudio, { capture: true, passive: true });
 }
-// iPhone's silent switch mutes web audio unless the page plays like a media app; the Sound button
-// is the control here.
-if (navigator.audioSession) navigator.audioSession.type = "playback";
 
 // The mouse cursor shows over the game while it moves and hides after a few seconds still (the
 // game itself hides it for good; see canvas.canvas in index.html).
@@ -148,9 +199,10 @@ async function applyTouch() {
 	$("touchToggle").textContent = touchOn ? "Controls: on" : "Controls: off";
 	// Before the game runs, Init() picks the setting up.
 	if (!host) return;
+	// Showing them plugs the virtual gamepad in (once) before the next frame, like connecting a
+	// controller; while they show, the keyboard isn't a player.
+	await host.ShowTouchControls(touchOn);
 	if (touchOn) {
-		// Plugs the virtual gamepad in (once) before the next frame, like connecting a controller.
-		await host.EnableTouchGamepad();
 		controls ??= createTouchControls((buttons, x, y) => host.SetTouchGamepad(buttons, x, y));
 	}
 	controls?.setVisible(touchOn);
@@ -163,6 +215,99 @@ $("touchToggle").addEventListener("click", () => {
 	$("canvas").focus();
 });
 applyTouch();
+
+// AI opponents. LoaderAI (behind the AIJimmy and AINova mods) sets its computer players up with
+// keys a phone doesn't have, so the AI button (shown in versus archer select) picks them instead: P2 on (to P4, or P8 with an
+// 8-player mod) each none or one of its AI types, joined in versus archer select by the host
+// (LoaderAi.cs). Remembered per browser.
+const OPPONENTS_KEY = "towerfall.opponents";
+let aiTypes = [];
+let aiSlots = 4;
+// From P2, up to P8.
+let opponents = (() => {
+	try {
+		const saved = JSON.parse(localStorage.getItem(OPPONENTS_KEY));
+		if (Array.isArray(saved)) return Array.from({ length: 7 }, (_, i) => (typeof saved[i] === "string" ? saved[i] : ""));
+	} catch {}
+	return Array(7).fill("");
+})();
+const aiName = (type) => (type ? type[0] + type.slice(1).toLowerCase() : "none");
+
+function renderOpponents() {
+	const shown = opponents.slice(0, aiSlots - 1);
+	const count = shown.filter((t) => aiTypes.includes(t)).length;
+	$("aiToggle").textContent = count ? `AI: ${count}` : "AI: off";
+	const panel = $("aiPanel");
+	panel.innerHTML = "";
+	panel.classList.toggle("wide", shown.length > 3);
+	shown.forEach((type, i) => {
+		const button = document.createElement("button");
+		button.textContent = `P${i + 2}: ${aiName(aiTypes.includes(type) ? type : "")}`;
+		button.addEventListener("click", () => {
+			const choices = ["", ...aiTypes];
+			opponents[i] = choices[(choices.indexOf(aiTypes.includes(type) ? type : "") + 1) % choices.length];
+			try {
+				localStorage.setItem(OPPONENTS_KEY, JSON.stringify(opponents));
+			} catch {}
+			renderOpponents();
+			sendOpponents();
+		});
+		panel.append(button);
+	});
+	const hint = document.createElement("div");
+	hint.className = "hint";
+	hint.textContent = "They join in Versus archer select (not online), if there are archers left for them.";
+	panel.append(hint);
+}
+
+function sendOpponents() {
+	host?.SetAiOpponents(["", ...opponents.slice(0, aiSlots - 1).map((t) => (aiTypes.includes(t) ? t : ""))]).catch(console.error);
+}
+
+let onArcherSelect = false;
+
+async function fetchAiSetup() {
+	const [slots, types, select] = (await host.GetAiSetup()).split("|");
+	aiSlots = Math.min(8, Math.max(2, Number(slots) || 4));
+	aiTypes = types ? types.split(",") : [];
+	onArcherSelect = select === "1";
+}
+
+// LoaderAI's AI types register once the game has loaded; then the button shows whenever the game
+// is in versus archer select (checked twice a second).
+async function watchAiTypes() {
+	for (let i = 0; i < 60 && !aiTypes.length; i++) {
+		await fetchAiSetup();
+		if (!aiTypes.length) await new Promise((resolve) => setTimeout(resolve, 1000));
+	}
+	if (!aiTypes.length) return;
+	renderOpponents();
+	sendOpponents();
+	for (;;) {
+		const button = $("aiToggle");
+		if (button.hidden === onArcherSelect) {
+			button.hidden = !onArcherSelect;
+			if (onArcherSelect) renderOpponents();
+			else $("aiPanel").hidden = true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		await fetchAiSetup().catch((e) => {
+			console.error(e);
+			onArcherSelect = false;
+		});
+	}
+}
+
+// (Opening it checks the slots again: an 8-player mode can be turned on in the game.)
+$("aiToggle").addEventListener("click", async () => {
+	const panel = $("aiPanel");
+	panel.hidden = !panel.hidden;
+	$("canvas").focus();
+	if (panel.hidden) return;
+	await fetchAiSetup();
+	renderOpponents();
+	sendOpponents();
+});
 
 // --- Mods (see mods.js) ---------------------------------------------------------------------
 
@@ -183,7 +328,12 @@ function useFortRise() {
 	const params = new URLSearchParams(location.search);
 	if (params.has("vanilla")) return false;
 	if (params.has("fortrise")) return true;
-	return enabledCatalogMods().length > 0 || modState.custom.some((c) => c.enabled);
+	return enabledCatalogMods().length > 0 || enabledCustomMods().length > 0;
+}
+
+// The player's own mod zips that will be installed (none while mods are switched off).
+function enabledCustomMods() {
+	return modState.off ? [] : modState.custom.filter((c) => c.enabled);
 }
 
 async function renderMods() {
@@ -211,13 +361,36 @@ async function renderMods() {
 
 	const files = [
 		...enabledCatalogMods().map((m) => ({ name: m.name, version: m.version, sha256: m.entry.file.sha256 })),
-		...modState.custom.filter((c) => c.enabled).map((c) => ({ name: c.file, sha256: c.sha256 })),
+		...enabledCustomMods().map((c) => ({ name: c.file, sha256: c.sha256 })),
 	];
-	$("modSummary").textContent = files.length
-		? `${files.length} on · mod set ${await Mods.fingerprint(files)}`
-		: "off (plain TowerFall)";
+	$("modSummary").textContent = modState.off
+		? "All off: plain TowerFall (your picks are kept)"
+		: files.length
+			? `${names.size + enabledCustomMods().length} on${names.has("TF.EX") ? " · online play" : ""} · mod set ${await Mods.fingerprint(files)}`
+			: "None picked: plain TowerFall";
+	$("modsToggle").textContent = modState.off ? "Off" : "On";
+	$("modsToggle").setAttribute("aria-pressed", String(!modState.off));
+	$("modsPanel").classList.toggle("off", modState.off);
 	const missing = Mods.missingDependencies(catalog, enabledCatalogMods());
 	$("modWarning").textContent = missing.length ? `Also needs mods that aren't available here: ${missing.join(", ")}.` : "";
+	patchAhead();
+}
+
+// Patching TowerFall.exe for FortRise takes a while the first time (cached afterwards: 12 s on a
+// fast Mac, much longer on a phone), and doesn't depend on the mods picked. So once FortRise will
+// run, it starts in the background (BrowserHost.PrePatch) while the player is still on this
+// screen, and Play only waits for what's left. Resolves to the FortRise version.
+let fortRiseReady = null;
+function patchAhead() {
+	if (fortRiseReady || !useFortRise() || !self.wasm?.exports) return;
+	fortRiseReady = syncFortRise(() => {}).then(async (version) => {
+		await self.wasm.exports.BrowserHost.PrePatch(version, new URL("_framework/", location.href).href, assemblyFiles());
+		return version;
+	});
+	fortRiseReady.catch((e) => {
+		console.warn("[fortrise] Couldn't start patching ahead:", e);
+		fortRiseReady = null;
+	});
 }
 
 $("modList").addEventListener("change", (e) => {
@@ -241,10 +414,24 @@ $("modList").addEventListener("click", (e) => {
 	Mods.saveState(modState);
 	renderMods();
 });
+// All mods on or off at once; the picks stay for when they're turned back on.
+$("modsToggle").addEventListener("click", () => {
+	modState.off = !modState.off;
+	Mods.saveState(modState);
+	renderMods();
+});
 $("addMod").addEventListener("click", () => $("modFile").click());
 $("modFile").addEventListener("change", async () => {
+	$("error").textContent = "";
 	for (const file of $("modFile").files) {
-		const added = await Mods.addZip(file);
+		let added;
+		try {
+			added = await Mods.addZip(file);
+		} catch (e) {
+			console.error(e);
+			$("error").textContent = String(e?.message ?? e);
+			continue;
+		}
 		// A zip matching a catalog file (e.g. after a failed download) just fills that in.
 		if (!catalog.some((m) => m.entry.file.sha256 === added.sha256) && !modState.custom.some((c) => c.sha256 === added.sha256)) {
 			modState.custom.push({ ...added, enabled: true });
@@ -260,7 +447,7 @@ async function prepareMods() {
 	status("Getting mods…");
 	$("bar").hidden = false;
 	const shas = await Mods.ensureFiles(enabledCatalogMods(), (done, total) => progress(done / total));
-	shas.push(...modState.custom.filter((c) => c.enabled).map((c) => c.sha256));
+	shas.push(...enabledCustomMods().map((c) => c.sha256));
 	await Mods.writeEnabled(shas);
 }
 
@@ -305,6 +492,19 @@ function gameFilesHost() {
 // Servers that host the game files (a private file host, or this one in private mode) win;
 // otherwise use what the player imported before, or ask them for their TowerFall folder. An
 // unreachable file host falls back to the copy already imported from it.
+// Asks the browser to keep the site's storage (the imported game, mods and saves) instead of
+// clearing it when space runs low, or (Safari) after a week without a visit. Browsers decide
+// themselves whether to grant it; asking again changes nothing once granted.
+async function keepStorage() {
+	try {
+		if (navigator.storage?.persist && !(await navigator.storage.persisted())) {
+			console.log(`[storage] persistent: ${await navigator.storage.persist()}`);
+		}
+	} catch (e) {
+		console.warn("[storage]", e);
+	}
+}
+
 async function ensureGameFiles() {
 	status("Checking game files…");
 	const server = await fromServer(gameFilesHost());
@@ -380,6 +580,39 @@ function offerMusic(host) {
 	});
 }
 
+// For steps with no telling how long they take (FortRise patching TowerFall.exe the first time,
+// then loading each mod): shows the time passing and what it's doing, from its log, and how far
+// patching is while it patches.
+function showActivity(text) {
+	const started = performance.now();
+	let doing = "";
+	let patched = 100;
+	onConsoleLine = (line) => {
+		const report = /^\[progress\] patch (\d+)$/.exec(line);
+		if (report) {
+			patched = Number(report[1]);
+			$("bar").classList.toggle("busy", patched >= 100);
+			progress(patched / 100);
+			return;
+		}
+		const logged = /^\[log\] \[Information\]\[(?:FortRise|Mods)\] (?:\[\w+\] )?(.+)/.exec(line);
+		if (logged) doing = logged[1];
+	};
+	const tick = () => {
+		status(`${text} ${Math.floor((performance.now() - started) / 1000)} s`);
+		detail(patched < 100 ? `${doing} ${patched}%` : doing);
+	};
+	tick();
+	const timer = setInterval(tick, 250);
+	$("bar").classList.add("busy");
+	return () => {
+		clearInterval(timer);
+		onConsoleLine = null;
+		$("bar").classList.remove("busy");
+		detail("");
+	};
+}
+
 function showProgress(done, total) {
 	progress(done / total);
 	detail(`${formatMB(done)} / ${formatMB(total)}`);
@@ -425,23 +658,71 @@ function acceptFolders(button, take) {
 	const onDrop = (e) => {
 		e.preventDefault();
 		const dt = e.dataTransfer;
+		// A zip of the folder, dropped on its own.
+		const zip = dt.files.length === 1 && /\.zip$/i.test(dt.files[0].name) ? dt.files[0] : null;
+		if (zip) return run(() => fromZip(zip), "zip");
 		// Read the entries now: DataTransfer items are only valid during the event.
 		const entries = fromDataTransfer(dt);
 		run(() => entries, "drop");
 	};
+	// The pick panel's other ways in: a zip file, or a link (see useLink).
+	if (button === $("choose")) {
+		$("chooseZip").onclick = () => {
+			$("zipFile").onchange = () => {
+				const zip = $("zipFile").files[0];
+				$("zipFile").value = "";
+				if (zip) run(() => fromZip(zip), "zip");
+			};
+			$("zipFile").click();
+		};
+		$("linkForm").onsubmit = (e) => {
+			e.preventDefault();
+			const link = $("linkInput").value.trim();
+			if (link) run(() => useLink(link), "zip-url");
+		};
+	}
 	addEventListener("dragover", onDragOver);
 	addEventListener("drop", onDrop);
 	return () => {
 		button.onclick = null;
+		if (button === $("choose")) $("chooseZip").onclick = $("linkForm").onsubmit = null;
 		removeEventListener("dragover", onDragOver);
 		removeEventListener("drop", onDrop);
 	};
 }
 
+// A link pasted on the pick panel: a private file host (its base URL, or a whole page link with
+// #gamefiles=), which is remembered like a #gamefiles= link and used from then on (the page reloads
+// to take it), or a zip of the TowerFall folder, whose entries are returned to import.
+async function useLink(link) {
+	const given = link.match(/[#&]gamefiles=([^&]*)/);
+	let url;
+	try {
+		url = new URL(given ? decodeURIComponent(given[1]) : link, location.href).href;
+	} catch {
+		throw new Error("That doesn't look like a link.");
+	}
+	if (!/\.zip$/i.test(new URL(url).pathname)) {
+		const host = url.endsWith("/") ? url : url + "/";
+		if (await fromServer(host)) {
+			try {
+				localStorage.setItem(HOST_KEY, host);
+			} catch {}
+			location.reload();
+			return new Promise(() => {}); // (the page is going away)
+		}
+	}
+	try {
+		return await fromZip(url);
+	} catch (e) {
+		throw new Error(`No game files found at that link: it isn't a game-file host, and as a zip: ${e?.message ?? e}`);
+	}
+}
+
 // Public site: the player supplies their own copy, by picking or dropping the install folder.
 function askForGame() {
 	const ask = () => {
-		status("Choose your TowerFall folder");
+		status("Bring your TowerFall");
 		$("bar").hidden = true;
 		$("pick").hidden = false;
 	};
@@ -498,8 +779,22 @@ function tfexServer() {
 
 async function startDotnet() {
 	status("Starting .NET runtime…");
+	// The bar follows the runtime's files (the app, the framework and the WebAssembly) as they
+	// arrive, then shows it's busy while the runtime compiles and starts, which takes a while on a
+	// phone and can't be measured.
+	$("bar").hidden = false;
+	progress(0);
 	const { dotnet } = await import("./_framework/dotnet.js");
-	let builder = dotnet.withConfig({});
+	let builder = dotnet.withConfig({}).withModuleConfig({
+		onDownloadResourceProgress: (loaded, total) => {
+			progress(loaded / total);
+			detail(`${loaded} / ${total} files`);
+			if (loaded >= total) {
+				$("bar").classList.add("busy");
+				detail("");
+			}
+		},
+	});
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
 	const server = tfexServer();
 	if (server.url) builder = builder.withEnvironmentVariable("TFEX_SERVER", server.url).withEnvironmentVariable("TFEX_SERVER_FORCE", server.force ? "1" : "0");
@@ -541,6 +836,8 @@ async function startDotnet() {
 
 	await runtime.runMain();
 	await exports.BrowserHost.PreInit();
+	$("bar").classList.remove("busy");
+	detail("");
 	return exports;
 }
 
@@ -551,6 +848,22 @@ async function main() {
 		status("Setting up…");
 		await new Promise((resolve) => setTimeout(resolve, 5000));
 	}
+	// The worker can also take control of this page before it reloads it (clients.claim), and then
+	// no reload comes: the page is controlled but was loaded without the headers. Reload once.
+	// (Without session storage, no reload: it couldn't tell it had already tried.)
+	const RELOADED = "towerfall.coiReload";
+	const session = (f) => {
+		try {
+			return f(sessionStorage);
+		} catch {
+			return null;
+		}
+	};
+	if (!self.crossOriginIsolated && navigator.serviceWorker?.controller && session((s) => s.getItem(RELOADED) !== "1" && (s.setItem(RELOADED, "1"), true))) {
+		location.reload();
+		return;
+	}
+	session((s) => s.removeItem(RELOADED));
 	if (!self.crossOriginIsolated) {
 		// coi-serviceworker.js reloads the page once it's installed; if we're still not isolated,
 		// the browser blocked it (e.g. private browsing) or the page isn't on https/localhost.
@@ -563,7 +876,10 @@ async function main() {
 	catalog = await Mods.loadCatalog();
 	await renderMods();
 	const play = $("play");
-	const noIntro = new URLSearchParams(location.search).has("nointro");
+	// The game opens on the main menu: no intro, and past the title screen (see startMode below).
+	// ?intro starts it the way the desktop game does.
+	const showIntro = new URLSearchParams(location.search).has("intro");
+	const noIntro = !showIntro;
 	let autoplay = new URLSearchParams(location.search).has("autoplay");
 	for (;;) {
 		status("Ready");
@@ -584,27 +900,38 @@ async function main() {
 			await prepareMods();
 			break;
 		} catch (e) {
-			if (!(e instanceof Mods.ModDownloadError)) throw e;
 			$("bar").hidden = true;
+			if (e instanceof Mods.StorageFullError) {
+				$("error").textContent = e.message;
+				continue;
+			}
+			if (!(e instanceof Mods.ModDownloadError)) throw e;
 			$("error").innerHTML = `${escapeHtml(e.message)} Download it from <a href="${escapeHtml(e.mod.entry.page)}" target="_blank" rel="noopener">its GameBanana page</a> and add it with "Add a mod zip", then press Play again.`;
 		}
 	}
 	$("change").hidden = true;
 	$("dw").hidden = true;
 	stopDarkWorldOffer();
+	// (After a click: some browsers only grant it to a page the player has interacted with.)
+	keepStorage();
 
-	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch.
-	if (touchOn) await exports.BrowserHost.EnableTouchGamepad();
+	// With the on-screen controls on, Init() plugs their virtual gamepad in at launch; with sound
+	// set to effects, the game's music stays off from the start.
+	await exports.BrowserHost.ShowTouchControls(touchOn);
+	await exports.BrowserHost.SetGameMusic(sound !== "effects");
 
 	if (useFortRise()) {
 		status("Getting FortRise…");
 		$("bar").hidden = false;
-		const version = await syncFortRise(showProgress);
-		progress(1);
-		detail("");
-		// Patching TowerFall.exe takes a while the first time (it's cached afterwards).
-		status(`Starting FortRise ${version}…`);
-		await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+		const version = await (fortRiseReady ?? Promise.reject()).catch(() => syncFortRise(showProgress));
+		// Patching TowerFall.exe takes a while the first time (it's cached afterwards), and so does
+		// loading the mods.
+		const stopActivity = showActivity(`Starting FortRise ${version}…`);
+		try {
+			await exports.BrowserHost.Init(noIntro, version, new URL("_framework/", location.href).href, assemblyFiles());
+		} finally {
+			stopActivity();
+		}
 	} else {
 		await exports.BrowserHost.Init(noIntro, null, null, null);
 	}
@@ -613,6 +940,7 @@ async function main() {
 	host = exports.BrowserHost;
 	if (pendingMusic) offerMusic(host);
 	await applyTouch();
+	if (useFortRise()) watchAiTypes().catch(console.error);
 
 	// TowerFall is a 60 Hz game. On high-refresh displays, only tick on the animation frames
 	// that bring us to the next 60 Hz slot (?uncapped ticks on every animation frame).
@@ -629,8 +957,15 @@ async function main() {
 		const text = e.clipboardData?.getData("text");
 		if (text) exports.BrowserHost.SetClipboardText(text);
 	});
-	const startMode = new URLSearchParams(location.search).get("mode");
+	const startMode = new URLSearchParams(location.search).get("mode") ?? (showIntro ? null : "menu");
 	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
+	// The Stats panel and performance reports (stats.js).
+	const server = tfexServer();
+	startStats(exports.BrowserHost, { serverUrl: server.url, official: server.url === TFEX_SERVERS.official, version: new URL(import.meta.url).searchParams.get("v") ?? "" });
+	// ?slowcpu=N (or towerfallSlowCpu(N) from the console), for testing: run like an N times slower computer.
+	self.towerfallSlowCpu = (factor) => exports.BrowserHost.SetSlowCpu(factor);
+	const slowCpu = Number(new URLSearchParams(location.search).get("slowcpu"));
+	if (slowCpu > 1) await exports.BrowserHost.SetSlowCpu(slowCpu);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}
@@ -653,8 +988,8 @@ async function main() {
 			fail(e);
 			return;
 		}
-		// SDL creates its AudioContext lazily, so keep the mute state applied.
-		applyMute();
+		// SDL creates its AudioContext lazily, so keep the sound setting applied.
+		applyGain();
 		if (keepRunning) {
 			requestAnimationFrame(frame);
 		} else if (await exports.BrowserHost.WantsRestart()) {

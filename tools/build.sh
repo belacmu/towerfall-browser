@@ -23,6 +23,12 @@ dotnet publish web/TowerFallBrowser.csproj -c Release -p:RunAOTCompilation=$aot 
 FW=$PUB/wwwroot/_framework
 # Fix Mono's init when -sWASMFS is enabled (from r58Playz/fna-wasm-threads).
 perl -pi -e 's/FS_createPath\("\/","usr\/share",!0,!0\)/FS_createPath("\/usr","share",!0,!0)/' $FW/dotnet.runtime.*.js
+# The runtime's forceThreadMemoryViewRefresh calls memory.grow(0) on every pump of the game thread's
+# synchronization context (many times a frame) to pick up memory another thread grew, in case the
+# thread was paused by a debugger before V8 told it. That's 2% of the game thread in an online match.
+# Check the buffer the way Emscripten's own heap accessors do (memory.buffer !== HEAPU8.buffer).
+perl -pi -e '$n += s/([A-Za-z_\$]+)\.grow\(0\),(\1\.buffer!==[A-Za-z_\$]+\.HEAPU8\.buffer&&[A-Za-z_\$]+\.updateMemoryViews\(\))/$2/g; END { exit($n == 1 ? 0 : 1) }' $FW/dotnet.runtime.*.js \
+	|| { echo "memory view refresh patch did not apply" >&2; exit 1; }
 # Transfer the `.canvas` element to the deputy thread (the C# main thread) so FNA can render there.
 perl -pi -e 's/var offscreenCanvases=\{\};/var offscreenCanvases={};if(globalThis.window&&!window.TRANSFERRED_CANVAS){transferredCanvasNames=[".canvas"];window.TRANSFERRED_CANVAS=true;}/' $FW/dotnet.native.*.js
 # Emscripten bug: findCanvasEventTarget("canvas") returns the first offscreen canvas's *key*

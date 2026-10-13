@@ -4,6 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FAUDIO_VERSION=26.10
+FAUDIO_COMMIT=6839b88e304a046ae1a609ff14a085371e02a4e0 # what the tag pointed at (a tag can move)
+SDL_COMMIT=5848e584a1b606de26e3dbd1c7e4ecbc34f807a6 # release-3.4.4, for its headers
 want="$FAUDIO_VERSION $(cat patches/FAudio.patch tools/build-faudio.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
 if [ "${1:-}" = "--if-needed" ] && [ -f vendor/statics/FAudio.a ] && [ "$(cat vendor/FAudio/.stamp 2>/dev/null)" = "$want" ]; then
 	exit 0
@@ -13,12 +15,14 @@ source tools/emenv.sh
 if [ "$(cat vendor/FAudio/.stamp 2>/dev/null)" != "$want" ]; then
 	rm -rf vendor/FAudio
 	git clone --quiet --depth 1 -b $FAUDIO_VERSION https://github.com/FNA-XNA/FAudio vendor/FAudio
+	[ "$(git -C vendor/FAudio rev-parse HEAD)" = "$FAUDIO_COMMIT" ] || { echo "FAudio $FAUDIO_VERSION is no longer $FAUDIO_COMMIT" >&2; exit 1; }
 	patch -d vendor/FAudio -p1 --forward < patches/FAudio.patch
 	echo "$want" > vendor/FAudio/.stamp
 fi
 if [ ! -d vendor/SDL3/include ]; then
 	git clone --depth 1 --filter=blob:none --sparse -b release-3.4.4 https://github.com/libsdl-org/SDL vendor/SDL3
 	git -C vendor/SDL3 sparse-checkout set include
+	[ "$(git -C vendor/SDL3 rev-parse HEAD)" = "$SDL_COMMIT" ] || { echo "SDL release-3.4.4 is no longer $SDL_COMMIT" >&2; exit 1; }
 fi
 
 OUT=vendor/faudio-build

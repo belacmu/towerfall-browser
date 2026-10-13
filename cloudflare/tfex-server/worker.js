@@ -2,14 +2,20 @@
 // use WebSocket hibernation so idle connections (players sitting in menus) cost nothing.
 //  - /ws: one Matchmaker object holds every lobby, join code and quick play queue.
 //  - /room/<id>, /ping_measurement/<id>: one SignalRoom object per room.
-//  - GET /turn: ICE servers (STUN, and Cloudflare TURN credentials when configured) for browsers.
+//  - GET /status (Authorization: Bearer <STATUS_KEY>): counts of connections, lobbies and matches,
+//    so a redeploy can wait until nobody is playing (tools/deploy-tfex-server.sh).
+//  - GET /turn?room=<id>&peer=<uuid>: ICE servers (STUN, and Cloudflare TURN credentials when
+//    configured) for browser pages whose peer is in that lobby.
+//  - POST /report, GET /reports: the pages' performance reports (reports.js), kept in one Reports
+//    object.
 // The logic lives in matchmaker.js and signal.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
-import { Matchmaker } from "./matchmaker.js";
-import { SignalRoom } from "./signal.js";
+import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
+import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
-import { iceServers } from "./turn.js";
+import { iceServers, STUN_ONLY } from "./turn.js";
+import { KEEP, LIST_LIMIT, MAX_REPORT, parseReport, RateLimit } from "./reports.js";
 
 export default {
 	async fetch(request, env) {
@@ -17,6 +23,9 @@ export default {
 		const route = parseRoute(url);
 		if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
 			if (url.pathname === "/turn") return turn(request, env);
+			if (url.pathname === "/status") return status(request, env);
+			if (url.pathname === "/report") return report(request, env);
+			if (url.pathname === "/reports") return reports(request, env);
 			if (url.pathname === "/") {
 				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
 			}
@@ -28,20 +37,74 @@ export default {
 			return new Response("Forbidden", { status: 403 });
 		}
 		const name = route.kind === "ws" ? "matchmaker" : `${route.kind}:${route.roomId}`;
+		// The client's address, for per-address limits (the Durable Object only sees the Worker).
+		request = new Request(request);
+		request.headers.set("X-Client-IP", clientIp(request) ?? "");
 		const ns = route.kind === "ws" ? env.MATCHMAKER : env.ROOMS;
 		return ns.get(ns.idFromName(name)).fetch(request);
 	},
 };
 
+// Only browsers ask (desktop TF.EX has its own ICE servers), and relay credentials only go to a
+// page whose peer is in the lobby it names: anyone else gets STUN.
 async function turn(request, env) {
 	const origin = request.headers.get("Origin");
-	if (!originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
-	const headers = { "Cache-Control": "no-store", Vary: "Origin" };
-	if (origin) headers["Access-Control-Allow-Origin"] = origin;
+	if (!origin || !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
 	if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "GET" } });
 	if (request.method !== "GET") return new Response("Method not allowed", { status: 405, headers });
-	return Response.json({ iceServers: await iceServers(env) }, { headers });
+	const params = new URL(request.url).searchParams;
+	const room = params.get("room") ?? "";
+	const peer = (params.get("peer") ?? "").toLowerCase();
+	let member = false;
+	if (/^[A-Za-z0-9_-]{1,64}$/.test(room) && /^[0-9a-f-]{36}$/.test(peer)) {
+		const query = new URL("https://matchmaker/member");
+		query.search = new URLSearchParams({ room, peer }).toString();
+		member = (await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch(query)).ok;
+	}
+	return Response.json({ iceServers: member ? await iceServers(env) : STUN_ONLY }, { headers });
 }
+
+// Whoever has STATUS_KEY (a wrangler secret).
+function hasStatusKey(request, env) {
+	const given = new TextEncoder().encode(request.headers.get("Authorization") ?? "");
+	const expected = new TextEncoder().encode(`Bearer ${env.STATUS_KEY}`);
+	return !!env.STATUS_KEY && env.STATUS_KEY.length >= 16 && given.byteLength === expected.byteLength && crypto.subtle.timingSafeEqual(given, expected);
+}
+
+// Only for whoever has STATUS_KEY; without it the endpoint doesn't exist.
+async function status(request, env) {
+	if (!hasStatusKey(request, env)) return new Response("Not found", { status: 404 });
+	const stats = await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch("https://matchmaker/stats");
+	return new Response(stats.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}
+
+// A page's performance report (reports.js), from the site's own origins.
+async function report(request, env) {
+	const origin = request.headers.get("Origin");
+	if (!origin || !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
+	if (request.method === "OPTIONS") {
+		return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" } });
+	}
+	if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers });
+	if (Number(request.headers.get("Content-Length") ?? 0) > MAX_REPORT) return new Response("Too large", { status: 413, headers });
+	const forward = new Request("https://reports/add", { method: "POST", body: await request.text(), headers: { "X-Client-IP": clientIp(request) ?? "" } });
+	const r = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(forward);
+	return new Response(null, { status: r.status, headers });
+}
+
+// The stored reports, for whoever has STATUS_KEY.
+async function reports(request, env) {
+	if (!hasStatusKey(request, env)) return new Response("Not found", { status: 404 });
+	const since = Number(new URL(request.url).searchParams.get("since") ?? 0) || 0;
+	const r = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(`https://reports/list?since=${since}`);
+	return new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}
+
+const clientIp = (request) => request.headers.get("CF-Connecting-IP");
+// A frame's size before decoding it.
+const frameSize = (message) => (typeof message === "string" ? message.length : message.byteLength);
 
 // Wraps hibernatable WebSockets as the core's connections. Each socket's state rides along as its
 // attachment (at most 2 KB), so it survives hibernation.
@@ -87,6 +150,8 @@ class Sockets {
 	}
 }
 
+const FLUSH_MS = 5000;
+
 const text = (message) => (typeof message === "string" ? message : new TextDecoder().decode(message));
 
 export class MatchmakerObject extends DurableObject {
@@ -94,10 +159,21 @@ export class MatchmakerObject extends DurableObject {
 		super(ctx, env);
 		this.sockets = new Sockets(ctx);
 		this.alarmAt = null;
+		// Lobbies change on every pick in archer select; storage gets each changed one at most every
+		// few seconds (the free plan allows 100,000 row writes a day). A Durable Object only
+		// hibernates after some seconds without events, so the last changes are written before.
+		this.dirty = new Map(); // RoomId -> room
+		this.flushTimer = null;
 		this.core = new Matchmaker({
 			persist: {
-				save: (room) => ctx.storage.put(`room:${room.lobby.RoomId}`, room),
-				remove: (roomId) => ctx.storage.delete(`room:${roomId}`),
+				save: (room) => {
+					this.dirty.set(room.lobby.RoomId, room);
+					this.flushTimer ??= setTimeout(() => this.flush(), FLUSH_MS);
+				},
+				remove: (roomId) => {
+					this.dirty.delete(roomId);
+					ctx.storage.delete(`room:${roomId}`);
+				},
 			},
 		});
 		ctx.blockConcurrencyWhile(async () => {
@@ -107,15 +183,31 @@ export class MatchmakerObject extends DurableObject {
 		});
 	}
 
-	async fetch() {
+	async fetch(request) {
+		const url = new URL(request.url);
+		if (url.pathname === "/stats") return Response.json(this.core.stats());
+		if (url.pathname === "/member") {
+			const member = this.core.isMember(url.searchParams.get("room"), url.searchParams.get("peer"));
+			return new Response(null, { status: member ? 204 : 404 });
+		}
 		const { client, conn } = this.sockets.accept();
-		this.core.open(conn, Date.now());
+		this.core.open(conn, Date.now(), request.headers.get("X-Client-IP") || null);
 		this.schedule();
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
+	flush() {
+		this.flushTimer = null;
+		for (const [id, room] of this.dirty) this.ctx.storage.put(`room:${id}`, room);
+		this.dirty.clear();
+	}
+
 	webSocketMessage(ws, message) {
-		this.core.message(this.sockets.wrap(ws), text(message), Date.now());
+		const conn = this.sockets.wrap(ws);
+		if (frameSize(message) > MAX_FRAME) {
+			conn.close(1009, "message too big");
+			this.core.close(conn, Date.now());
+		} else this.core.message(conn, text(message), Date.now());
 		this.schedule();
 	}
 
@@ -158,12 +250,16 @@ export class SignalRoomObject extends DurableObject {
 
 	async fetch(request) {
 		const { client, conn } = this.sockets.accept();
-		this.room.open(conn, new URL(request.url).searchParams.get("peer"));
+		this.room.open(conn, new URL(request.url).searchParams.get("peer"), Date.now(), request.headers.get("X-Client-IP") || null);
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
 	webSocketMessage(ws, message) {
-		this.room.message(this.sockets.wrap(ws), text(message));
+		const conn = this.sockets.wrap(ws);
+		if (frameSize(message) > MAX_SIGNAL_FRAME) {
+			conn.close(1009, "message too big");
+			this.room.close(conn);
+		} else this.room.message(conn, text(message), Date.now());
 	}
 
 	webSocketClose(ws, code, reason) {
@@ -175,5 +271,33 @@ export class SignalRoomObject extends DurableObject {
 
 	webSocketError(ws) {
 		this.room.close(this.sockets.wrap(ws));
+	}
+}
+
+// The performance reports, in this object's SQLite storage (the newest KEEP).
+export class ReportsObject extends DurableObject {
+	constructor(ctx, env) {
+		super(ctx, env);
+		this.limit = new RateLimit();
+		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, report TEXT NOT NULL)");
+	}
+
+	async fetch(request) {
+		const url = new URL(request.url);
+		const sql = this.ctx.storage.sql;
+		if (url.pathname === "/add") {
+			if (!this.limit.allow(request.headers.get("X-Client-IP") ?? "")) return new Response(null, { status: 429 });
+			const report = parseReport(await request.text());
+			if (!report) return new Response(null, { status: 400 });
+			sql.exec("INSERT INTO reports (at, report) VALUES (?, ?)", Date.now(), report);
+			sql.exec("DELETE FROM reports WHERE id <= (SELECT MAX(id) FROM reports) - ?", KEEP);
+			return new Response(null, { status: 204 });
+		}
+		if (url.pathname === "/list") {
+			const since = Number(url.searchParams.get("since") ?? 0) || 0;
+			const rows = sql.exec("SELECT id, at, report FROM reports WHERE id > ? ORDER BY id LIMIT ?", since, LIST_LIMIT).toArray();
+			return Response.json({ reports: rows.map((r) => ({ id: r.id, at: r.at, report: JSON.parse(r.report) })) });
+		}
+		return new Response("Not found", { status: 404 });
 	}
 }

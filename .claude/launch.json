@@ -68,6 +68,111 @@
         "8787"
       ],
       "port": 8787
+    },
+    {
+      "name": "towerfall-webkit",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8086",
+        "--diag"
+      ],
+      "port": 8086
+    },
+    {
+      "name": "towerfall-variant-webkit",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8087",
+        "--diag"
+      ],
+      "port": 8087,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/variant-publish/wwwroot"
+      }
+    },
+    {
+      "name": "towerfall-baseline",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8084"
+      ],
+      "port": 8084,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/baseline-publish/wwwroot"
+      }
+    },
+    {
+      "name": "switch-main",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8085"
+      ],
+      "port": 8085,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/baseline-publish/wwwroot"
+      }
+    },
+    {
+      "name": "switch-branch",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8085"
+      ],
+      "port": 8085,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/variant-publish/wwwroot"
+      }
+    },
+    {
+      "name": "switch-site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8086"
+      ],
+      "port": 8086,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/site"
+      }
+    },
+    {
+      "name": "ab-base",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8080"
+      ],
+      "port": 8080,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/ab-base"
+      }
+    },
+    {
+      "name": "ab-new",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8080"
+      ],
+      "port": 8080,
+      "env": {
+        "TOWERFALL_WWW": "web/bin/ab-new"
+      }
+    },
+    {
+      "name": "towerfall-public",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8088",
+        "--public"
+      ],
+      "port": 8088
     }
   ]
 }

@@ -9,9 +9,16 @@ don't do `webkitdirectory` or folder drops), so a phone can't import the game fi
 Instead the public site loads them from a private file host you run, `cloudflare/`:
 
 - an **R2 bucket** holds your TowerFall install (`tools/upload-gamefiles.sh`), laid out like
-  `tools/serve.py`'s private mode: `gamefiles/manifest.json` plus the files;
+  `tools/serve.py`'s private mode: `gamefiles/manifest.json` plus the files, and the game's files
+  (all but the music bank, 127 MB) once more as one pack under `gamefiles/packs/`
+  (`tools/pack-gamefiles.py`). The page reads the pack in about ten range requests of up to
+  16 MB, split into the files, where file by file took one request (and a round trip) for each of
+  ~1,200 files: with 0.2 s of latency, the first import went from 47 s to 26 s in a local test.
+  Files outside it, a pack that has gone, or a host that doesn't answer ranges load file by file;
 - a **Worker** (`cloudflare/worker.js`) serves it under `/<KEY>/gamefiles/*`, cross-origin (CORS),
-  where `KEY` is a long random secret. Every other path is a 404 that never touches the bucket;
+  where `KEY` is a long random secret (compared in constant time). Every other path is a 404 that
+  never touches the bucket. It answers ranges and conditional requests from R2, and packs (named by
+  their content) can be cached for good;
 - the **site** is told about the host once, by opening it with
   `#gamefiles=https://towerfall-private.<subdomain>.workers.dev/<KEY>/`. It remembers the host in
   that browser and imports from it, like private mode: the first visit copies the game into the
@@ -43,13 +50,14 @@ downloads it and starts the music (`BrowserHost.StartMusic`). Once it's stored, 
 music from the start. (Starting without it needed an FNA fix: a `WaveBank` whose constructor
 threw crashed the game from its finalizer; see `patches/FNA.patch`.)
 
-Costs: this fits Cloudflare's free tiers for one player. A first import on a device is about 1,600
-R2 reads and Worker requests, a later visit one of each (R2: 10M reads/month free; Workers free plan:
+Costs: this fits Cloudflare's free tiers for one player. A first import on a device is about a dozen
+R2 reads and Worker requests (and a preflight; ~1,200 for a page from before packs), a later visit
+one of each (R2: 10M reads/month free; Workers free plan:
 100k requests/day).
 
 ### What to try on each phone
 
-Open the link with `?autoplay&nointro` before the `#` (no Play tap needed, no audio), wait for the
+Open the link with `?autoplay` before the `#` (no Play tap needed, no audio), wait for the
 game files to copy, and see whether the title screen comes up.
 Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely first:
 
@@ -67,8 +75,16 @@ Check iPhone (Safari) and Android (Chrome). Things that may fail, most likely fi
   Safari only starts audio from inside a tap, click or key press, and SDL created its AudioContext
   after Play and resumed it from a timer (fine in Chrome), so iPhone was silent. The page now
   creates SDL's context during the Play click and resumes it on later taps when it isn't running
-  (`unlockAudio` in `main.js`). It also sets `navigator.audioSession.type = "playback"` (Safari 17+)
-  so the silent switch doesn't mute the game; the Sound button does that.
+  (`unlockAudio` in `main.js`). With sound on it sets `navigator.audioSession.type = "playback"`
+  (Safari 17+) so the silent switch doesn't mute the game; the Sound button does that. With sound
+  off it's `"ambient"`, which mixes with other apps' audio: as "playback", the silently running
+  game stopped music playing in other apps.
+- **Sound: effects** (the Sound button steps off → effects → on) is for playing over your own
+  music: the game's sound effects without its music (`GameMusic.cs` holds the XACT "Music"
+  category at zero), as `"ambient"`. Ambient audio obeys the silent switch, and no session type
+  avoids that while mixing: in WebKit (`DOMAudioSession.cpp`, `AudioSessionIOS.mm`) `ambient` and
+  `transient` are AVAudioSession's Ambient, `transient-solo` SoloAmbient, `playback` Playback and
+  `play-and-record` PlayAndRecord, and none gets `MixWithOthers`. Only a native app could have both.
 
 ## Step 2: touch controls (virtual gamepad)
 
@@ -86,6 +102,11 @@ that they drive (`web/TouchGamepad.cs`). They're on by default on touch screens
   mid-game (whether the game picks that up is still to be seen); turned off, the controls let go
   of everything and hide, and the pad stays connected. The page sends the controls' state when it
   changes (`SetTouchGamepad`), and `MainLoop` applies it on the game thread before each frame.
+- While the controls show, the keyboard isn't a player (it was player 2 behind the pad): a
+  Harmony postfix on `PlayerInput.AssignInputs` takes it out of the player list the game builds,
+  while a gamepad is left. The menus still take keys. TF.EX's own lists in online lobbies (with
+  `KeyboardInput`s standing in for remote players) are left alone. Turning the controls on or off
+  rebuilds the list once the main menu is up; a match in progress keeps its players.
 - Layout: a stick on the left half that follows the thumb past half its radius. A faint ring
   marks where it rests, across from the buttons on the right, and a touch anywhere on the left
   half pushes it from there towards the thumb at once: tapping off centre is a press in that

@@ -46,6 +46,7 @@ public static class Profiler
 		public long Ticks;
 		public long Bytes;
 		public int Calls;
+		public long Longest; // the longest single call (hitches)
 	}
 
 	private static readonly Dictionary<MethodBase, Entry> entries = new();
@@ -61,6 +62,18 @@ public static class Profiler
 		var report = new StringBuilder();
 		foreach (string spec in specs.Length > 0 ? specs : Defaults)
 		{
+			// lines:Type::Method times the stretches between the calls inside that one method.
+			if (spec.StartsWith("lines:", StringComparison.Ordinal))
+			{
+				report.Append(' ').Append(Lines.Start(harmony, spec["lines:".Length..]));
+				continue;
+			}
+			// callers:Type::Method counts the call stacks that reach every overload of that method.
+			if (spec.StartsWith("callers:", StringComparison.Ordinal))
+			{
+				report.Append(' ').Append(Callers.Start(harmony, spec["callers:".Length..]));
+				continue;
+			}
 			string[] parts = spec.Split("::");
 			// Namespace.* matches every type in that namespace (and below).
 			IEnumerable<Type> types = parts[0].EndsWith(".*")
@@ -105,7 +118,9 @@ public static class Profiler
 	{
 		if (entries.TryGetValue(__originalMethod, out Entry e))
 		{
-			e.Ticks += Stopwatch.GetTimestamp() - __state.Time;
+			long took = Stopwatch.GetTimestamp() - __state.Time;
+			e.Ticks += took;
+			e.Longest = Math.Max(e.Longest, took);
 			e.Bytes += GC.GetAllocatedBytesForCurrentThread() - __state.Bytes;
 			e.Calls++;
 		}
@@ -122,15 +137,172 @@ public static class Profiler
 			StateSpeedups.GetAllTicks = 0;
 			StateSpeedups.GetAllCalls = 0;
 		}
-		foreach (Entry e in entries.Values.Where(e => e.Calls > 0).OrderByDescending(e => Math.Max(e.Ticks / (double)Stopwatch.Frequency * 1000, e.Bytes / 1048576.0)))
+		Lines.Report(sb, frames);
+		Callers.Report(sb);
+		foreach (Entry e in entries.Values.Where(e => e.Calls > 0).OrderByDescending(e => Math.Max(Math.Max(e.Ticks / (double)Stopwatch.Frequency * 1000, e.Bytes / 1048576.0), e.Longest * 5000.0 / Stopwatch.Frequency)))
 		{
 			double ms = e.Ticks * 1000.0 / Stopwatch.Frequency / frames;
 			double total = e.Ticks * 1000.0 / Stopwatch.Frequency;
-			sb.Append($"\n[profile]   {ms,7:0.00} ms/frame {e.Calls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {e.Calls,6} calls {e.Bytes / 1048576.0,8:0.0} MB  {e.Name}");
+			sb.Append($"\n[profile]   {ms,7:0.00} ms/frame {e.Calls / (double)frames,6:0.0} calls/frame {total,8:0} ms in {e.Calls,6} calls {e.Bytes / 1048576.0,8:0.0} MB {e.Longest * 1000.0 / Stopwatch.Frequency,6:0.0} ms longest  {e.Name}");
 			e.Ticks = 0;
+			e.Longest = 0;
 			e.Bytes = 0;
 			e.Calls = 0;
 		}
 		return sb.ToString();
+	}
+
+	// Who calls a method: the distinct call stacks (8 frames) that reach it, by count and time.
+	private static class Callers
+	{
+		private static readonly Dictionary<string, (int Calls, long Ticks)> stacks = new();
+
+		public static string Start(Harmony harmony, string spec)
+		{
+			string[] parts = spec.Split("::");
+			Type type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(parts[0])).FirstOrDefault(t => t != null);
+			const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+			MethodBase[] targets = type?.GetMethods(all).Where(m => m.Name == parts[^1] && !m.ContainsGenericParameters && m.GetMethodBody() != null).ToArray() ?? Array.Empty<MethodBase>();
+			const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+			foreach (MethodBase m in targets)
+			{
+				harmony.Patch(m, prefix: new HarmonyMethod(typeof(Callers).GetMethod(nameof(Enter), flags)), postfix: new HarmonyMethod(typeof(Callers).GetMethod(nameof(Leave), flags)));
+			}
+			return $"callers of {spec}: {targets.Length} overloads;";
+		}
+
+		private static void Enter(out long __state) => __state = Stopwatch.GetTimestamp();
+
+		private static void Leave(long __state)
+		{
+			long took = Stopwatch.GetTimestamp() - __state;
+			var trace = new StackTrace(2, false);
+			string key = string.Join(" < ", trace.GetFrames().Take(8).Select(f => f.GetMethod() is MethodBase m ? $"{m.DeclaringType?.Name}.{m.Name}" : "?"));
+			lock (stacks)
+			{
+				stacks.TryGetValue(key, out var v);
+				stacks[key] = (v.Calls + 1, v.Ticks + took);
+			}
+		}
+
+		public static void Report(StringBuilder sb)
+		{
+			lock (stacks)
+			{
+				foreach (var (key, v) in stacks.OrderByDescending(kv => kv.Value.Ticks).Take(10))
+				{
+					sb.Append($"\n[callers] {v.Calls,6} calls {v.Ticks * 1000.0 / Stopwatch.Frequency,8:0.0} ms  {key}");
+				}
+				stacks.Clear();
+			}
+		}
+	}
+
+	// A line profiler for one method: a probe before each call inside it records the time since the
+	// previous probe, so each stretch (a call and the plain code after it, up to the next call) gets
+	// its share. Stretches are named by the call that starts them.
+	private static class Lines
+	{
+		private static string[] names = Array.Empty<string>();
+		private static long[] ticks = Array.Empty<long>();
+		private static int[] hits = Array.Empty<int>();
+		private static long[] longest = Array.Empty<long>();
+		private static int last = -1;
+		private static long lastTime;
+		private static int depth;
+		private static string method;
+
+		public static string Start(Harmony harmony, string spec)
+		{
+			string[] parts = spec.Split("::");
+			Type type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(parts[0])).FirstOrDefault(t => t != null);
+			const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+			// Type::.ctor for its (first) constructor.
+			MethodBase target = parts[^1] == ".ctor"
+				? type?.GetConstructors(all).FirstOrDefault()
+				: type?.GetMethods(all).FirstOrDefault(m => m.Name == parts[^1] && !m.ContainsGenericParameters);
+			if (target == null) return $"{spec}: not found;";
+			method = $"{type.Name}.{target.Name}";
+			const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+			harmony.Patch(target,
+				prefix: new HarmonyMethod(typeof(Lines).GetMethod(nameof(Enter), flags)),
+				finalizer: new HarmonyMethod(typeof(Lines).GetMethod(nameof(Leave), flags)),
+				transpiler: new HarmonyMethod(typeof(Lines).GetMethod(nameof(Transpile), flags)));
+			return $"lines in {method}: {names.Length} stretches;";
+		}
+
+		private static IEnumerable<CodeInstruction> Transpile(IEnumerable<CodeInstruction> instructions)
+		{
+			var list = new List<string> { "(start)" };
+			MethodInfo hit = typeof(Lines).GetMethod(nameof(Hit), BindingFlags.NonPublic | BindingFlags.Static);
+			var code = instructions.ToList();
+			for (int i = 0; i < code.Count; i++)
+			{
+				CodeInstruction ins = code[i];
+				if (!((ins.opcode == System.Reflection.Emit.OpCodes.Call || ins.opcode == System.Reflection.Emit.OpCodes.Callvirt || ins.opcode == System.Reflection.Emit.OpCodes.Newobj) && ins.operand is MethodBase callee))
+				{
+					continue;
+				}
+				// Before any prefix (constrained., tail., ...), which must come right before its call.
+				int at = i;
+				while (at > 0 && code[at - 1].opcode.OpCodeType == System.Reflection.Emit.OpCodeType.Prefix) at--;
+				var probe = new CodeInstruction(System.Reflection.Emit.OpCodes.Ldc_I4, list.Count);
+				code[at].MoveLabelsTo(probe);
+				code[at].MoveBlocksTo(probe);
+				code.Insert(at, new CodeInstruction(System.Reflection.Emit.OpCodes.Call, hit));
+				code.Insert(at, probe);
+				i += 2;
+				list.Add($"{(ins.opcode == System.Reflection.Emit.OpCodes.Newobj ? "new " : "")}{callee.DeclaringType?.Name}.{callee.Name}");
+			}
+			names = list.ToArray();
+			ticks = new long[names.Length];
+			hits = new int[names.Length];
+			longest = new long[names.Length];
+			return code;
+		}
+
+		private static void Enter()
+		{
+			if (depth++ == 0)
+			{
+				last = 0;
+				lastTime = Stopwatch.GetTimestamp();
+			}
+		}
+
+		private static Exception Leave(Exception __exception)
+		{
+			if (--depth == 0) Hit(-1);
+			return __exception;
+		}
+
+		private static void Hit(int site)
+		{
+			if (depth != 1) return; // only the outermost call
+			long now = Stopwatch.GetTimestamp();
+			if (last >= 0)
+			{
+				ticks[last] += now - lastTime;
+				longest[last] = Math.Max(longest[last], now - lastTime);
+				hits[last]++;
+			}
+			last = site;
+			lastTime = Stopwatch.GetTimestamp();
+		}
+
+		public static void Report(StringBuilder sb, int frames)
+		{
+			if (method == null) return;
+			double total = ticks.Sum() * 1000.0 / Stopwatch.Frequency;
+			sb.Append($"\n[lines]   {method}: {total / frames,7:0.00} ms/frame in its own stretches");
+			foreach (int i in Enumerable.Range(0, names.Length).Where(i => hits[i] > 0).OrderByDescending(i => Math.Max(ticks[i] / frames, longest[i])).Take(25))
+			{
+				double ms = ticks[i] * 1000.0 / Stopwatch.Frequency;
+				sb.Append($"\n[lines]   {ms / frames,7:0.000} ms/frame {hits[i] / (double)frames,6:0.0}/frame {longest[i] * 1000.0 / Stopwatch.Frequency,6:0.0} ms longest  #{i,-4} {names[i]}");
+			}
+			Array.Clear(ticks);
+			Array.Clear(longest);
+			Array.Clear(hits);
+		}
 	}
 }

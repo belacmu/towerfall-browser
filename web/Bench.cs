@@ -42,6 +42,31 @@ public static class Bench
 		Console.WriteLine($"[bench] done ({sink > 0})");
 	}
 
+	// "bench dyndata": the first DynamicData of each kind of entity (TF.EX takes one in many entity
+	// constructors) plus first reads of 5 of its fields, which is what a new kind of entity appearing
+	// mid-game costs. Run it before playing, while those types are still new to DynamicData.
+	public static void RunDynamicData(Assembly game)
+	{
+		Type entity = game.GetType("Monocle.Entity");
+		var types = new System.Collections.Generic.List<(string Name, double Ms)>();
+		var total = Stopwatch.StartNew();
+		foreach (Type type in game.GetTypes())
+		{
+			if (type.IsAbstract || type.IsValueType || type.ContainsGenericParameters || !entity.IsAssignableFrom(type)) continue;
+			var sw = Stopwatch.StartNew();
+			var dyn = new DynamicData(System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type));
+			int read = 0;
+			foreach (FieldInfo f in type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+			{
+				if (read++ == 5) break;
+				dyn.TryGet(f.Name, out object _);
+			}
+			types.Add((type.Name, sw.Elapsed.TotalMilliseconds));
+		}
+		types.Sort((a, b) => b.Ms.CompareTo(a.Ms));
+		Console.WriteLine($"[bench] first DynamicData of {types.Count} entity types: {total.Elapsed.TotalMilliseconds:0} ms in all, slowest: {string.Join(", ", types.GetRange(0, Math.Min(5, types.Count)).ConvertAll(t => $"{t.Name} {t.Ms:0.0} ms"))}");
+	}
+
 	public static Func<object, object> EmitGetter(FieldInfo field)
 	{
 		var method = new DynamicMethod("get_" + field.Name, typeof(object), new[] { typeof(object) }, field.DeclaringType, skipVisibility: true);

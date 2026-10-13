@@ -25,14 +25,18 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
   times a second. So each socket (and each lobby WebSocket) shares counters in wasm memory that
   the page bumps when something arrives or changes, and polls whose counter didn't move return
   without calling the page. In an idle match that took each player from ~2,400 calls a second to
-  ~700 (packet sends and reads), and the main thread from ~54 to ~42 ms busy per second.
+  ~700 (packet sends and reads), and the main thread from ~54 to ~42 ms busy per second. Sends
+  don't wait at all: `tfnet_send` is proxied asynchronously with a copy of the packet, which took
+  the game's threads from 16-30 ms a second blocked on sends to ~2 ms, and the game's time per
+  frame from 5.6-7.8 ms to 4.9-5.4 ms in an idle match.
 - Lobbies use .NET's `ClientWebSocket` to TF.EX's server setting plus `/ws`. TF.EX's official
   server (`wss://tfex-server.balatro-vs-matchmaking.eu`) **turns browsers away**: since the TF.EX
   0.19.1 release (2026-10-10, ~08:00 UTC) a handshake carrying an `Origin` header gets 403 (by
   ~09:00 UTC, 400), whatever the origin, while the same request without one gets 101. Browsers
   always send Origin and desktop TF.EX never does. Earlier that day two browsers met and played
-  there. We don't route around it (no Origin-stripping proxy); allowing browsers is the
-  operator's call. So **the site runs its own TF.EX-compatible server** (below), and the page
+  there. Still so on 2026-10-11 with TF.EX 0.19.2 out: 400 with the site's or a localhost Origin,
+  101 without. (0.19.2 is a client release; it changes nothing about this.) We don't route around
+  it (no Origin-stripping proxy); allowing browsers is the operator's call. So **the site runs its own TF.EX-compatible server** (below), and the page
   points browser players at it.
 
 ## Our server (`cloudflare/tfex-server`)
@@ -40,7 +44,8 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 Deployed at **`wss://tfex-server.tf-bd1030ec.workers.dev`** (2026-10-10), the site's default. A
 server implementing what TF.EX's client uses, written from TF.EX's GPL client source at
 v0.19.1 (`src/network/TF.EX.Domain/Services/MatchmakingService.cs`, the message models in
-`Models/WebSocket/`, and the menus that drive them). The official server isn't open source, so
+`Models/WebSocket/`, and the menus that drive them), and checked against v0.19.2 (no message
+changes: its `MatchmakingService.cs` change only shows desync warnings at match start). The official server isn't open source, so
 where the client leaves room the choices below are ours. Desktop TF.EX can use it too: set TF.EX's
 SERVER option (Mod options) to its `wss://` address.
 
@@ -50,7 +55,10 @@ SERVER option (Mod options) to its `wss://` address.
   `/ping_measurement/<roomId>?peer=<peerId>`: matchbox 0.12's protocol (`IdAssigned`, `NewPeer`,
   `PeerLeft`, `Signal`; `"KeepAlive"` ignored), except that the peer id comes from the URL (the
   lobby hands them out and GGRS matches seats to them) instead of being random. Without `?peer=`
-  it is random, like stock matchbox. Each room is a full mesh of up to 16 peers.
+  it is random, like stock matchbox. Each room is a full mesh of up to 16 peers. A peer id that
+  is already connected can't be taken over by another connection (peer ids are handed to
+  everyone in the lobby, spectators too), except from the same address (a client reconnecting)
+  or once the old connection has been quiet for 25 s (two and a half keep-alives): 4003.
 - `routes.js`: the endpoints and allowed origins. Browsers may connect from
   `https://belacmu.github.io` and from `http://localhost` / `http://127.0.0.1` on any port, plus any in
   `ALLOWED_ORIGINS` (comma-separated, `*` for any page). Connections without an Origin (desktop
@@ -59,17 +67,31 @@ SERVER option (Mod options) to its `wss://` address.
   `MatchmakerObject` Durable Object (it holds every lobby, so join codes and quick play are
   global) and each signaling room to its own `SignalRoomObject`. Both use WebSocket hibernation:
   sockets stay open while the object sleeps, connection state rides along as socket attachments,
-  and lobbies are stored (`room:<id>`) so they survive. A redeploy disconnects everyone.
-- `turn.js`: `GET /turn` (CORS, same origins as above) returns `{"iceServers": [...]}` for the
-  browser's peer connections: Cloudflare STUN plus TURN relay credentials valid for 6 hours,
+  and lobbies are stored (`room:<id>`) so they survive. Changed lobbies are written at most every
+  5 s (an object only hibernates after some seconds without events, so nothing is lost to it). A
+  redeploy disconnects everyone, and TF.EX ends a match whose signaling drops (that's its design;
+  we don't paper over it), so `tools/deploy-tfex-server.sh` deploys only when `GET /status` (counts
+  of connections, lobbies and matches; `Authorization: Bearer <STATUS_KEY>`, the key in
+  `~/.config/towerfall-tfex.env`) shows no match running, or with `--wait` once there's none.
+- `turn.js`: `GET /turn?room=<roomId>&peer=<peerId>` (CORS, same origins as above, and an Origin
+  is required: only browsers ask) returns `{"iceServers": [...]}` for the browser's peer
+  connections. For a peer that is a player or spectator in that lobby: Cloudflare STUN plus TURN
+  relay credentials valid for 6 hours,
   generated with the Cloudflare Realtime TURN key in the `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`
   secrets (key `tfex-server`, created 2026-10-10; `cf realtime turn keys list`). Without them, or
   if Cloudflare's API fails, STUN only. STUN alone is enough when both players' routers allow a
   direct path (the same network always does), but not behind stricter NATs (common on mobile
   carriers and some ISPs): there both players sat at "waiting for other players" until TF.EX
   gave up with a connection failure. The relay is used only when no direct path works.
+- Limits, since the server is open to anyone (TF.EX stays well inside them):
+  - Matchmaking: messages up to 336 KB (a skin chunk is the biggest), 100 at once then 20 a
+    second per connection, 16 connections per address, lobbies up to 64 KB serialized, 8
+    spectators. Past one: closed with 4029 (or refused, for lobbies and spectators).
+  - 20 wrong join codes from one address lock it out for 10 minutes (`TOO MANY TRIES`).
+  - Signaling: messages up to 64 KB, 200 at once then 20 a second per connection.
+  - `GetLobbies` leaves out peer ids (TF.EX's lobby list doesn't use them).
 - `local.mjs`: the same code under Node (18+, no dependencies), for development or self-hosting.
-- `test.mjs`: protocol tests (17) that talk to a server the way TF.EX and matchbox do, plus
+- `test.mjs`: protocol tests (22) that talk to a server the way TF.EX and matchbox do, plus
   in-process tests of the timed flows with a simulated clock. `node test.mjs` starts `local.mjs`;
   `node test.mjs --url ws://127.0.0.1:8787` tests another (e.g. `wrangler dev`, or a deployment).
 - `TFEX_PROTOCOL`: the TF.EX version the server was checked against. The hourly TF.EX updater
@@ -124,7 +146,7 @@ collections are never null.
 | `SeriesPickMap` | the side that lost the last game picks an unplayed tower (refused picks get the lobby back). The next game starts by itself once everyone is ready and the tower is set, or after 60 s with a random unplayed tower; a finished series restarts when everyone readies again. The server picks game 1's tower, since `MatchEnded` doesn't say which was played. A player leaving aborts the series (`PLAYER LEFT`) |
 | `EnterQuickPlay` / `ExitQuickPlay` | `QuickPlayStatus` counts to everyone searching; the first two with the same screen width (WiderSet) are matched into a `QuickPlay` lobby (`QuickPlayMatchFound`); it starts by itself 1.5 s after both have picked |
 | `SkinChunk` | relayed to the rest of the lobby with `from` = the sender's peer id |
-| `LeaveLobby` / disconnect | removed; `LeaveLobbyResponse`. When the host leaves, the others get one hostless lobby (TF.EX's cue that the host left) and the lobby closes: no host migration, since the host's GGRS role is fixed |
+| `LeaveLobby` / disconnect | removed; `LeaveLobbyResponse`. When the host leaves, the others get one hostless lobby (TF.EX's cue that the host left) and the lobby closes: no host migration, since the host's GGRS role is fixed. The same for a quick play lobby that someone leaves before its match (it can't take anyone new). Someone leaving mid-match starts the 33 s vote clock, so the lobby gets back to archer select even if nobody reports the match's end |
 
 Not done: quick play for more than two players, a timeout for quick-play players who never pick
 an archer, checking that both players report the same result. Tested end to end in browsers: a
@@ -144,8 +166,9 @@ awake for the match: about 75 GB-s for a 10-minute match, so roughly 170 such ma
 TURN relaying is billed per GB sent from Cloudflare to players, at $0.05/GB past 1,000 GB a month
 free (shared with the Realtime SFU, which we don't use). A relayed 10-minute two-player match
 moves tens of MB, and only matches without a direct path use it, so it stays free. The $1 budget
-alert on the account covers surprises; `/turn` hands credentials to anyone who asks (an Origin
-header is easy to fake), so a key can be deleted and replaced if they're ever abused.
+alert on the account covers surprises. `/turn` only hands credentials to a peer in a lobby, but
+anyone can make a lobby (and fake an Origin header), so a key can be deleted and replaced if
+they're ever abused.
 
 ## Status (2026-10-10)
 

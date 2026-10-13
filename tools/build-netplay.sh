@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-GGRS_FFI_COMMIT=16859a599ecf73475a90cd9596c7d9c0d52a8beb
+GGRS_FFI_COMMIT=cf60182621fa96d1f6541f66038350eaf14a8da6
 GGRS_COMMIT=12a2d476653873042df38496386415124693acb9
 # A nightly on LLVM 19, like Emscripten 3.1.56: newer LLVMs tag objects with WebAssembly features
 # (bulk-memory-opt, call-indirect-overlong) that its wasm-opt doesn't know.
@@ -18,7 +18,7 @@ RUST_TOOLCHAIN=nightly-2025-02-01
 SRC=vendor/netplay-src
 OUT=vendor/netplay
 
-want="$RUST_TOOLCHAIN $GGRS_FFI_COMMIT $GGRS_COMMIT $(cat netplay/*.patch netplay/matchbox-browser/Cargo.toml netplay/matchbox-browser/src/*.rs tools/build-netplay.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
+want="$RUST_TOOLCHAIN $GGRS_FFI_COMMIT $GGRS_COMMIT $(cat netplay/*.patch netplay/ggrs-ffi.Cargo.lock netplay/matchbox-browser/Cargo.toml netplay/matchbox-browser/src/*.rs tools/build-netplay.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
 [ -f $OUT/ggrs_ffi.a ] && [ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
 
 fetch() { # repo dir commit patch
@@ -46,11 +46,12 @@ export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+mutable-globals -C pa
 	rustup toolchain list | grep -q "^$RUST_TOOLCHAIN" || rustup toolchain install $RUST_TOOLCHAIN --profile minimal --component rust-src
 	patches=(--config "patch.crates-io.matchbox_socket.path=\"$ROOT/netplay/matchbox-browser\""
 		--config "patch.'https://github.com/Fcornaire/ggrs'.ggrs.path=\"$ROOT/$SRC/ggrs\"")
-	# Dependency versions this (older) compiler supports. The GGRS fork only declares a newer one.
-	rm -f Cargo.lock
-	cargo +$RUST_TOOLCHAIN generate-lockfile "${patches[@]}"
-	cargo +$RUST_TOOLCHAIN update "${patches[@]}" -p uuid --precise 1.18.1
-	cargo +$RUST_TOOLCHAIN rustc --release --target wasm32-unknown-emscripten --ignore-rust-version \
+	# Exactly the crate versions in netplay/ggrs-ffi.Cargo.lock (built and tested with), not whatever
+	# is newest on crates.io at build time. To update it: rm Cargo.lock; cargo +$RUST_TOOLCHAIN
+	# generate-lockfile with the patches below; cargo update -p uuid --precise 1.18.1 (a version this
+	# older compiler supports; the GGRS fork only declares a newer one); copy it back.
+	cp "$ROOT/netplay/ggrs-ffi.Cargo.lock" Cargo.lock
+	cargo +$RUST_TOOLCHAIN rustc --release --locked --target wasm32-unknown-emscripten --ignore-rust-version \
 		-Zbuild-std=std,panic_abort --crate-type staticlib "${patches[@]}"
 )
 # The archive's name is the P/Invoke library name TF.EX uses ("ggrs_ffi").

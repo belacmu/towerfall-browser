@@ -8,9 +8,15 @@
 //   curl 'localhost:9400/A/console?from=0'       console output of all threads (works while hung)
 //   curl 'localhost:9400/A/eval' --data 'js'     evaluate in the page
 //   curl 'localhost:9400/A/evalworkers' --data 'js'  evaluate in every worker thread
+//   curl 'localhost:9400/A/cpuprofile?s=10'      sample the page's and workers' CPU; each one's functions by self time
+//                                                (&callers=N adds the call paths of the N busiest;
+//                                                &hitches=N the N longest busy stretches and what ran)
 //   curl 'localhost:9400/A/catch', then 'localhost:9400/A/pauses'   stacks of uncaught exceptions in workers
 //   curl 'localhost:9400/quit'
-// Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400]
+// Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400] [--no-cache]
+// (--no-cache: no HTTP cache or service worker, for comparing builds served at the same address;
+// --window 390x844: the window size, e.g. a phone in portrait.)
+// (Add slowcpu=4 to the URL to make a player run like a 4x slower computer.)
 // (Another driver at the same time: a different --port and different player names, which name
 // the profiles.)
 import { spawn } from "node:child_process";
@@ -24,6 +30,8 @@ const opt = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) +
 const url = opt("--url", "http://localhost:8080/?mute&nointro&autoplay&mods=TF.EX");
 const names = opt("--players", "A,B").split(",");
 const port = Number(opt("--port", "9400"));
+const noCache = args.includes("--no-cache");
+const windowSize = opt("--window", "960,600").replace("x", ",");
 const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 // The real GPU where Chrome can use it headless (Metal on macOS); software rendering elsewhere,
 // which costs several CPU cores per running game.
@@ -41,7 +49,7 @@ async function launch(name, debugPort) {
 	children.push(spawn(chrome, [
 		"--headless=new", `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, "--no-first-run",
 		...GPU_FLAGS, "--autoplay-policy=no-user-gesture-required", "--mute-audio", // the page's audio runs, silently
-		"--window-size=960,600", "about:blank",
+		`--window-size=${windowSize}`, "about:blank",
 	], { stdio: "ignore" }));
 	let target;
 	for (let i = 0; i < 100 && !target; i++) {
@@ -99,11 +107,99 @@ async function launch(name, debugPort) {
 			ws.addEventListener("message", onMessage);
 			ws.send(JSON.stringify({ id, sessionId, method: "Runtime.evaluate", params: { expression, returnByValue: true, awaitPromise: true } }));
 		})));
+	const sessionSend = (sessionId, method, params = {}, timeout = 60_000) =>
+		new Promise((resolve) => {
+			const id = nextId++;
+			const timer = setTimeout(() => resolve({ error: "timeout" }), timeout);
+			const onMessage = (m) => {
+				const d = JSON.parse(m.data);
+				if (d.id !== id) return;
+				clearTimeout(timer);
+				ws.removeEventListener("message", onMessage);
+				resolve(d.result ?? { error: d.error });
+			};
+			ws.addEventListener("message", onMessage);
+			ws.send(JSON.stringify({ id, sessionId, method, params }));
+		});
+	// Samples every worker's CPU for `seconds` and returns each one's functions by self time
+	// (wasm functions show by name where the module has a name section).
+	const cpuProfile = async (seconds, callers = 0, hitches = 0) => {
+		// The page's main thread first (it paces the frames), then every worker.
+		const targets = [(m, p) => send(m, p), ...workerSessions.map((s) => (m, p) => sessionSend(s, m, p))];
+		await Promise.all(targets.map(async (t) => {
+			await t("Profiler.enable");
+			await t("Profiler.setSamplingInterval", { interval: 200 });
+			await t("Profiler.start");
+		}));
+		await sleep(seconds * 1000);
+		const profiles = await Promise.all(targets.map((t) => t("Profiler.stop")));
+		const out = [];
+		profiles.forEach((r, i) => {
+			const prof = r.profile;
+			if (!prof) return;
+			const byId = new Map(prof.nodes.map((n) => [n.id, n]));
+			const self = new Map();
+			for (const id of prof.samples) {
+				const f = byId.get(id).callFrame;
+				const name = f.functionName || `(${f.url.split("/").pop() || "anonymous"})`;
+				self.set(name, (self.get(name) ?? 0) + 1);
+			}
+			const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 40);
+			out.push(`== ${i ? `worker ${i}` : "page"}: ${prof.samples.length} samples`, ...top.map(([n, c]) => `${(100 * c / prof.samples.length).toFixed(1).padStart(5)}%  ${n}`));
+			// ?hitches=N: the N longest stretches of back-to-back busy samples (a hitch), with what ran.
+			if (hitches) {
+				const parent = new Map();
+				for (const n of prof.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+				const nameOf = (n) => n.callFrame.functionName || `(${n.callFrame.url.split("/").pop() || "anonymous"})`;
+				const idle = (id) => ["(idle)", "(program)", "(garbage collector)"].includes(nameOf(byId.get(id)));
+				const stretches = [];
+				let t = 0, start = -1, startT = 0;
+				prof.samples.forEach((id, k) => {
+					t += prof.timeDeltas[k] / 1000;
+					if (!idle(id) && start < 0) [start, startT] = [k, t];
+					if (idle(id) && start >= 0) {
+						stretches.push({ from: start, to: k, ms: t - startT, at: startT });
+						start = -1;
+					}
+				});
+				for (const h of stretches.sort((a, b) => b.ms - a.ms).slice(0, hitches)) {
+					const paths = new Map();
+					for (let k = h.from; k < h.to; k++) {
+						const chain = [];
+						for (let p = prof.samples[k]; p && chain.length < 8; p = parent.get(p)) chain.push(nameOf(byId.get(p)));
+						const key = chain.join(" < ");
+						paths.set(key, (paths.get(key) ?? 0) + 1);
+					}
+					out.push(`   busy ${h.ms.toFixed(0)} ms at ${(h.at / 1000).toFixed(1)} s, ${h.to - h.from} samples:`, ...[...paths].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, c]) => `      ${c}  ${k}`));
+				}
+			}
+			// ?callers=N: for the N busiest functions, the call paths (5 frames up) that reach them.
+			if (callers) {
+				const parent = new Map();
+				for (const n of prof.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+				const nameOf = (n) => n.callFrame.functionName || `(${n.callFrame.url.split("/").pop() || "anonymous"})`;
+				for (const [fn] of top.filter(([n]) => n !== "(idle)" && n !== "(program)").slice(0, callers)) {
+					const paths = new Map();
+					for (const id of prof.samples) {
+						if (nameOf(byId.get(id)) !== fn) continue;
+						const chain = [];
+						for (let p = parent.get(id); p && chain.length < 5; p = parent.get(p)) chain.push(nameOf(byId.get(p)));
+						const key = chain.join(" < ");
+						paths.set(key, (paths.get(key) ?? 0) + 1);
+					}
+					out.push(`   ${fn} called from:`, ...[...paths].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, c]) => `      ${c}  < ${k}`));
+				}
+			}
+		});
+		return out.join("\n") || "no profile";
+	};
 	ws.addEventListener("message", (m) => {
 		const d = JSON.parse(m.data);
 		if (d.method === "Target.attachedToTarget") {
 			workerSessions.push(d.params.sessionId);
+			// (Workers wait for this before running anything, so their earliest errors are seen too.)
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.enable" }));
+			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Log.enable" }));
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.runIfWaitingForDebugger" }));
 		} else if (d.method === "Debugger.paused" && catching.has(d.sessionId)) {
 			// An exception in a worker we're watching: record where, then let it continue.
@@ -114,6 +210,12 @@ async function launch(name, debugPort) {
 		} else if (d.method?.startsWith("Network.webSocket")) {
 			const q = d.params;
 			consoleLines.push(`network ${d.method.slice(8)}: ${q.url ?? ""}${q.response ? ` ${q.response.status}` : ""}${q.errorMessage ? ` ${q.errorMessage}` : ""}`);
+		} else if (d.method === "Runtime.exceptionThrown") {
+			const x = d.params.exceptionDetails;
+			consoleLines.push(`${d.sessionId ? "worker" : "page"} exception: ${x.exception?.description ?? x.text} ${x.url ?? ""}:${x.lineNumber ?? ""}`);
+		} else if (d.method === "Log.entryAdded") {
+			const e = d.params.entry;
+			consoleLines.push(`${d.sessionId ? "worker" : "page"} log ${e.level} (${e.source}): ${e.text} ${e.url ?? ""}`);
 		} else if (d.method === "Runtime.consoleAPICalled") {
 			const text = d.params.args.map((a) => a.value ?? a.description ?? "").join(" ");
 			consoleLines.push(`${d.sessionId ? "worker" : "page"} ${d.params.type}: ${text}`);
@@ -122,7 +224,14 @@ async function launch(name, debugPort) {
 	});
 	await send("Runtime.enable");
 	await send("Network.enable");
-	await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+	if (noCache) {
+		// Comparing builds served one after another at the same address: the HTTP cache or the service
+		// worker could otherwise hand the page the previous build's files.
+		await send("Network.setCacheDisabled", { cacheDisabled: true });
+		await send("Network.setBypassServiceWorker", { bypass: true });
+	}
+	await send("Log.enable");
+	await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
 	// The page main thread's stack right now (for hangs): pause, read, resume.
 	const stack = async () => {
 		await send("Debugger.enable");
@@ -136,7 +245,7 @@ async function launch(name, debugPort) {
 		await send("Debugger.disable");
 		return result;
 	};
-	return { name, send, consoleLines, stack, evalWorkers, catchWorkers, pauses };
+	return { name, send, consoleLines, stack, evalWorkers, catchWorkers, pauses, cpuProfile };
 }
 
 // Key events as the game sees them (SDL reads DOM keydown/keyup on the canvas' document).
@@ -195,6 +304,8 @@ http.createServer(async (req, res) => {
 			res.end(`watching ${await p.catchWorkers()} workers\n`);
 		} else if (action === "pauses") {
 			res.end(JSON.stringify(p.pauses, null, 1) + "\n");
+		} else if (action === "cpuprofile") {
+			res.end(await p.cpuProfile(Number(u.searchParams.get("s") ?? 10), Number(u.searchParams.get("callers") ?? 0), Number(u.searchParams.get("hitches") ?? 0)) + "\n");
 		} else if (action === "evalworkers") {
 			res.end(JSON.stringify(await p.evalWorkers(body), null, 1) + "\n");
 		} else if (action === "eval") {

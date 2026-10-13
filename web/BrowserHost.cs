@@ -72,6 +72,53 @@ public static partial class BrowserHost
 		});
 	}
 
+	private static Task prePatch;
+	private static bool fortRisePrepared;
+
+	// Patching TowerFall.exe for FortRise takes a while the first time (12 s on a fast Mac, far longer
+	// on a phone; cached afterwards), so the page starts it in the background while the player is
+	// still on its start screen, as soon as FortRise will run. Init then finds it done, or waits for
+	// the rest. Returns at once; arguments as for Init.
+	[JSExport]
+	internal static Task PrePatch(string fortriseVersion, string frameworkUrl, string[] assemblies)
+	{
+		prePatch ??= Task.Run(() =>
+		{
+			LinkFolders();
+			PrepareFortRise(frameworkUrl, assemblies);
+			ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
+			FortRisePatcher.EnsurePatched(GameAssembly, FortRiseDir, fortriseVersion, loggers, FortRiseLauncher.ReportPatchProgress);
+		});
+		return Task.CompletedTask;
+	}
+
+	private static void LinkFolders()
+	{
+		Directory.CreateDirectory(SaveDir);
+		foreach (string dir in new[] { GameDir, FortRiseDir })
+		{
+			string target = Root + dir;
+			Directory.CreateDirectory(target);
+			if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
+		}
+	}
+
+	// What patching needs: the app's assemblies where Cecil looks, and TowerFall.exe's references
+	// beside it.
+	private static void PrepareFortRise(string frameworkUrl, string[] assemblies)
+	{
+		if (fortRisePrepared) return;
+		MountAssemblies(frameworkUrl, assemblies);
+		// MonoMod resolves TowerFall.exe's references from the FortRise folder.
+		foreach (string dll in new[] { "FNA.dll", "Steamworks.NET.dll" })
+		{
+			File.Copy("/bin/" + dll, Path.Combine(FortRiseDir, dll), overwrite: true);
+		}
+		// ...and the framework from /bin.
+		Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
+		fortRisePrepared = true;
+	}
+
 	// fortriseVersion: null for the plain game. frameworkUrl/assemblies (FortRise only): where the
 	// app's assemblies are served and their "served-name|assembly-name.dll" pairs, for Cecil.
 	[JSExport]
@@ -79,13 +126,17 @@ public static partial class BrowserHost
 	{
 		try
 		{
-			Directory.CreateDirectory(SaveDir);
-			foreach (string dir in new[] { GameDir, FortRiseDir })
+			// A patch started ahead (PrePatch) must finish first: it works in the FortRise folder as
+			// the current directory. If it failed, launching patches again (and reports why).
+			try
 			{
-				string target = Root + dir;
-				Directory.CreateDirectory(target);
-				if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
+				prePatch?.Wait();
 			}
+			catch (Exception e)
+			{
+				Console.Error.WriteLine($"[fortrise] Patching ahead failed; patching again: {e.InnerException ?? e}");
+			}
+			LinkFolders();
 			// TFGame.GetSavePath() (Linux branch) resolves to $XDG_DATA_HOME/TowerFall. This must
 			// be set before anything touches TFGame, whose static fields capture the save path.
 			Environment.SetEnvironmentVariable("XDG_DATA_HOME", SaveDir);
@@ -101,6 +152,8 @@ public static partial class BrowserHost
 				}
 			}
 			Directory.SetCurrentDirectory("/");
+			// Before the game reads its sprite XML (see XmlSnapshotLists).
+			XmlSnapshotLists.Install();
 
 			if (fortriseVersion == null)
 			{
@@ -110,14 +163,7 @@ public static partial class BrowserHost
 			}
 			else
 			{
-				MountAssemblies(frameworkUrl, assemblies);
-				// MonoMod resolves TowerFall.exe's references from the FortRise folder.
-				foreach (string dll in new[] { "FNA.dll", "Steamworks.NET.dll" })
-				{
-					File.Copy("/bin/" + dll, Path.Combine(FortRiseDir, dll), overwrite: true);
-				}
-				// ...and the framework from /bin.
-				Environment.SetEnvironmentVariable("MONOMOD_DEPDIRS", "/bin");
+				PrepareFortRise(frameworkUrl, assemblies);
 				// The provider decides what's shown (see PlainConsoleLoggerProvider); don't filter before it.
 				ILoggerFactory loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(new PlainConsoleLoggerProvider()));
 				ModInstaller.Apply(FortRiseDir, loggers.CreateLogger("Mods"));
@@ -126,7 +172,9 @@ public static partial class BrowserHost
 				game = FortRiseLauncher.Start(GameAssembly, FortRiseDir, fortriseVersion, noIntro, loggers);
 				towerFall = game.GetType().Assembly;
 			}
-			TouchGamepad.AttachIfEnabled();
+			TouchGamepad.Init(game);
+			GameMusic.Init(game);
+			LoaderAi.Init(game);
 
 			// The constructor's GameData.CheckForDLC() also requires Steam to report the DLC as
 			// installed. In the browser, having the Dark World content is enough.
@@ -186,7 +234,11 @@ public static partial class BrowserHost
 				Invoke("BeforeLoop");
 				typeof(Game).GetField("gameTimer", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(game, System.Diagnostics.Stopwatch.StartNew());
 				started = true;
+				// (TFGame.Initialize, run by DoInitialize, loaded the save.)
+				UnlockArchers();
 				TfexPatches.Apply();
+				ReplayRecordFix.Install();
+				ReplayKeyStates.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
 			// then e.g. "test" is the base game's own command)...
@@ -196,7 +248,19 @@ public static partial class BrowserHost
 				// ...and TowerFall's background loading (game data, default match settings) is done.
 				commandsReady = menuFrames > 300 && towerFall.GetType("TowerFall.TFGame")?.GetProperty("Loaded", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is true;
 			}
-			if (startMode != null) ApplyStartMode();
+			if (startMode != null)
+			{
+				// (A convenience: if a mod has changed the menus, the game still starts.)
+				try
+				{
+					ApplyStartMode();
+				}
+				catch (Exception e)
+				{
+					startMode = null;
+					Console.Error.WriteLine($"[mode] {e}");
+				}
+			}
 			while (commandsReady && commands.TryDequeue(out string[] command))
 			{
 				RunGameCommand(command);
@@ -232,9 +296,26 @@ public static partial class BrowserHost
 				lastKeys = now;
 			}
 			TouchGamepad.Update();
+			GameMusic.Update();
+			LoaderAi.Update();
+			TickCatchUp.BeforeFrame();
 			long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
 			game.RunOneFrame();
-			frameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - frameStart;
+			if (slowCpu > 1)
+			{
+				// Busy for (slowCpu - 1) times as long again, as if this computer were that much slower.
+				long until = frameStart + (long)((System.Diagnostics.Stopwatch.GetTimestamp() - frameStart) * slowCpu);
+				while (System.Diagnostics.Stopwatch.GetTimestamp() < until) { }
+			}
+			long frameEnd = System.Diagnostics.Stopwatch.GetTimestamp();
+			frameTicks += frameEnd - frameStart;
+			int collections = GC.CollectionCount(0);
+			if (frameEnd - frameStart > worstFrameTicks) (worstFrameTicks, worstFrameGc) = (frameEnd - frameStart, collections != frameCollections);
+			frameCollections = collections;
+			if (lastFrameStart != 0) worstGapTicks = Math.Max(worstGapTicks, frameStart - lastFrameStart);
+			if (frameEnd - frameStart > System.Diagnostics.Stopwatch.Frequency / 60) longFrames++;
+			lastFrameStart = frameStart;
+			Diagnostics.Frame(frameEnd - frameStart);
 			ReportFrameRate();
 		}
 		catch (Exception e)
@@ -245,6 +326,35 @@ public static partial class BrowserHost
 			return Task.FromException<bool>(e);
 		}
 		return Task.FromResult((bool)runApplication.GetValue(game));
+	}
+
+	// Every archer can be picked from the start. The four secret ones (White, Yellow, Cyan, Purple:
+	// UnlockData.GetArcherUnlocked 4-7) count as found and introduced, as if earned, so no unlock
+	// sequence plays later either. Only their flags change; towers, variants and stats don't. The
+	// save keeps them once the game next writes it.
+	private static void UnlockArchers()
+	{
+		try
+		{
+			object save = towerFall.GetType("TowerFall.SaveData")?.GetField("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+			object unlocks = save?.GetType().GetField("Unlocks")?.GetValue(save);
+			if (unlocks == null) return;
+			int changed = 0;
+			foreach (string flag in new[] { "WhiteArcherRevealed", "WhiteArcherIntro", "YellowArcherRevealed", "YellowArcherIntro", "CyanArcherIntro", "PurpleArcherRevealed", "PurpleArcherIntro" })
+			{
+				FieldInfo field = unlocks.GetType().GetField(flag);
+				if (field?.GetValue(unlocks) is false)
+				{
+					field.SetValue(unlocks, true);
+					changed++;
+				}
+			}
+			if (changed > 0) Console.WriteLine("[unlocks] All archers unlocked.");
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[unlocks] {e}");
+		}
 	}
 
 	// Text the player pasted on the page (Ctrl+V), for the game's clipboard: SDL's is internal to
@@ -290,12 +400,21 @@ public static partial class BrowserHost
 		}
 	}
 
-	// On-screen controls (wwwroot/touch.js): a virtual gamepad, plugged in by Init() when enabled
-	// before it, or before the next frame when enabled later.
+	// The game's music on or off (the page's "Effects" sound setting: sound effects only), see
+	// GameMusic. Before Init() it applies from the start.
 	[JSExport]
-	internal static Task EnableTouchGamepad()
+	internal static Task SetGameMusic(bool on)
 	{
-		TouchGamepad.Enabled = true;
+		GameMusic.SetOn(on);
+		return Task.CompletedTask;
+	}
+
+	// On-screen controls (wwwroot/touch.js) shown or hidden: a virtual gamepad, plugged in by Init()
+	// when shown before it, or before the next frame when shown later (see TouchGamepad).
+	[JSExport]
+	internal static Task ShowTouchControls(bool shown)
+	{
+		TouchGamepad.Show(shown);
 		return Task.CompletedTask;
 	}
 
@@ -320,13 +439,62 @@ public static partial class BrowserHost
 		return Task.CompletedTask;
 	}
 
+	// The AI opponents: "<player slots>|<LoaderAI's types, comma-separated>|<1 in versus archer select>"
+	// (no types without it, or until the game has loaded), and the page's picks: per slot from P1, a
+	// type or empty (see LoaderAi).
+	[JSExport]
+	internal static Task<string> GetAiSetup()
+	{
+		try
+		{
+			return Task.FromResult($"{LoaderAi.Slots()}|{LoaderAi.Types()}|{(LoaderAi.OnArcherSelect ? 1 : 0)}");
+		}
+		catch (Exception e)
+		{
+			Console.Error.WriteLine($"[ai] {e}");
+			return Task.FromResult("0||0");
+		}
+	}
+
+	[JSExport]
+	internal static Task SetAiOpponents(string[] slots)
+	{
+		LoaderAi.SetOpponents(slots);
+		return Task.CompletedTask;
+	}
+
 	// ?mode=versus|quest|darkworld|trials: once the main menu is up, do what that mode's button does.
+	// "menu" (the page's default) just opens the main menu, past the title screen.
 	[JSExport]
 	internal static Task SetStartMode(string mode)
 	{
 		startMode = mode.ToLowerInvariant();
 		return Task.CompletedTask;
 	}
+
+	// ?slowcpu=N, for testing: the game thread takes N times as long for every frame, like a slower
+	// computer's (busy waiting after each frame). Chrome's DevTools CPU throttling can't do this: it
+	// only slows the page's main thread, not the worker the game runs on.
+	[JSExport]
+	internal static Task SetSlowCpu(double factor)
+	{
+		slowCpu = factor;
+		Console.WriteLine($"[slowcpu] the game thread runs {factor:0.#}x slower");
+		return Task.CompletedTask;
+	}
+
+	private static double slowCpu = 1;
+
+	// The page's Stats panel (main.js): turned on while it's open; it asks for numbers about once a second.
+	[JSExport]
+	internal static Task SetDiagnostics(bool on)
+	{
+		Diagnostics.On = on;
+		return Task.CompletedTask;
+	}
+
+	[JSExport]
+	internal static Task<string> TakeDiagnostics() => Task.FromResult(Diagnostics.TakeWindow(game?.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().Name));
 
 	private static string startMode;
 	private static int mainMenuFrames;
@@ -366,15 +534,27 @@ public static partial class BrowserHost
 		{
 			state.SetValue(scene, Enum.Parse(state.PropertyType, "Main"));
 			mainMenuFrames = 0;
+			if (startMode == "menu") startMode = null;
 			return;
 		}
-		if (menuState != "Main")
+		// Quest and Dark World are in the co-op submenu when TF.EX replaces their main menu buttons with
+		// its own co-op button: open it (as that button does) and press the mode's button there.
+		bool coOp = menuState == "CoOp" && (startMode == "quest" || startMode == "darkworld");
+		if (menuState != "Main" && !coOp)
 		{
 			if (menuState != "PressStart") mainMenuFrames = 0;
 			return;
 		}
 		if (++mainMenuFrames < 30) return;
 		string mode = startMode;
+		if (menuState == "Main" && (mode == "quest" || mode == "darkworld")
+			&& !SceneEntities(scene).Any(e => e.GetType().FullName == (mode == "quest" ? "TowerFall.QuestButton" : "TowerFall.DarkWorldButton"))
+			&& Enum.GetNames(state.PropertyType).Contains("CoOp"))
+		{
+			state.SetValue(scene, Enum.Parse(state.PropertyType, "CoOp"));
+			mainMenuFrames = 0;
+			return;
+		}
 		startMode = null;
 		if (mode == "online" || mode == "quickplay")
 		{
@@ -397,7 +577,7 @@ public static partial class BrowserHost
 		};
 		if (rollcall == null)
 		{
-			Console.WriteLine($"[mode] unknown mode \"{mode}\" (versus, quest, darkworld, trials, online or quickplay)");
+			Console.WriteLine($"[mode] unknown mode \"{mode}\" (menu, versus, quest, darkworld, trials, online or quickplay)");
 			return;
 		}
 		Type menu = scene.GetType();
@@ -406,11 +586,52 @@ public static partial class BrowserHost
 			Console.WriteLine("[mode] darkworld: Dark World isn't installed");
 			return;
 		}
+		// The menu's own button when it's there, so mods that patch it (TF.EX) take part as when the
+		// player presses it; otherwise its effect, below.
+		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+		string buttonType = "TowerFall." + (rollcall == "Versus" ? "Fight" : rollcall) + "Button";
+		object button = SceneEntities(scene).FirstOrDefault(e => e.GetType().FullName == buttonType);
+		if (button == null && (rollcall == "Quest" || rollcall == "DarkWorld"))
+		{
+			// The co-op submenu's one button, turned to the mode (its buttonNames, e.g. "QUEST").
+			button = SceneEntities(scene).FirstOrDefault(e => e.GetType().FullName == "TowerFall.CoOpModeButton");
+			var names = button?.GetType().GetField("buttonNames", any)?.GetValue(button) as System.Collections.Generic.IList<string>;
+			int index = names?.ToList().FindIndex(n => n.Replace(" ", "").Contains(rollcall, StringComparison.OrdinalIgnoreCase)) ?? -1;
+			if (index >= 0) button.GetType().GetField("currentMode", any)?.SetValue(button, index);
+			else button = null;
+		}
+		// (Main menu buttons act in MenuAction; the co-op submenu's in its base's OnConfirm.)
+		MethodInfo menuAction = button?.GetType().GetMethod("MenuAction", any) ?? button?.GetType().GetMethod("OnConfirm", any);
+		if (menuAction != null)
+		{
+			menuAction.Invoke(button, null);
+			Console.WriteLine($"[mode] {mode} (pressed {button.GetType().Name})");
+			return;
+		}
 		menu.GetField("CurrentMatchSettings").SetValue(null, menu.GetField(rollcall + "MatchSettings").GetValue(null));
 		FieldInfo rollcallMode = menu.GetField("RollcallMode");
 		rollcallMode.SetValue(null, Enum.Parse(rollcallMode.FieldType, rollcall));
 		state.SetValue(scene, Enum.Parse(state.PropertyType, "Rollcall"));
 		Console.WriteLine($"[mode] {mode}");
+	}
+
+	// A scene's entities: Monocle keeps them per layer (Scene.Layers[i].Entities).
+	private static IEnumerable<object> SceneEntities(object scene)
+	{
+		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+		object layers = scene.GetType().GetField("Layers", any)?.GetValue(scene) ?? scene.GetType().GetProperty("Layers", any)?.GetValue(scene);
+		if (layers is not System.Collections.IEnumerable all) yield break;
+		foreach (object item in all)
+		{
+			// (A dictionary of layers enumerates key/value pairs.)
+			object layer = item?.GetType().GetProperty("Value")?.GetValue(item) ?? item;
+			if (layer == null) continue;
+			object entities = layer.GetType().GetField("Entities", any)?.GetValue(layer) ?? layer.GetType().GetProperty("Entities", any)?.GetValue(layer);
+			if (entities is System.Collections.IEnumerable list)
+			{
+				foreach (object e in list) yield return e;
+			}
+		}
 	}
 
 	private static int menuFrames;
@@ -424,9 +645,21 @@ public static partial class BrowserHost
 		{
 			if (words[0] == "keys")
 			{
-				// Logs the keys (and gamepad state) FNA reports, for the next 10 seconds (input debugging).
+				// Logs the keys (and gamepad state) FNA reports, for the next 10 seconds (input debugging),
+				// and the game's players' inputs.
 				keysFrames = 600;
 				Console.WriteLine("[command] keys: logging pressed keys and gamepads for 10 s");
+				if (towerFall.GetType("TowerFall.TFGame").GetField("PlayerInputs")?.GetValue(null) is Array players)
+				{
+					Console.WriteLine($"[keys] players: {string.Join(", ", players.Cast<object>().Select(p => p?.GetType().Name ?? "-"))}");
+				}
+				return;
+			}
+			if (words[0] == "ai")
+			{
+				// LoaderAI's slots; "ai JIMMY - NOVA" picks P2-P4's opponents like the page does (- for none).
+				if (words.Length > 1) LoaderAi.SetOpponents(words[1..].Select(w => w == "-" ? "" : w).Prepend("").ToArray());
+				Console.WriteLine($"[ai] {LoaderAi.Describe()}");
 				return;
 			}
 			if (words[0] == "patches")
@@ -446,9 +679,26 @@ public static partial class BrowserHost
 				}
 				return;
 			}
+			if (words[0] == "startmode" && words.Length > 1)
+			{
+				// As ?mode=, but now: the next time the main menu's top level is up (for tests).
+				startMode = words[1].ToLowerInvariant();
+				mainMenuFrames = 0;
+				Console.WriteLine($"[command] startmode {startMode}");
+				return;
+			}
+			if (words[0] == "save")
+			{
+				// TowerFall's own save, which FortRise extends to every mod's settings and save data.
+				object save = towerFall.GetType("TowerFall.SaveData")?.GetField("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+				save?.GetType().GetMethod("Save", BindingFlags.Public | BindingFlags.Instance, Type.EmptyTypes)?.Invoke(save, null);
+				Console.WriteLine($"[command] save: {(save != null ? "saved" : "no save data")}");
+				return;
+			}
 			if (words[0] == "bench")
 			{
-				Bench.Run();
+				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);
+				else Bench.Run();
 				return;
 			}
 			if (words[0] == "netplay")
@@ -487,10 +737,20 @@ public static partial class BrowserHost
 			// What the command prints goes to the console's screen buffer (newest first); echo it.
 			var output = console.GetType().GetField("drawCommands", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(console) as List<string>;
 			output?.Clear();
-			// Let exceptions through (with their stack) instead of a one-line note.
-			console.GetType().GetField("safeExecute", BindingFlags.NonPublic | BindingFlags.Instance)?.SetValue(console, false);
-			console.GetType().GetMethod("ExecuteCommand", new[] { typeof(string), typeof(string[]) })
-				.Invoke(console, new object[] { words[0].ToLowerInvariant(), words[1..] });
+			// Let exceptions through (with their stack) instead of a one-line note, for this command
+			// only: in the game's own console, a mistyped command must not stop the game.
+			FieldInfo safeExecute = console.GetType().GetField("safeExecute", BindingFlags.NonPublic | BindingFlags.Instance);
+			object wasSafe = safeExecute?.GetValue(console);
+			safeExecute?.SetValue(console, false);
+			try
+			{
+				console.GetType().GetMethod("ExecuteCommand", new[] { typeof(string), typeof(string[]) })
+					.Invoke(console, new object[] { words[0].ToLowerInvariant(), words[1..] });
+			}
+			finally
+			{
+				if (wasSafe != null) safeExecute.SetValue(console, wasSafe);
+			}
 			for (int i = (output?.Count ?? 0) - 1; i >= 0; i--)
 			{
 				Console.WriteLine($"[command]   {output[i]}");
@@ -530,6 +790,14 @@ public static partial class BrowserHost
 	private static readonly System.Diagnostics.Stopwatch fpsClock = System.Diagnostics.Stopwatch.StartNew();
 	private static int fpsFrames;
 	private static long frameTicks;
+	// Hitches, which the average hides: the longest frame, the longest time from one frame's start to
+	// the next's, and how many frames took longer than a 60 Hz frame.
+	private static long worstFrameTicks, worstGapTicks, lastFrameStart;
+	private static bool worstFrameGc; // a garbage collection ran during the worst frame
+	private static FieldInfo currentFrame;
+	private static int lastNetplayFrame;
+	private static int frameCollections;
+	private static int longFrames;
 	private static int lastGen0, lastGen1, lastGen2;
 	private static TimeSpan lastPaused;
 	private static double lastAllocatedMb;
@@ -545,9 +813,22 @@ public static partial class BrowserHost
 			TimeSpan paused = GC.GetTotalPauseDuration();
 			string gc = $", GC {gen0 - lastGen0}/{gen1 - lastGen1}/{gen2 - lastGen2} (gen 0/1/2), {(paused - lastPaused).TotalMilliseconds:0} ms paused, {GC.GetTotalAllocatedBytes() / 1048576.0 - lastAllocatedMb:0} MB allocated";
 			(lastGen0, lastGen1, lastGen2, lastPaused, lastAllocatedMb) = (gen0, gen1, gen2, paused, GC.GetTotalAllocatedBytes() / 1048576.0);
-			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{gc}{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
+			double ms(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+			string hitches = $", worst {ms(worstFrameTicks):0} ms{(worstFrameGc ? " with a GC" : "")} (gap {ms(worstGapTicks):0} ms), {longFrames} over 16.7 ms";
+			// Online: how fast the match runs (240 ticks/s is full speed) and catch-up time dropped.
+			currentFrame ??= AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name?.StartsWith("TF.EX", StringComparison.Ordinal) == true)
+				.SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+				.FirstOrDefault(t => t.Name == "ExFlags")?.GetField("CurrentFrame", BindingFlags.Public | BindingFlags.Static);
+			if (currentFrame?.GetValue(null) is int frame && frame != lastNetplayFrame)
+			{
+				if (frame > lastNetplayFrame && lastNetplayFrame > 0) hitches += $", online {(frame - lastNetplayFrame) / seconds:0} ticks/s, {TickCatchUp.DroppedMs:0} ms of catch-up dropped";
+				lastNetplayFrame = frame;
+			}
+			TickCatchUp.DroppedMs = 0;
+			Console.WriteLine($"[perf] {fpsFrames / seconds:0.0} frames/s, {busy:0.0} ms/frame in the game{hitches}{gc}{(Profiler.Enabled ? Profiler.Report(fpsFrames) : "")}");
 			fpsFrames = 0;
 			frameTicks = 0;
+			(worstFrameTicks, worstGapTicks, longFrames) = (0, 0, 0);
 			fpsClock.Restart();
 		}
 	}

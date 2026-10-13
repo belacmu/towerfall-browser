@@ -70,6 +70,16 @@
 				width: 0;
 				background: #e8c547;
 			}
+			/* Busy, for how long unknown (see showActivity in main.js). */
+			#bar.busy > div {
+				width: 25% !important;
+				animation: busy 1.2s ease-in-out infinite alternate;
+			}
+			@keyframes busy {
+				from { transform: translateX(0); }
+				to { transform: translateX(300%); }
+			}
+			#detail { max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 			#error { color: #ff7b7b; white-space: pre-wrap; max-width: 90vw; }
 			#pick { max-width: 34em; }
 			#modsPanel { width: min(34em, 90vw); text-align: left; }
@@ -90,14 +100,21 @@
 				padding: 0;
 			}
 			/* Sound and Controls buttons. */
+			/* A row of buttons; under it the AI and Stats buttons, then their panels, when they show. */
 			#corner {
 				position: fixed;
 				top: max(8px, env(safe-area-inset-top));
 				right: max(8px, env(safe-area-inset-right));
 				z-index: 10;
 				display: flex;
+				flex-direction: column;
+				align-items: flex-end;
 				gap: 8px;
+				/* Only its buttons take taps, not the space between them. */
+				pointer-events: none;
 			}
+			#corner .row { display: flex; gap: 8px; }
+			#corner button, #aiPanel, #statsPanel { pointer-events: auto; }
 			/* Styled like the on-screen controls' Back and Pause buttons (#touch .back, below). */
 			#corner button {
 				height: calc(min(19vmin, 88px) * 0.45 + 4px); /* + the borders, which .tbutton adds outside */
@@ -111,6 +128,47 @@
 			}
 			#corner button:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 			#corner button:disabled { cursor: default; }
+			/* The Stats panel (the Stats button; see stats.js): small, so the game stays playable under it. */
+			#statsPanel {
+				max-width: min(92vw, 440px);
+				padding: 6px 8px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(0, 0, 0, 0.75);
+				color: rgba(255, 255, 255, 0.85);
+			}
+			#statsPanel[hidden] { display: none; }
+			#statsPanel pre {
+				margin: 0 0 6px;
+				font: 10px/1.35 ui-monospace, Menlo, monospace;
+				white-space: pre-wrap;
+				user-select: text;
+				-webkit-user-select: text;
+			}
+			#statsPanel .row { justify-content: flex-end; }
+			/* The AI opponents picker (the AI button; see main.js). */
+			#aiPanel {
+				display: grid;
+				grid-template-columns: auto;
+				gap: 6px;
+				padding: 8px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(0, 0, 0, 0.8);
+			}
+			#aiPanel[hidden] { display: none; }
+			#aiPanel button {
+				height: 32px;
+				padding: 0 12px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(255, 255, 255, 0.08);
+				color: rgba(255, 255, 255, 0.8);
+				font-size: 10px;
+				text-transform: uppercase;
+			}
+			#aiPanel.wide { grid-template-columns: auto auto; }
+			#aiPanel .hint { grid-column: 1 / -1; font-size: 10px; color: #999; max-width: 15em; }
 			/* On-screen controls (touch.js). */
 			#touch {
 				position: fixed;
@@ -186,6 +244,132 @@
 				padding: 6px 14px;
 				cursor: pointer;
 			}
+
+			/* --- The start screen (#overlay), in TowerFall's colors: a night sky over the towers, a
+			   stone frame, gold pixel lettering. Silkscreen (fonts/, SIL OFL) stands in for the game's
+			   own font, which only arrives with the player's files. --- */
+			@font-face { font-family: "Silkscreen"; src: url("fonts/Silkscreen-Regular.ttf") format("truetype"); font-display: swap; }
+			@font-face { font-family: "Silkscreen"; src: url("fonts/Silkscreen-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+			#overlay {
+				--gold: #f4d35e;
+				--gold-dark: #b8860b;
+				--ember: #8a3b12;
+				--stone: #2b2238;
+				--stone-light: #6d5a86;
+				--stone-dark: #120d1c;
+				--sky-top: #07060f;
+				--sky: #1a1230;
+				--sky-low: #3a1f3f;
+				/* (Layers listed first are drawn on top.) */
+				background:
+					/* the ground, and towers with battlements on the horizon */
+					linear-gradient(#0b0812, #0b0812) bottom / 100% 40px no-repeat,
+					linear-gradient(#0b0812, #0b0812) left 8% bottom 40px / 44px 110px no-repeat,
+					repeating-linear-gradient(to right, #0b0812 0 8px, transparent 8px 14px) left 8% bottom 150px / 44px 8px no-repeat,
+					linear-gradient(#0b0812, #0b0812) left 26% bottom 40px / 28px 64px no-repeat,
+					repeating-linear-gradient(to right, #0b0812 0 8px, transparent 8px 14px) left 26% bottom 104px / 28px 8px no-repeat,
+					linear-gradient(#0b0812, #0b0812) left 74% bottom 40px / 56px 136px no-repeat,
+					repeating-linear-gradient(to right, #0b0812 0 8px, transparent 8px 14px) left 74% bottom 176px / 56px 8px no-repeat,
+					linear-gradient(#0b0812, #0b0812) left 91% bottom 40px / 30px 82px no-repeat,
+					repeating-linear-gradient(to right, #0b0812 0 8px, transparent 8px 14px) left 91% bottom 122px / 30px 8px no-repeat,
+					/* stars: three repeating fields of different sizes */
+					radial-gradient(1px 1px at 17px 23px, #fffc 60%, transparent 70%) 0 0 / 97px 89px,
+					radial-gradient(1px 1px at 61px 47px, #fff9 60%, transparent 70%) 0 0 / 131px 113px,
+					radial-gradient(1.5px 1.5px at 33px 71px, #ffe9b0cc 60%, transparent 70%) 0 0 / 173px 157px,
+					linear-gradient(var(--sky-top), var(--sky) 55%, var(--sky-low));
+				overflow-y: auto;
+				justify-content: safe center;
+			}
+			#overlay .frame {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 12px;
+				width: min(36em, 100%);
+				box-sizing: border-box;
+				padding: 20px 22px 22px;
+				background: var(--stone);
+				/* A pixel stone frame: light edge, dark edge, then the outline. */
+				border: 4px solid var(--stone-light);
+				box-shadow: inset 0 0 0 4px #3d3150, 0 0 0 4px var(--stone-dark), 0 12px 0 4px #0006;
+			}
+			#overlay .title {
+				margin: 0;
+				font: 700 clamp(30px, 9vw, 58px)/1 "Silkscreen", ui-monospace, monospace;
+				letter-spacing: 0.02em;
+				text-transform: uppercase;
+				color: var(--gold);
+				text-shadow: 3px 3px 0 var(--ember), 6px 6px 0 var(--stone-dark);
+			}
+			#overlay .subtitle {
+				margin-top: -6px;
+				font: 12px "Silkscreen", ui-monospace, monospace;
+				text-transform: uppercase;
+				letter-spacing: 0.25em;
+				color: #b9a8d6;
+			}
+			#overlay #status { font: 16px "Silkscreen", ui-monospace, monospace; text-transform: uppercase; color: #eee; }
+			#overlay #detail:empty, #overlay #error:empty { display: none; }
+			#overlay #bar { border: 2px solid var(--stone-light); background: var(--stone-dark); height: 10px; }
+			#overlay #bar > div { background: var(--gold); }
+			#overlay p { margin: 0 0 10px; }
+			#overlay .hint { color: #a99bbf; }
+			#overlay .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-bottom: 10px; }
+			#overlay button:not(.link) {
+				font: 14px "Silkscreen", ui-monospace, monospace;
+				text-transform: uppercase;
+				color: var(--gold);
+				background: #3a2e4f;
+				border: 3px solid var(--stone-light);
+				box-shadow: 0 4px 0 var(--stone-dark);
+				padding: 8px 16px;
+			}
+			#overlay button:not(.link):hover { background: #4a3c63; color: #fff3b0; }
+			#overlay button:not(.link):active { transform: translateY(3px); box-shadow: 0 1px 0 var(--stone-dark); }
+			#overlay button.primary {
+				font-size: 22px;
+				padding: 10px 40px;
+				color: #2a1606;
+				background: var(--gold);
+				border-color: #fff3b0;
+				box-shadow: 0 5px 0 var(--gold-dark), 0 5px 0 3px var(--stone-dark);
+			}
+			#overlay button.primary:hover { background: #ffe27a; color: #2a1606; }
+			#overlay button.link { color: #b9a8d6; }
+			#overlay .link-row { display: flex; gap: 8px; margin: 4px auto 6px; width: min(30em, 100%); }
+			#overlay .link-row input {
+				flex: 1;
+				min-width: 0;
+				font: 13px ui-monospace, Menlo, monospace;
+				color: #eee;
+				background: var(--stone-dark);
+				border: 3px solid var(--stone-light);
+				padding: 6px 8px;
+			}
+			#overlay .link-row input:focus { outline: 2px solid var(--gold); outline-offset: 0; }
+			#overlay #modsPanel { width: 100%; }
+			#overlay .mods-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+			#overlay .mods-head .label { font: 16px "Silkscreen", ui-monospace, monospace; text-transform: uppercase; color: var(--gold); }
+			#overlay button.toggle { padding: 4px 12px; font-size: 12px; min-width: 5.5em; }
+			#overlay button.toggle[aria-pressed="false"] { color: #a99bbf; background: var(--stone-dark); }
+			#overlay #modsPanel.off details { opacity: 0.45; }
+			#overlay #modList { border: 2px solid #3d3150; background: #1d1729; }
+			/* The other build (main <-> preview): a faint mark in the corner, for those who know. */
+			#otherBuild {
+				position: fixed;
+				left: max(6px, env(safe-area-inset-left));
+				bottom: max(6px, env(safe-area-inset-bottom));
+				width: 28px;
+				height: 28px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				color: #fff;
+				opacity: 0.12;
+				text-decoration: none;
+				font-size: 14px;
+			}
+			#otherBuild:hover, #otherBuild:focus-visible { opacity: 0.6; }
 		</style>
 		<!-- Threads need cross-origin isolation. Hosts that can't send COOP/COEP headers (GitHub
 		     Pages) get them from this service worker; it does nothing when the server sends them. -->
@@ -214,51 +398,83 @@
 			<canvas id="canvas" class="canvas" tabindex="0"></canvas>
 		</div>
 		<div id="corner">
-			<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
-			<button id="music" title="Download the game's music" hidden></button>
-			<button id="mute" title="Toggle sound">Sound: on</button>
+			<div class="row">
+				<button id="touchToggle" title="Toggle the on-screen controls">Controls: off</button>
+				<button id="music" title="Download the game's music" hidden></button>
+				<button id="mute" title="Toggle sound">Sound: on</button>
+			</div>
+			<div class="row">
+				<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
+				<button id="statsToggle" title="Performance numbers (frame times, online ticks, ping…)" hidden>Stats</button>
+			</div>
+			<div id="aiPanel" hidden></div>
+			<div id="statsPanel" hidden>
+				<pre></pre>
+				<div class="row"><button class="copy">Copy report</button><button class="reset">Reset</button></div>
+			</div>
 		</div>
 		<div id="overlay">
 			<div id="previewNote" class="hint" hidden></div>
-			<div id="status">Starting…</div>
-			<div id="bar"><div></div></div>
-			<div id="detail"></div>
-			<div id="error"></div>
-			<div id="pick" hidden>
-				<p>
-					This runs TowerFall from your own copy of the PC version (Steam, itch.io or Humble).
-					Drop the folder it's installed in onto this page, or choose it below.
-					The files are copied into this browser's storage and never leave your device.
-				</p>
-				<button id="choose">Choose TowerFall folder</button>
-				<input id="folder" type="file" webkitdirectory hidden>
-				<p class="hint">
-					Steam: right-click TowerFall in your library, then Manage &rarr; Browse local files, and drag that folder here.
-				</p>
-			</div>
-			<div id="download" hidden>
-				<p>Your TowerFall files are ready to copy into this browser's storage. Later visits use that copy.</p>
-				<button id="downloadAll"></button>
-				<button id="downloadNoMusic"></button>
-				<p id="downloadNoMusicHint" class="hint">Without music, the game is silent until you press Load music in it.</p>
-			</div>
-			<div id="dw" hidden>
-				<p class="hint">
-					Dark World wasn't included. If you have it, drop the <b>DarkWorldContent</b> folder here too
-					(on Steam for Mac it's next to TowerFall.app), or <button id="dwchoose" class="link">choose it</button>.
-				</p>
-			</div>
-			<div id="modsPanel" hidden>
-				<details>
-					<summary class="modsHeader">Mods: <span id="modSummary"></span></summary>
-					<div id="modList"></div>
-					<button id="addMod" class="link">Add a mod zip…</button>
-					<input id="modFile" type="file" accept=".zip,application/zip" multiple hidden>
-				</details>
-				<div id="modWarning" class="hint"></div>
-			</div>
-			<button id="play" hidden>Play</button>
-			<button id="change" class="link" hidden>Use different game files</button>
+			<main class="frame">
+				<h1 class="title" aria-label="TowerFall">TowerFall</h1>
+				<div class="subtitle">in your browser</div>
+				<div id="status">Starting…</div>
+				<div id="bar"><div></div></div>
+				<div id="detail"></div>
+				<div id="error"></div>
+				<div id="pick" hidden>
+					<p>
+						This runs TowerFall from your own copy of the PC version (Steam, itch.io or Humble).
+						Drop its folder (or a zip of it) onto this page, or choose it below.
+						The files are copied into this browser's storage and never leave your device.
+					</p>
+					<div class="choices">
+						<button id="choose">Choose TowerFall folder</button>
+						<button id="chooseZip">Choose a zip</button>
+					</div>
+					<input id="folder" type="file" webkitdirectory hidden>
+					<input id="zipFile" type="file" accept=".zip,application/zip" hidden>
+					<p class="hint">
+						Steam: right-click TowerFall in your library, then Manage &rarr; Browse local files, and drag that folder here.
+					</p>
+					<form id="linkForm" class="link-row">
+						<input id="linkInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="…or paste a link to your game files">
+						<button type="submit">Use</button>
+					</form>
+					<p class="hint">A link to your private game-file host (as in <b>#gamefiles=</b> links), or to a zip of your TowerFall folder.</p>
+				</div>
+				<div id="download" hidden>
+					<p>Your TowerFall files are ready to copy into this browser's storage. Later visits use that copy.</p>
+					<div class="choices">
+						<button id="downloadAll"></button>
+						<button id="downloadNoMusic"></button>
+					</div>
+					<p id="downloadNoMusicHint" class="hint">Without music, the game is silent until you press Load music in it.</p>
+				</div>
+				<div id="dw" hidden>
+					<p class="hint">
+						Dark World wasn't included. If you have it, drop the <b>DarkWorldContent</b> folder here too
+						(on Steam for Mac it's next to TowerFall.app), or <button id="dwchoose" class="link">choose it</button>.
+					</p>
+				</div>
+				<div id="modsPanel" hidden>
+					<div class="mods-head">
+						<span class="label">Mods</span>
+						<button id="modsToggle" class="toggle" aria-pressed="true">On</button>
+					</div>
+					<details>
+						<summary class="modsHeader"><span id="modSummary"></span></summary>
+						<div id="modList"></div>
+						<button id="addMod" class="link">Add a mod zip…</button>
+						<input id="modFile" type="file" accept=".zip,application/zip" multiple hidden>
+					</details>
+					<div id="modWarning" class="hint"></div>
+				</div>
+				<button id="play" class="primary" hidden>Play</button>
+				<button id="change" class="link" hidden>Use different game files</button>
+			</main>
+			<!-- To the other build: the branch preview from the main site, and back. Kept out of the way. -->
+			<a id="otherBuild" href="preview/" aria-label="Preview build" title="Preview build">&#x2023;</a>
 		</div>
 	</body>
 </html>

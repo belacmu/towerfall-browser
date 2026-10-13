@@ -226,6 +226,20 @@ the game and reaches the menu, but crashes as soon as the sync test starts. What
   made since 2026-07-25 (ikvmcraft uses the same one). Picking this up means building the runtime
   from that branch (FNA-WASM-Build's `build-dotnet.sh`, likely 1–2 h of CI per build).
 
+## Precompiling TF.State: not possible; generated MessagePack formatters: no gain (2026-10-13)
+
+- **Mono AOT can't cover TF.State as it loads.** FortRise loads mods into a collectible
+  `ModAssemblyLoadContext`, and Mono's AOT loader skips collectible contexts outright
+  (`mono/mini/aot-runtime.c`: "Assemblies loaded into collectible ALCs require different codegen").
+  An AOT image also records its dependencies' GUIDs, and TF.State references the game as FortRise
+  patches it in each player's browser.
+- **MessagePack formatters generated ahead of time** (`mpc` 2.5.302 from TF.State.Domain's
+  sources, compiled into an assembly loaded into TF.State's context) produce byte-identical saves
+  (about 34,000 compared in TF.EX's sync test) but serialize **8% slower** than the formatters
+  MessagePack emits at run time (119 vs 110 µs per save, with a static per-type resolver cache
+  and alternating order; 70% slower through `CompositeResolver.Create`). The interpreter runs
+  emitted and compiled IL alike, so there's nothing to win there.
+
 ## Tools for this work
 
 - `patches` host command: the run-time patched methods and their owners.

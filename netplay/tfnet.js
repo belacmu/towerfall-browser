@@ -22,7 +22,7 @@
 var LibraryTFNet = {
 	// (Emscripten copies these objects into the build as source text, which turns a Map into {};
 	// the postsets create them at startup instead.)
-	$TFNet__postset: "TFNet.sockets = new Map();",
+	$TFNet__postset: "TFNet.sockets = new Map(); if (!ENVIRONMENT_IS_PTHREAD) globalThis.tfnetStats = TFNet.stats;",
 	$TFNet: {
 		sockets: null,
 		next: 1,
@@ -30,15 +30,17 @@ var LibraryTFNet = {
 		ice: null, // { url, at, servers: Promise } from the last /turn request
 		GATHER_WAIT_MS: 1000, // longest wait for ICE gathering before sending an offer or answer (see gathered)
 
-		// The ICE servers for a room URL, from its server's /turn. Credentials last 6 hours; reused
-		// for one.
+		// The ICE servers for a room URL (.../room/<id>?peer=<uuid>), from its server's /turn, which
+		// only gives relay credentials to a peer in that lobby. Credentials last 6 hours; reused for one.
 		iceServersFor(roomUrl) {
 			let url;
 			try {
 				const u = new URL(roomUrl);
+				const room = u.pathname.split("/").pop();
+				const peer = u.searchParams.get("peer") ?? "";
 				u.protocol = u.protocol === "wss:" ? "https:" : "http:";
 				u.pathname = "/turn";
-				u.search = "";
+				u.search = new URLSearchParams({ room, peer }).toString();
 				url = u.href;
 			} catch {
 				return Promise.resolve(TFNet.iceServers);
@@ -60,6 +62,57 @@ var LibraryTFNet = {
 				.finally(() => clearTimeout(timer));
 			TFNet.ice = { url, at: performance.now(), servers };
 			return servers;
+		},
+
+		// Packet timing for the page's Stats panel (stats.js reads and resets it): how long each
+		// received packet waited on the page before the game took it (tfnet_recv_all). (How long the
+		// browser held it before the handler ran can't be read: the event is stamped at dispatch.)
+		stats: { packets: 0, wait: null, path: "", rtt: null },
+
+		// The connection's path and WebRTC's own round-trip time (its connectivity checks, so the
+		// network alone, without either game in it), from a peer connection's stats. Safari doesn't
+		// always name the selected pair on the transport, so a succeeded nominated pair also counts.
+		network: async function (pc) {
+			const stats = await pc.getStats();
+			let pair = null;
+			stats.forEach((x) => {
+				if (x.type === "transport" && x.selectedCandidatePairId) pair = stats.get(x.selectedCandidatePairId) ?? pair;
+			});
+			if (!pair) stats.forEach((x) => {
+				if (x.type === "candidate-pair" && (x.selected || (x.nominated && x.state === "succeeded"))) pair = x;
+			});
+			if (!pair) return null;
+			const local = stats.get(pair.localCandidateId);
+			const remote = stats.get(pair.remoteCandidateId);
+			const relayed = local?.candidateType === "relay" || remote?.candidateType === "relay";
+			return {
+				path: relayed ? `through the relay (${local?.relayProtocol ?? local?.protocol ?? "?"})` : `directly (${local?.candidateType ?? "?"} to ${remote?.candidateType ?? "?"})`,
+				rttMs: typeof pair.currentRoundTripTime === "number" ? pair.currentRoundTripTime * 1000 : null,
+			};
+		},
+		timing() {
+			return { n: 0, sum: 0, max: 0, over4: 0, over16: 0 };
+		},
+		time(t, ms) {
+			t.n++;
+			t.sum += ms;
+			if (ms > t.max) t.max = ms;
+			if (ms > 4) t.over4++;
+			if (ms > 16.7) t.over16++;
+		},
+
+		// ?netdelay=N[&netjitter=M], for testing online play over a slower network on one machine:
+		// received packets are held N ms (plus up to M ms at random) before the game can take them.
+		// Each player delays what it receives, so netdelay=40 on both makes about 80 ms of ping.
+		netDelay: null,
+		delay() {
+			if (TFNet.netDelay === null) {
+				const p = new URLSearchParams(globalThis.location?.search ?? "");
+				TFNet.netDelay = { ms: Math.max(0, Number(p.get("netdelay")) || 0), jitter: Math.max(0, Number(p.get("netjitter")) || 0) };
+				if (TFNet.netDelay.ms || TFNet.netDelay.jitter) console.log(`[tfnet] test: received packets held ${TFNet.netDelay.ms} ms + up to ${TFNet.netDelay.jitter} ms`);
+			}
+			const d = TFNet.netDelay;
+			return d.ms || d.jitter ? d.ms + Math.random() * d.jitter : 0;
 		},
 
 		// Bumps one of a socket's signal counters (see the top).
@@ -114,8 +167,16 @@ var LibraryTFNet = {
 				};
 				dc.onmessage = (e) => {
 					if (!(e.data instanceof ArrayBuffer)) return;
-					s.inbox.push([uuid, new Uint8Array(e.data)]);
-					TFNet.bump(s, 0);
+					const bytes = new Uint8Array(e.data);
+					const deliver = () => {
+						if (s.state !== 0) return;
+						TFNet.stats.packets++;
+						s.inbox.push([uuid, bytes, performance.now()]);
+						TFNet.bump(s, 0);
+					};
+					const held = TFNet.delay();
+					if (held) setTimeout(deliver, held);
+					else deliver();
 				};
 				dc.onclose = () => {
 					if (peer.connected) {
@@ -131,14 +192,23 @@ var LibraryTFNet = {
 					// Direct or through the TURN relay, for reports of slow or failed connections.
 					let path = "";
 					try {
-						const stats = await pc.getStats();
-						stats.forEach((s) => {
-							const pair = s.type === "transport" && stats.get(s.selectedCandidatePairId);
-							const local = pair && stats.get(pair.localCandidateId);
-							if (local) path = local.candidateType === "relay" ? ` through the relay (${local.relayProtocol})` : ` directly (${local.candidateType})`;
-						});
+						const n = await TFNet.network(pc);
+						if (n) path = ` ${n.path}${n.rttMs != null ? `, network round trip ${Math.round(n.rttMs)} ms` : ""}`;
 					} catch {}
 					console.log(`[tfnet] connected to peer ${uuid}${path} in ${Math.round(performance.now() - started)} ms`);
+					TFNet.stats.path = path.trim().replace(/, network.*/, "");
+					// While connected, the path (it can change) and WebRTC's round trip every 2 s, for the
+					// Stats panel and reports (stats.js), next to the game's own ping.
+					clearInterval(peer.sampler);
+					peer.sampler = setInterval(async () => {
+						if (pc.connectionState !== "connected") return clearInterval(peer.sampler);
+						try {
+							const n = await TFNet.network(pc);
+							if (!n) return;
+							TFNet.stats.path = n.path;
+							if (n.rttMs != null) TFNet.time((TFNet.stats.rtt ??= TFNet.timing()), n.rttMs);
+						} catch {}
+					}, 2000);
 				};
 				s.peers.set(uuid, peer);
 				return peer;
@@ -346,21 +416,24 @@ var LibraryTFNet = {
 		return e[1];
 	},
 
-	// int tfnet_send(int h, const uint8_t peer[16], const uint8_t* data, size_t len): 0 sent,
-	// -1 peer not connected, -2 send failed.
-	tfnet_send__deps: ["$TFNet"],
-	tfnet_send__proxy: "sync",
-	tfnet_send__sig: "iippp",
-	tfnet_send: function (h, peer, data, len) {
+	// void tfnet_send(int h, uint8_t* packet, size_t len): sends packet[16..len) to the peer whose
+	// id is packet[0..16), if it's connected, then frees packet (malloc'd by the caller). Proxied
+	// asynchronously: the caller doesn't wait for the main thread (each wait took 33-63 us on a
+	// desktop, longer where the main thread is busier, ~490 times a second), so it hands over a copy
+	// and gets no result; ggrs only logs failed sends anyway. Calls from one thread arrive in order.
+	tfnet_send__deps: ["$TFNet", "free"],
+	tfnet_send__proxy: "async",
+	tfnet_send__sig: "vipp",
+	tfnet_send: function (h, packet, len) {
 		globalThis.tfnetCalls ??= {};
 		globalThis.tfnetCalls.tfnet_send = (globalThis.tfnetCalls.tfnet_send | 0) + 1; // calls proxied to the page (for diagnostics)
-		const p = TFNet.sockets.get(h)?.peers.get(TFNet.bytesToUuid(peer));
-		if (!p || !p.connected) return -1;
 		try {
-			p.dc.send(HEAPU8.slice(data, data + len));
-			return 0;
+			const p = TFNet.sockets.get(h)?.peers.get(TFNet.bytesToUuid(packet));
+			if (p?.connected) p.dc.send(HEAPU8.slice(packet + 16, packet + len));
 		} catch {
-			return -2;
+			// The channel closed in between: the packet is lost, as on any unreliable channel.
+		} finally {
+			_free(packet);
 		}
 	},
 
@@ -375,13 +448,15 @@ var LibraryTFNet = {
 		const s = TFNet.sockets.get(h);
 		if (!s) return 0;
 		let at = 0;
+		const now = performance.now();
 		while (s.inbox.length) {
-			const [uuid, bytes] = s.inbox[0];
+			const [uuid, bytes, arrived] = s.inbox[0];
 			if (at + 20 + bytes.length > cap) {
 				if (at === 0) s.inbox.shift(); // can't ever fit: drop it (unreliable channel anyway)
 				break;
 			}
 			s.inbox.shift();
+			TFNet.time((TFNet.stats.wait ??= TFNet.timing()), now - arrived);
 			TFNet.uuidToBytes(uuid, buf + at);
 			HEAPU8[buf + at + 16] = bytes.length & 255;
 			HEAPU8[buf + at + 17] = (bytes.length >> 8) & 255;

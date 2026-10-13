@@ -29,7 +29,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const catalog = JSON.parse(fs.readFileSync(path.join(root, "mods/catalog.json"), "utf8"));
 const overridesPath = path.join(root, "mods/overrides.json");
 const overrides = fs.existsSync(overridesPath) ? JSON.parse(fs.readFileSync(overridesPath, "utf8")) : {};
-const mods = catalog.mods.flatMap((e) => e.mods).filter((m) => m.status !== "unsupported");
+// (With the file's checksum: a result only stands for the exact file tested.)
+const mods = catalog.mods.flatMap((e) => e.mods.map((m) => ({ ...m, sha256: e.file.sha256 }))).filter((m) => m.status !== "unsupported");
 const todo = mods.filter((m) => (only ? only.includes(m.name) : retest || !overrides[m.name]));
 
 try {
@@ -131,7 +132,7 @@ async function test(mod) {
 console.log(`Testing ${todo.length} of ${mods.length} mods against ${base}`);
 for (const [i, mod] of todo.entries()) {
 	const result = await test(mod);
-	overrides[mod.name] = { ...overrides[mod.name], ...result, version: mod.version };
+	overrides[mod.name] = { ...overrides[mod.name], ...result, version: mod.version, sha256: mod.sha256 };
 	fs.writeFileSync(overridesPath, JSON.stringify(overrides, null, "\t") + "\n");
 	console.log(`[${i + 1}/${todo.length}] ${mod.name} ${mod.version}: ${result.status} — ${result.note}`);
 }
