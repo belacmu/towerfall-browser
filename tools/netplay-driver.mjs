@@ -14,7 +14,8 @@
 //   curl 'localhost:9400/A/catch', then 'localhost:9400/A/pauses'   stacks of uncaught exceptions in workers
 //   curl 'localhost:9400/quit'
 // Usage: node tools/netplay-driver.mjs [--url URL] [--players A,B] [--port 9400] [--no-cache]
-// (--no-cache: no HTTP cache or service worker, for comparing builds served at the same address.)
+// (--no-cache: no HTTP cache or service worker, for comparing builds served at the same address;
+// --window 390x844: the window size, e.g. a phone in portrait.)
 // (Add slowcpu=4 to the URL to make a player run like a 4x slower computer.)
 // (Another driver at the same time: a different --port and different player names, which name
 // the profiles.)
@@ -30,6 +31,7 @@ const url = opt("--url", "http://localhost:8080/?mute&nointro&autoplay&mods=TF.E
 const names = opt("--players", "A,B").split(",");
 const port = Number(opt("--port", "9400"));
 const noCache = args.includes("--no-cache");
+const windowSize = opt("--window", "960,600").replace("x", ",");
 const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 // The real GPU where Chrome can use it headless (Metal on macOS); software rendering elsewhere,
 // which costs several CPU cores per running game.
@@ -47,7 +49,7 @@ async function launch(name, debugPort) {
 	children.push(spawn(chrome, [
 		"--headless=new", `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, "--no-first-run",
 		...GPU_FLAGS, "--autoplay-policy=no-user-gesture-required", "--mute-audio", // the page's audio runs, silently
-		"--window-size=960,600", "about:blank",
+		`--window-size=${windowSize}`, "about:blank",
 	], { stdio: "ignore" }));
 	let target;
 	for (let i = 0; i < 100 && !target; i++) {

@@ -148,6 +148,25 @@ test("turn: ICE servers for the site's pages, with CORS; not for other pages", a
 	eq((await turn("https://example.com")).status, 403, "another page");
 });
 
+test("reports: the site's pages can send one; other pages, non-reports and huge bodies can't", async () => {
+	const http = base.replace(/^ws/, "http");
+	const send = (origin, body) => fetch(http + "/report", { method: "POST", headers: { Origin: origin, "Content-Type": "text/plain" }, body });
+	const marker = `test-${Math.random()}`;
+	const res = await send("https://belacmu.github.io", JSON.stringify({ kind: "online", marker, fps: 60 }));
+	eq(res.status, 204, "accepted");
+	eq(res.headers.get("access-control-allow-origin"), "https://belacmu.github.io", "CORS");
+	eq((await fetch(http + "/report", { method: "OPTIONS", headers: { Origin: "https://belacmu.github.io" } })).status, 204, "preflight");
+	eq((await send("https://example.com", JSON.stringify({ kind: "online" }))).status, 403, "another page");
+	eq((await send("https://belacmu.github.io", "not json")).status, 400, "not JSON");
+	eq((await send("https://belacmu.github.io", JSON.stringify({ kind: "other" }))).status, 400, "not a report");
+	eq((await send("https://belacmu.github.io", JSON.stringify({ kind: "solo", pad: "x".repeat(30000) }))).status, 413, "too large");
+	if (child) {
+		// (Locally /reports needs no key.)
+		const { reports } = await (await fetch(http + "/reports")).json();
+		eq(reports.some((r) => r.report.marker === marker), true, "listed");
+	}
+});
+
 // ---- Signaling (matchbox) ----
 
 test("signaling: ids from ?peer=, NewPeer to those already in, signals relayed, PeerLeft", async () => {

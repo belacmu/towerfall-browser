@@ -8,3 +8,4 @@ gamefiles/
 reference/
 msbuild.binlog
 .wrangler/
+.dev.vars

@@ -313,6 +313,7 @@ public static partial class BrowserHost
 			if (lastFrameStart != 0) worstGapTicks = Math.Max(worstGapTicks, frameStart - lastFrameStart);
 			if (frameEnd - frameStart > System.Diagnostics.Stopwatch.Frequency / 60) longFrames++;
 			lastFrameStart = frameStart;
+			Diagnostics.Frame(frameEnd - frameStart);
 			ReportFrameRate();
 		}
 		catch (Exception e)
@@ -481,6 +482,17 @@ public static partial class BrowserHost
 	}
 
 	private static double slowCpu = 1;
+
+	// The page's Stats panel (main.js): turned on while it's open; it asks for numbers about once a second.
+	[JSExport]
+	internal static Task SetDiagnostics(bool on)
+	{
+		Diagnostics.On = on;
+		return Task.CompletedTask;
+	}
+
+	[JSExport]
+	internal static Task<string> TakeDiagnostics() => Task.FromResult(Diagnostics.TakeWindow(game?.GetType().GetProperty("Scene")?.GetValue(game)?.GetType().Name));
 
 	private static string startMode;
 	private static int mainMenuFrames;

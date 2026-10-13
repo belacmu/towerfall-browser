@@ -100,7 +100,7 @@
 				padding: 0;
 			}
 			/* Sound and Controls buttons. */
-			/* A row of buttons, with the AI button and its picker below it when they show. */
+			/* A row of buttons; under it the AI and Stats buttons, then their panels, when they show. */
 			#corner {
 				position: fixed;
 				top: max(8px, env(safe-area-inset-top));
@@ -114,7 +114,7 @@
 				pointer-events: none;
 			}
 			#corner .row { display: flex; gap: 8px; }
-			#corner button, #aiPanel { pointer-events: auto; }
+			#corner button, #aiPanel, #statsPanel { pointer-events: auto; }
 			/* Styled like the on-screen controls' Back and Pause buttons (#touch .back, below). */
 			#corner button {
 				height: calc(min(19vmin, 88px) * 0.45 + 4px); /* + the borders, which .tbutton adds outside */
@@ -128,6 +128,24 @@
 			}
 			#corner button:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 			#corner button:disabled { cursor: default; }
+			/* The Stats panel (the Stats button; see stats.js): small, so the game stays playable under it. */
+			#statsPanel {
+				max-width: min(92vw, 440px);
+				padding: 6px 8px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.35);
+				background: rgba(0, 0, 0, 0.75);
+				color: rgba(255, 255, 255, 0.85);
+			}
+			#statsPanel[hidden] { display: none; }
+			#statsPanel pre {
+				margin: 0 0 6px;
+				font: 10px/1.35 ui-monospace, Menlo, monospace;
+				white-space: pre-wrap;
+				user-select: text;
+				-webkit-user-select: text;
+			}
+			#statsPanel .row { justify-content: flex-end; }
 			/* The AI opponents picker (the AI button; see main.js). */
 			#aiPanel {
 				display: grid;
@@ -259,8 +277,15 @@
 				<button id="music" title="Download the game's music" hidden></button>
 				<button id="mute" title="Toggle sound">Sound: on</button>
 			</div>
-			<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
+			<div class="row">
+				<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
+				<button id="statsToggle" title="Performance numbers (frame times, online ticks, ping…)" hidden>Stats</button>
+			</div>
 			<div id="aiPanel" hidden></div>
+			<div id="statsPanel" hidden>
+				<pre></pre>
+				<div class="row"><button class="copy">Copy report</button><button class="reset">Reset</button></div>
+			</div>
 		</div>
 		<div id="overlay">
 			<div id="previewNote" class="hint" hidden></div>

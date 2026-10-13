@@ -6,6 +6,8 @@
 //    so a redeploy can wait until nobody is playing (tools/deploy-tfex-server.sh).
 //  - GET /turn?room=<id>&peer=<uuid>: ICE servers (STUN, and Cloudflare TURN credentials when
 //    configured) for browser pages whose peer is in that lobby.
+//  - POST /report, GET /reports: the pages' performance reports (reports.js), kept in one Reports
+//    object.
 // The logic lives in matchmaker.js and signal.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
@@ -13,6 +15,7 @@ import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
 import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
+import { KEEP, LIST_LIMIT, MAX_REPORT, parseReport, RateLimit } from "./reports.js";
 
 export default {
 	async fetch(request, env) {
@@ -21,6 +24,8 @@ export default {
 		if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
 			if (url.pathname === "/turn") return turn(request, env);
 			if (url.pathname === "/status") return status(request, env);
+			if (url.pathname === "/report") return report(request, env);
+			if (url.pathname === "/reports") return reports(request, env);
 			if (url.pathname === "/") {
 				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
 			}
@@ -60,15 +65,41 @@ async function turn(request, env) {
 	return Response.json({ iceServers: member ? await iceServers(env) : STUN_ONLY }, { headers });
 }
 
-// Only for whoever has STATUS_KEY (a wrangler secret); without it the endpoint doesn't exist.
-async function status(request, env) {
+// Whoever has STATUS_KEY (a wrangler secret).
+function hasStatusKey(request, env) {
 	const given = new TextEncoder().encode(request.headers.get("Authorization") ?? "");
 	const expected = new TextEncoder().encode(`Bearer ${env.STATUS_KEY}`);
-	if (!env.STATUS_KEY || env.STATUS_KEY.length < 16 || given.byteLength !== expected.byteLength || !crypto.subtle.timingSafeEqual(given, expected)) {
-		return new Response("Not found", { status: 404 });
-	}
+	return !!env.STATUS_KEY && env.STATUS_KEY.length >= 16 && given.byteLength === expected.byteLength && crypto.subtle.timingSafeEqual(given, expected);
+}
+
+// Only for whoever has STATUS_KEY; without it the endpoint doesn't exist.
+async function status(request, env) {
+	if (!hasStatusKey(request, env)) return new Response("Not found", { status: 404 });
 	const stats = await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch("https://matchmaker/stats");
 	return new Response(stats.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}
+
+// A page's performance report (reports.js), from the site's own origins.
+async function report(request, env) {
+	const origin = request.headers.get("Origin");
+	if (!origin || !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
+	if (request.method === "OPTIONS") {
+		return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" } });
+	}
+	if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers });
+	if (Number(request.headers.get("Content-Length") ?? 0) > MAX_REPORT) return new Response("Too large", { status: 413, headers });
+	const forward = new Request("https://reports/add", { method: "POST", body: await request.text(), headers: { "X-Client-IP": clientIp(request) ?? "" } });
+	const r = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(forward);
+	return new Response(null, { status: r.status, headers });
+}
+
+// The stored reports, for whoever has STATUS_KEY.
+async function reports(request, env) {
+	if (!hasStatusKey(request, env)) return new Response("Not found", { status: 404 });
+	const since = Number(new URL(request.url).searchParams.get("since") ?? 0) || 0;
+	const r = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(`https://reports/list?since=${since}`);
+	return new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
 const clientIp = (request) => request.headers.get("CF-Connecting-IP");
@@ -240,5 +271,33 @@ export class SignalRoomObject extends DurableObject {
 
 	webSocketError(ws) {
 		this.room.close(this.sockets.wrap(ws));
+	}
+}
+
+// The performance reports, in this object's SQLite storage (the newest KEEP).
+export class ReportsObject extends DurableObject {
+	constructor(ctx, env) {
+		super(ctx, env);
+		this.limit = new RateLimit();
+		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, report TEXT NOT NULL)");
+	}
+
+	async fetch(request) {
+		const url = new URL(request.url);
+		const sql = this.ctx.storage.sql;
+		if (url.pathname === "/add") {
+			if (!this.limit.allow(request.headers.get("X-Client-IP") ?? "")) return new Response(null, { status: 429 });
+			const report = parseReport(await request.text());
+			if (!report) return new Response(null, { status: 400 });
+			sql.exec("INSERT INTO reports (at, report) VALUES (?, ?)", Date.now(), report);
+			sql.exec("DELETE FROM reports WHERE id <= (SELECT MAX(id) FROM reports) - ?", KEEP);
+			return new Response(null, { status: 204 });
+		}
+		if (url.pathname === "/list") {
+			const since = Number(url.searchParams.get("since") ?? 0) || 0;
+			const rows = sql.exec("SELECT id, at, report FROM reports WHERE id > ? ORDER BY id LIMIT ?", since, LIST_LIMIT).toArray();
+			return Response.json({ reports: rows.map((r) => ({ id: r.id, at: r.at, report: JSON.parse(r.report) })) });
+		}
+		return new Response("Not found", { status: 404 });
 	}
 }

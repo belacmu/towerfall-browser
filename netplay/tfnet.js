@@ -22,7 +22,7 @@
 var LibraryTFNet = {
 	// (Emscripten copies these objects into the build as source text, which turns a Map into {};
 	// the postsets create them at startup instead.)
-	$TFNet__postset: "TFNet.sockets = new Map();",
+	$TFNet__postset: "TFNet.sockets = new Map(); if (!ENVIRONMENT_IS_PTHREAD) globalThis.tfnetStats = TFNet.stats;",
 	$TFNet: {
 		sockets: null,
 		next: 1,
@@ -62,6 +62,21 @@ var LibraryTFNet = {
 				.finally(() => clearTimeout(timer));
 			TFNet.ice = { url, at: performance.now(), servers };
 			return servers;
+		},
+
+		// Packet timing for the page's Stats panel (stats.js reads and resets it): how long each
+		// received packet waited on the page before the game took it (tfnet_recv_all). (How long the
+		// browser held it before the handler ran can't be read: the event is stamped at dispatch.)
+		stats: { packets: 0, wait: null, path: "" },
+		timing() {
+			return { n: 0, sum: 0, max: 0, over4: 0, over16: 0 };
+		},
+		time(t, ms) {
+			t.n++;
+			t.sum += ms;
+			if (ms > t.max) t.max = ms;
+			if (ms > 4) t.over4++;
+			if (ms > 16.7) t.over16++;
 		},
 
 		// Bumps one of a socket's signal counters (see the top).
@@ -116,7 +131,8 @@ var LibraryTFNet = {
 				};
 				dc.onmessage = (e) => {
 					if (!(e.data instanceof ArrayBuffer)) return;
-					s.inbox.push([uuid, new Uint8Array(e.data)]);
+					TFNet.stats.packets++;
+					s.inbox.push([uuid, new Uint8Array(e.data), performance.now()]);
 					TFNet.bump(s, 0);
 				};
 				dc.onclose = () => {
@@ -141,6 +157,7 @@ var LibraryTFNet = {
 						});
 					} catch {}
 					console.log(`[tfnet] connected to peer ${uuid}${path} in ${Math.round(performance.now() - started)} ms`);
+					TFNet.stats.path = path.trim();
 				};
 				s.peers.set(uuid, peer);
 				return peer;
@@ -380,13 +397,15 @@ var LibraryTFNet = {
 		const s = TFNet.sockets.get(h);
 		if (!s) return 0;
 		let at = 0;
+		const now = performance.now();
 		while (s.inbox.length) {
-			const [uuid, bytes] = s.inbox[0];
+			const [uuid, bytes, arrived] = s.inbox[0];
 			if (at + 20 + bytes.length > cap) {
 				if (at === 0) s.inbox.shift(); // can't ever fit: drop it (unreliable channel anyway)
 				break;
 			}
 			s.inbox.shift();
+			TFNet.time((TFNet.stats.wait ??= TFNet.timing()), now - arrived);
 			TFNet.uuidToBytes(uuid, buf + at);
 			HEAPU8[buf + at + 16] = bytes.length & 255;
 			HEAPU8[buf + at + 17] = (bytes.length >> 8) & 255;
