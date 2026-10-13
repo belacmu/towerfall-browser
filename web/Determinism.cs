@@ -17,6 +17,61 @@ public static class Determinism
 		return $"first pass {first:x8}, after warm-up {later:x8}";
 	}
 
+	// Math library results, against the Switch game's own sin/cos/atan2/pow (the cross-play probe,
+	// ~/Code/tfx-crossplay-exlaunch, computes the same inputs on the Switch and logs the same
+	// hashes). The game's Math.Sin/Cos/Atan2/Pow are exactly these calls on both platforms. Twice:
+	// interpreted, then after warm-up (the jiterpreter may compile Math calls differently).
+	public static string MathTest()
+	{
+		string first = MathPass();
+		string later = "";
+		for (int i = 0; i < 20; i++) later = MathPass();
+		return first == later ? $"{first} (same after warm-up)" : $"first pass {first}; after warm-up {later}";
+	}
+
+	private static float Range(float lo, float hi)
+	{
+		double t = (Next() % 1000001) / 1000000.0;
+		return (float)(lo + t * (hi - lo));
+	}
+
+	private sealed class Fnv64
+	{
+		public ulong H = 1469598103934665603ul;
+		public void Mix(double d)
+		{
+			ulong bits = double.IsNaN(d) ? 0x7FF8000000000000ul : (ulong)BitConverter.DoubleToInt64Bits(d);
+			for (int i = 0; i < 8; i++)
+			{
+				H ^= (bits >> (8 * i)) & 0xFF;
+				H *= 1099511628211ul;
+			}
+		}
+	}
+
+	private static string MathPass()
+	{
+		var hs = new Fnv64();
+		var hc = new Fnv64();
+		var ha = new Fnv64();
+		var hp = new Fnv64();
+		state = 2463534242;
+		for (int i = 0; i < 100000; i++)
+		{
+			float angle = Range(-10f, 10f);
+			hs.Mix(Math.Sin(angle));
+			hc.Mix(Math.Cos(angle));
+			float y = Range(-500f, 500f);
+			float x = Range(-500f, 500f);
+			ha.Mix(Math.Atan2(y, x));
+			float b = Range(0f, 2f);
+			float e = Range(0f, 3f);
+			hp.Mix(Math.Pow(b, e));
+			hp.Mix(Math.Pow(0.9800000190734863, e)); // Arrow.ArrowUpdate's drag
+		}
+		return $"sin {hs.H:x16} cos {hc.H:x16} atan2 {ha.H:x16} pow {hp.H:x16}";
+	}
+
 	// xorshift32: the same sequence in C# and JavaScript (integer only).
 	private static uint state;
 	private static uint Next()

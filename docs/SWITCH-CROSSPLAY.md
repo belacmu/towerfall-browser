@@ -87,3 +87,60 @@ A name-based call graph over the PC decompile, starting at every `Update` and sk
   kept the algorithm; 2d confirms.
 - **Dictionary loops** only at load time (`GameData.Load`, `DarkWorldTowerData.Load`) and in random
   level generation. Worth one look in 2e (enumeration order after load).
+
+### 2c. Math library: sin, cos, atan2 match; pow fixed (2026-10-13)
+
+On the Switch, `Math.Sin`, `Cos`, `Atan2` and `Pow` are tail calls into the SDK's `sin`, `cos`,
+`atan2` and `pow` (imports, found through the import table); `Math.Sqrt` is an inline `fsqrt`.
+
+**How it was tested.**
+- The probe (`tools/switch-probe`, an exlaunch module run in Ryujinx) calls those SDK functions on
+  100,000 inputs each, in game-like ranges (angles −10..10, positions −500..500, `pow(0..2, 0..3)`,
+  plus the arrow drag's `pow(0.98f, 0..3)`).
+- The browser's `mathtest` host command computes the same inputs.
+- A C++ build of the probe's input generator on the Mac agrees with desktop .NET, so the inputs
+  are identical on both sides.
+
+| | sin | cos | atan2 | pow |
+|---|---|---|---|---|
+| Switch (SDK, Ryujinx) | `07301656689ca354` | `5ca7e6ef1f70778b` | `c85d1691abc73032` | `d3d1af53b719d844` |
+| Browser, Chrome (interpreted and warmed up) | `07301656689ca354` | `5ca7e6ef1f70778b` | `c85d1691abc73032` | `2ca2e37827dfbaea` |
+| Browser, Safari (iOS 26.4 Simulator) | same as Chrome | | | |
+| Desktop .NET on macOS (Apple's libm) | `6c8ab704…` | `c2a942fa…` | `1d38b607…` | `2d05de53…` |
+
+**`sin`, `cos` and `atan2` are bit-identical** between the Switch and the browser, in every
+browser engine tested.
+
+**`pow` differs. Fix: musl's `pow` on the Switch.**
+- The browser's `pow` is Emscripten's musl `pow` (Arm's optimized routines).
+- Built without its FMA path and with `-ffp-contract=off` (as WebAssembly runs it), it gives
+  `2ca2e37827dfbaea` on the Mac's ARM64 and **on the Switch**.
+- The probe points the game's `pow` import slot (`+0x47225b0`) at it, by a plain write (lazily bound
+  slots are writable data; `CodePatcher`'s code mirror crashed). The game runs normally with it.
+- In gameplay, `pow` only matters for the arrow drag in slow motion, where `TimeMult` isn't 1.
+
+### FPCR: no flush-to-zero (Ryujinx)
+
+`FPCR=0`: round to nearest, subnormals kept (FZ=0), NaNs propagated (DN=0). That's the same as
+WebAssembly. Ryujinx on Apple Silicon runs guest code on the real CPU, but the OS sets FPCR, so a
+read on real hardware still has to confirm it.
+
+### 2e. `Math.Round` differs: the Switch rounds halves up
+
+- **The difference.** BRUTE's `Math.Round(double)` (`+0xaca0`, called from `Actor.MoveH` at `+0x95bd08`
+  and `MoveV`) is `fadd d0, d0, #0.5; frintm d0, d0`, that is `floor(x + 0.5)`. .NET (desktop and
+  browser) rounds ties to even. Results differ on exact halves with an even whole part: 0.5 → 0 on
+  .NET but 1 on the Switch, 2.5 → 2 or 3.
+- **Why it matters.** `Actor.MoveH`/`MoveV` round the sub-pixel movement counter for every player and
+  arrow, so this would desync quickly.
+- **Fix.** Patch that function to `frintn d0, d0; ret` (ties to even). The Switch then rounds like
+  .NET, which also matches desktop PC TowerFall. It's one function shared by every caller of
+  `Math.Round(double)`. The likely reason it differs: `Math.Round` is a runtime-provided method
+  (an "icall") that BRUTE's runtime implements by hand, whereas ordinary library code like
+  `System.Random` was converted from Mono's C# source.
+
+### 2d. Random and the sort: left to the determinism test
+
+- **Random.** The seed constant is present, and `System.Random` is converted from Mono's
+  managed source, not hand-written like `Round`, so it should match. Step 3 checks it.
+- **Sort ties.** The treasure-spot sort gets a tie-proof comparison on both sides in any case.
