@@ -2,7 +2,7 @@
 //  1. Get the player's game files into OPFS (see gamefiles.js), which .NET mounts at /libsdl.
 //  2. Start the .NET runtime, load their TowerFall.exe, then tick it once per animation frame.
 
-import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
+import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, fromZip, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 import { startStats } from "./stats.js";
@@ -83,6 +83,11 @@ fetch("preview.json", { cache: "no-store" })
 		document.title = `TowerFall (preview: ${p.branch})`;
 	})
 	.catch(() => {});
+// The faint corner link on the start screen: to the branch preview, or from it back to the main site.
+if (/\/preview\/$/.test(location.pathname.replace(/index\.html$/, ""))) {
+	$("otherBuild").href = "../";
+	$("otherBuild").title = $("otherBuild").ariaLabel = "Main site";
+}
 
 // The Sound button steps through off, effects and on, remembered per browser; ?mute, ?effects and
 // ?unmute in the URL override it. "Effects" is the game's sound effects without its music, to play
@@ -323,7 +328,12 @@ function useFortRise() {
 	const params = new URLSearchParams(location.search);
 	if (params.has("vanilla")) return false;
 	if (params.has("fortrise")) return true;
-	return enabledCatalogMods().length > 0 || modState.custom.some((c) => c.enabled);
+	return enabledCatalogMods().length > 0 || enabledCustomMods().length > 0;
+}
+
+// The player's own mod zips that will be installed (none while mods are switched off).
+function enabledCustomMods() {
+	return modState.off ? [] : modState.custom.filter((c) => c.enabled);
 }
 
 async function renderMods() {
@@ -351,11 +361,16 @@ async function renderMods() {
 
 	const files = [
 		...enabledCatalogMods().map((m) => ({ name: m.name, version: m.version, sha256: m.entry.file.sha256 })),
-		...modState.custom.filter((c) => c.enabled).map((c) => ({ name: c.file, sha256: c.sha256 })),
+		...enabledCustomMods().map((c) => ({ name: c.file, sha256: c.sha256 })),
 	];
-	$("modSummary").textContent = files.length
-		? `${files.length} on · mod set ${await Mods.fingerprint(files)}`
-		: "off (plain TowerFall)";
+	$("modSummary").textContent = modState.off
+		? "All off: plain TowerFall (your picks are kept)"
+		: files.length
+			? `${names.size + enabledCustomMods().length} on${names.has("TF.EX") ? " · online play" : ""} · mod set ${await Mods.fingerprint(files)}`
+			: "None picked: plain TowerFall";
+	$("modsToggle").textContent = modState.off ? "Off" : "On";
+	$("modsToggle").setAttribute("aria-pressed", String(!modState.off));
+	$("modsPanel").classList.toggle("off", modState.off);
 	const missing = Mods.missingDependencies(catalog, enabledCatalogMods());
 	$("modWarning").textContent = missing.length ? `Also needs mods that aren't available here: ${missing.join(", ")}.` : "";
 	patchAhead();
@@ -399,6 +414,12 @@ $("modList").addEventListener("click", (e) => {
 	Mods.saveState(modState);
 	renderMods();
 });
+// All mods on or off at once; the picks stay for when they're turned back on.
+$("modsToggle").addEventListener("click", () => {
+	modState.off = !modState.off;
+	Mods.saveState(modState);
+	renderMods();
+});
 $("addMod").addEventListener("click", () => $("modFile").click());
 $("modFile").addEventListener("change", async () => {
 	$("error").textContent = "";
@@ -426,7 +447,7 @@ async function prepareMods() {
 	status("Getting mods…");
 	$("bar").hidden = false;
 	const shas = await Mods.ensureFiles(enabledCatalogMods(), (done, total) => progress(done / total));
-	shas.push(...modState.custom.filter((c) => c.enabled).map((c) => c.sha256));
+	shas.push(...enabledCustomMods().map((c) => c.sha256));
 	await Mods.writeEnabled(shas);
 }
 
@@ -637,23 +658,71 @@ function acceptFolders(button, take) {
 	const onDrop = (e) => {
 		e.preventDefault();
 		const dt = e.dataTransfer;
+		// A zip of the folder, dropped on its own.
+		const zip = dt.files.length === 1 && /\.zip$/i.test(dt.files[0].name) ? dt.files[0] : null;
+		if (zip) return run(() => fromZip(zip), "zip");
 		// Read the entries now: DataTransfer items are only valid during the event.
 		const entries = fromDataTransfer(dt);
 		run(() => entries, "drop");
 	};
+	// The pick panel's other ways in: a zip file, or a link (see useLink).
+	if (button === $("choose")) {
+		$("chooseZip").onclick = () => {
+			$("zipFile").onchange = () => {
+				const zip = $("zipFile").files[0];
+				$("zipFile").value = "";
+				if (zip) run(() => fromZip(zip), "zip");
+			};
+			$("zipFile").click();
+		};
+		$("linkForm").onsubmit = (e) => {
+			e.preventDefault();
+			const link = $("linkInput").value.trim();
+			if (link) run(() => useLink(link), "zip-url");
+		};
+	}
 	addEventListener("dragover", onDragOver);
 	addEventListener("drop", onDrop);
 	return () => {
 		button.onclick = null;
+		if (button === $("choose")) $("chooseZip").onclick = $("linkForm").onsubmit = null;
 		removeEventListener("dragover", onDragOver);
 		removeEventListener("drop", onDrop);
 	};
 }
 
+// A link pasted on the pick panel: a private file host (its base URL, or a whole page link with
+// #gamefiles=), which is remembered like a #gamefiles= link and used from then on (the page reloads
+// to take it), or a zip of the TowerFall folder, whose entries are returned to import.
+async function useLink(link) {
+	const given = link.match(/[#&]gamefiles=([^&]*)/);
+	let url;
+	try {
+		url = new URL(given ? decodeURIComponent(given[1]) : link, location.href).href;
+	} catch {
+		throw new Error("That doesn't look like a link.");
+	}
+	if (!/\.zip$/i.test(new URL(url).pathname)) {
+		const host = url.endsWith("/") ? url : url + "/";
+		if (await fromServer(host)) {
+			try {
+				localStorage.setItem(HOST_KEY, host);
+			} catch {}
+			location.reload();
+			return new Promise(() => {}); // (the page is going away)
+		}
+	}
+	try {
+		return await fromZip(url);
+	} catch (e) {
+		throw new Error(`No game files found at that link: it isn't a game-file host, and as a zip: ${e?.message ?? e}`);
+	}
+}
+
 // Public site: the player supplies their own copy, by picking or dropping the install folder.
 function askForGame() {
 	const ask = () => {
-		status("Choose your TowerFall folder");
+		status("Bring your TowerFall");
 		$("bar").hidden = true;
 		$("pick").hidden = false;
 	};

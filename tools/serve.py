@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Dev server for the browser build. Threads need cross-origin isolation (COOP/COEP).
-Usage: serve.py [port] [--pages] [--verbose] [--diag]
+Usage: serve.py [port] [--pages] [--public] [--verbose] [--diag]
+--public: without the game files, like the public site (a first visit asks for them)
 --diag: pages report their memory (WebAssembly heap, JS heap), audio output level (peak sample; gaps: blocks with runs of exact silence) and new [perf]/error log lines
 here every 5 s, printed as [diag] lines, and run JavaScript queued with
 `curl 'localhost:PORT/__eval' --data 'towerfallCommand("profile")'` (result: a [diag] line). For browsers whose console can't be read, e.g. iOS
@@ -203,6 +204,9 @@ class Handler(SimpleHTTPRequestHandler):
         path = super().translate_path(path)
         rel = os.path.relpath(path, os.getcwd())
         if rel == "gamefiles" or rel.startswith("gamefiles" + os.sep):
+            # --public: like the public site, without the game files (a first visit asks for them).
+            if "--public" in sys.argv:
+                return os.path.join(WWW, "__no_game_files__")
             return os.path.join(GAMEFILES, rel[len("gamefiles") + 1:])
         return os.path.join(WWW, rel)
 

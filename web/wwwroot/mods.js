@@ -41,13 +41,15 @@ export function offered(catalog) {
 
 // --- What's enabled -----------------------------------------------------------------------
 
-// { enabled: [mod name], custom: [{ name, sha256, size, file }] }, per browser.
+// { enabled: [mod name], custom: [{ name, sha256, size, file }], off }, per browser. Without a
+// saved choice, online play (TF.EX) is on. `off` turns every mod off and keeps the choice for later.
+export const DEFAULT_ENABLED = ["TF.EX"];
 export function loadState() {
 	try {
 		const s = JSON.parse(localStorage.getItem(STATE_KEY));
-		if (s && Array.isArray(s.enabled)) return { enabled: s.enabled, custom: s.custom ?? [] };
+		if (s && Array.isArray(s.enabled)) return { enabled: s.enabled, custom: s.custom ?? [], off: s.off === true };
 	} catch {}
-	return { enabled: [], custom: [] };
+	return { enabled: [...DEFAULT_ENABLED], custom: [], off: false };
 }
 
 export function saveState(state) {
@@ -59,7 +61,7 @@ export function saveState(state) {
 // ?mods=a,b overrides what's enabled (for tests and shareable links).
 export function enabledNames(state) {
 	const param = new URLSearchParams(location.search).get("mods");
-	return param != null ? param.split(",").filter(Boolean) : state.enabled;
+	return param != null ? param.split(",").filter(Boolean) : state.off ? [] : state.enabled;
 }
 
 // The enabled catalog mods plus everything they depend on (that's in the catalog).
