@@ -696,6 +696,11 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] save: {(save != null ? "saved" : "no save data")}");
 				return;
 			}
+			if (words[0] == "floattest")
+			{
+				Console.WriteLine($"[command] floattest: {Determinism.FloatTest()}");
+				return;
+			}
 			if (words[0] == "bench")
 			{
 				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);
