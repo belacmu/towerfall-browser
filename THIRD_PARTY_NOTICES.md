@@ -59,5 +59,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Silkscreen (font)
+
+`web/wwwroot/fonts/Silkscreen-*.ttf`, the start screen's pixel font, from
+https://github.com/googlefonts/silkscreen (via google/fonts). Copyright 2001 The Silkscreen
+Project Authors. Licensed under the SIL Open Font License 1.1, included as
+`web/wwwroot/fonts/OFL.txt`.
+
 The approach (loading the player's own game files, patched FNA in WebAssembly) follows
 https://github.com/MercuryWorkshop/celeste-wasm.

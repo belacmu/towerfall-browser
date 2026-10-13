@@ -3,7 +3,8 @@
 //
 // Sources, all reduced to a flat list of { path, size, open() -> Promise<Blob | Response> } (plus
 // `pack` from a server that has the files in a pack, see fromServer):
-//   - a folder the player picks or drops (public site: no game files are hosted), or
+//   - a folder the player picks or drops (public site: no game files are hosted),
+//   - a zip of that folder, picked, dropped or at a URL (fromZip), or
 //   - gamefiles/manifest.json on a server that hosts the files: this one (tools/serve.py's private
 //     mode) or a private file host elsewhere (cloudflare/, given as a base URL).
 // Paths are relative to whatever folder was supplied; locateGame() finds the game inside it, so
@@ -95,6 +96,107 @@ export async function fromDataTransfer(dataTransfer) {
 	};
 	for (const root of roots) await walk(root, "");
 	return out;
+}
+
+// A zip of the TowerFall folder: a File the player picks or drops, or a URL (read with range
+// requests, so the zip is never downloaded whole; the server must allow ranges, and other sites
+// must send CORS headers). Reads the zip's central directory, then each file's data on open():
+// stored files as they are, deflated ones through the browser's DecompressionStream. ZIP64
+// archives (over 4 GB, or a zip64 directory some tools always write) are understood too.
+export async function fromZip(source) {
+	const read = typeof source === "string" ? rangeReader(source) : async (offset, length) => new Uint8Array(await source.slice(offset, offset + length).arrayBuffer());
+	const size = typeof source === "string" ? await zipSize(source) : source.size;
+	const u16 = (b, i) => b[i] | (b[i + 1] << 8);
+	const u32 = (b, i) => (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0;
+	const u64 = (b, i) => u32(b, i) + u32(b, i + 4) * 2 ** 32;
+
+	// The end of central directory record, in the last 64 KB (its comment can be up to 65,535 bytes).
+	const tailLength = Math.min(size, 65557);
+	const tail = await read(size - tailLength, tailLength);
+	let eocd = -1;
+	for (let i = tail.length - 22; i >= 0; i--) {
+		if (u32(tail, i) === 0x06054b50) {
+			eocd = i;
+			break;
+		}
+	}
+	if (eocd < 0) throw new Error("That isn't a zip file (no zip directory at its end).");
+	let count = u16(tail, eocd + 10);
+	let dirSize = u32(tail, eocd + 12);
+	let dirOffset = u32(tail, eocd + 16);
+	if (count === 0xffff || dirSize === 0xffffffff || dirOffset === 0xffffffff) {
+		const locator = eocd - 20;
+		if (locator < 0 || u32(tail, locator) !== 0x07064b50) throw new Error("This zip's directory couldn't be read (ZIP64 locator missing).");
+		const z = await read(u64(tail, locator + 8), 56);
+		if (u32(z, 0) !== 0x06064b50) throw new Error("This zip's directory couldn't be read (ZIP64 record missing).");
+		[count, dirSize, dirOffset] = [u64(z, 32), u64(z, 40), u64(z, 48)];
+	}
+
+	const dir = await read(dirOffset, dirSize);
+	const names = new TextDecoder();
+	const entries = [];
+	for (let i = 0, n = 0; n < count; n++) {
+		if (u32(dir, i) !== 0x02014b50) throw new Error("This zip's directory is damaged.");
+		const method = u16(dir, i + 10);
+		let compressed = u32(dir, i + 20);
+		let uncompressed = u32(dir, i + 24);
+		const nameLength = u16(dir, i + 28);
+		const extraLength = u16(dir, i + 30);
+		const commentLength = u16(dir, i + 32);
+		let local = u32(dir, i + 42);
+		const name = names.decode(dir.subarray(i + 46, i + 46 + nameLength));
+		// ZIP64 extra field: the 64-bit values, in this order, for those set to 0xffffffff above.
+		for (let e = i + 46 + nameLength, end = e + extraLength; e + 4 <= end; e += 4 + u16(dir, e + 2)) {
+			if (u16(dir, e) !== 0x0001) continue;
+			let at = e + 4;
+			if (uncompressed === 0xffffffff) (uncompressed = u64(dir, at)), (at += 8);
+			if (compressed === 0xffffffff) (compressed = u64(dir, at)), (at += 8);
+			if (local === 0xffffffff) local = u64(dir, at);
+		}
+		i += 46 + nameLength + extraLength + commentLength;
+		if (name.endsWith("/") || name.startsWith("__MACOSX/")) continue;
+		if (method !== 0 && method !== 8) throw new Error(`${name} is compressed in a way this page can't unpack (method ${method}); zip it with ordinary compression.`);
+		entries.push({
+			path: name,
+			size: uncompressed,
+			open: async () => {
+				// The local header repeats the name and has its own extra field before the data.
+				const header = await read(local, 30);
+				if (u32(header, 0) !== 0x04034b50) throw new Error(`${name}: damaged zip entry`);
+				const start = local + 30 + u16(header, 26) + u16(header, 28);
+				const body = typeof source === "string" ? await rangeStream(source, start, compressed) : source.slice(start, start + compressed).stream();
+				return new Response(method === 8 ? body.pipeThrough(new DecompressionStream("deflate-raw")) : body);
+			},
+		});
+	}
+	return entries;
+}
+
+async function zipSize(url) {
+	// A one-byte range tells both the size (Content-Range) and that ranges work.
+	const res = await fetch(url, { headers: { Range: "bytes=0-0" } });
+	const total = Number(res.headers.get("Content-Range")?.split("/")[1]);
+	res.body?.cancel();
+	if (res.status !== 206 || !total) {
+		throw new Error(res.ok
+			? "That server sent the whole zip instead of parts of it: it needs to allow range requests (and, on another site, expose Content-Range with CORS)."
+			: `Couldn't get the zip (${res.status}).`);
+	}
+	return total;
+}
+
+function rangeReader(url) {
+	return async (offset, length) => new Uint8Array(await (await rangeStreamResponse(url, offset, length)).arrayBuffer());
+}
+
+async function rangeStream(url, offset, length) {
+	return (await rangeStreamResponse(url, offset, length)).body;
+}
+
+async function rangeStreamResponse(url, offset, length) {
+	const res = await fetch(url, { headers: { Range: `bytes=${offset}-${offset + length - 1}` } });
+	if (res.status !== 206) throw new Error(`Couldn't read part of the zip (${res.status}).`);
+	return res;
 }
 
 // --- Finding the game inside whatever was supplied ------------------------------------------

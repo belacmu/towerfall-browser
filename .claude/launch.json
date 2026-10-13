@@ -163,6 +163,16 @@
       "env": {
         "TOWERFALL_WWW": "web/bin/ab-new"
       }
+    },
+    {
+      "name": "towerfall-public",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/serve.py",
+        "8088",
+        "--public"
+      ],
+      "port": 8088
     }
   ]
 }
