@@ -1,0 +1,101 @@
+# Builds r58playz's Mono runtime with its wasm JIT (r58playz/dotnet-runtime, wasm-jspi-jit-10.0.3)
+# from source, the way r58Playz/FNA-WASM-Build's own CI does: its last published pack (2026-07-25)
+# predates the JIT fixes we need (detour stubs, qualified deny lists; docs/COMPILATION.md). Runs on
+# a push that changes this file, or by hand. The artifact "runtime-jit" holds what
+# tools/fetch-runtime.sh expects from a release (dotnet-jspi-jit.zip, liba.o, hot_reload_detour.o),
+# the runtime's internal-call table and SOURCE.txt (the commits it was built from):
+#   RUNTIME_RUN=<run id> OUT=vendor/runtime-jit tools/fetch-runtime.sh
+name: Runtime (JIT)
+
+on:
+  push:
+    paths: [.github/workflows/runtime-jit.yml]
+  workflow_dispatch:
+    inputs:
+      runtime_ref:
+        description: r58playz/dotnet-runtime branch or commit
+        default: wasm-jspi-jit-10.0.3
+      build_ref:
+        description: r58Playz/FNA-WASM-Build branch or commit (build scripts, liba)
+        default: 15583b12e55158d2f7ad7976eda8613f3ce5c7cd
+
+permissions:
+  contents: read
+
+env:
+  RUNTIME_REF: ${{ inputs.runtime_ref || 'wasm-jspi-jit-10.0.3' }}
+  BUILD_REF: ${{ inputs.build_ref || '15583b12e55158d2f7ad7976eda8613f3ce5c7cd' }}
+  EMSDK_VERSION: 3.1.56
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: r58Playz/FNA-WASM-Build
+          ref: ${{ env.BUILD_REF }}
+
+      # The runtime build needs more disk than the runner leaves free.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt -y update
+          sudo apt install -y ninja-build cmake llvm lld clang build-essential python-is-python3 curl git lldb libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev pigz cpio ripgrep p7zip-full
+
+      - name: Check out the runtime
+        run: |
+          # A branch or a commit, without the repository's history.
+          git init --quiet liba/runtime
+          git -C liba/runtime fetch --quiet --depth=1 https://github.com/r58playz/dotnet-runtime "$RUNTIME_REF"
+          git -C liba/runtime checkout --quiet FETCH_HEAD
+          {
+            echo "r58playz/dotnet-runtime $RUNTIME_REF $(git -C liba/runtime rev-parse HEAD)"
+            echo "r58Playz/FNA-WASM-Build $BUILD_REF $(git rev-parse HEAD)"
+            echo "emsdk $EMSDK_VERSION"
+          } | tee SOURCE.txt
+
+      # MonoMod's detours: interpreter hooks and the hot-reload component, built against this
+      # runtime's headers (the interpreter's structures differ between the branches).
+      - name: liba
+        working-directory: liba
+        run: |
+          for f in liba hot_reload_detour; do
+            emcc $f.c -r -o $f.o -DHOST_BROWSER -DHOST_WASM -DTARGET_WASM \
+              -Iruntime/src/mono/ -Iruntime/src/mono/mono/ -Iruntime/src/native/public/ -Iruntime/src/mono/mono/eglib/ -Iruntime/src/native/ -I.
+          done
+
+      - name: Runtime
+        env:
+          WASM_ENABLE_JSPI: "true"
+        run: ./build-dotnet.sh ./liba/runtime true ./liba/runtime.zip
+
+      # The internal calls this runtime has, for the app build (see RuntimeIcallTable in
+      # web/TowerFallBrowser.csproj); the workload's own compiler doesn't know the fork's.
+      - name: Internal-call table
+        run: |
+          cross=liba/runtime/artifacts/bin/mono/browser.wasm.Release/cross/browser-wasm
+          LD_LIBRARY_PATH=$cross $cross/mono-aot-cross --print-icall-table > icall-table.json
+          test -s icall-table.json
+
+      - name: Collect
+        run: |
+          mkdir out
+          cp liba/runtime.zip out/dotnet-jspi-jit.zip
+          cp liba/liba.o liba/hot_reload_detour.o icall-table.json SOURCE.txt out/
+          (cd out && sha256sum * | tee SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-jit
+          path: out/
+          retention-days: 90

@@ -5,6 +5,20 @@
 # Used for Harmony-based FortRise mods; see docs/FORTRISE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# RUNTIME_RUN=<run id> takes the pack from a run of our "Runtime (JIT)" workflow
+# (.github/workflows/runtime-jit.yml) instead of a release, with its internal-call table.
+if [ -n "${RUNTIME_RUN:-}" ]; then
+	OUT=${OUT:-vendor/runtime-jit}
+	want="run $RUNTIME_RUN"
+	[ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
+	rm -rf "$OUT" && mkdir -p "$OUT"
+	gh run download "$RUNTIME_RUN" -R belacmu/towerfall-browser -n runtime-jit -D "$OUT"
+	(cd "$OUT" && shasum -a 256 -c SHA256SUMS >/dev/null) || { echo "run $RUNTIME_RUN: checksums don't match" >&2; exit 1; }
+	unzip -q "$OUT/dotnet-jspi-jit.zip" -d "$OUT/dotnet" && rm "$OUT/dotnet-jspi-jit.zip"
+	echo "$want" > "$OUT/.stamp"
+	cat "$OUT/SOURCE.txt"
+	exit 0
+fi
 RELEASE=${RUNTIME_RELEASE:-5ecb4294-8cbb-42f1-a73b-476bb46ddbb6}
 # RUNTIME_ZIP picks a variant of a release (dotnet.zip, or e.g. dotnet-jspi-jit.zip); OUT where to.
 ZIP=${RUNTIME_ZIP:-dotnet.zip}

@@ -76,6 +76,8 @@
 	     (upstream 10.0.x), which doesn't know the ones r58playz's runtime adds; supply the runtime's
 	     own list instead (patches/runtime/, regenerate when the runtime pack changes). -->
 	<PropertyGroup>
+		<!-- A runtime built by our "Runtime (JIT)" workflow brings its own. -->
+		<RuntimeIcallTable Condition="'$(RuntimeIcallTable)' == '' and Exists('$(RuntimeDir)\icall-table.json')">$(RuntimeDir)\icall-table.json</RuntimeIcallTable>
 		<RuntimeIcallTable Condition="'$(RuntimeIcallTable)' == ''">$(MSBuildProjectDirectory)\..\patches\runtime\icall-table-r58playz-wasm-10.0.3.json</RuntimeIcallTable>
 	</PropertyGroup>
 	<Target Name="UseRuntimeIcallTable" AfterTargets="_PrepareForBrowserWasmBuildNative" BeforeTargets="_GenerateManagedToNative" Condition="Exists('$(RuntimeIcallTable)')">
