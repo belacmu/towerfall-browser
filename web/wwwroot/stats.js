@@ -24,6 +24,7 @@ class Summary {
 		this.ping = { n: 0, sum: 0, max: 0 };
 		this.behind = 0;
 		this.inputDelay = null;
+		this.aheadFrom = null;
 		this.packets = 0;
 		this.wait = timing();
 		this.late = timing();
@@ -58,6 +59,7 @@ class Summary {
 			}
 			this.behind = Math.max(this.behind, w.localBehind ?? 0, w.remoteBehind ?? 0);
 			if (w.inputDelay != null) this.inputDelay = w.inputDelay;
+			if (w.aheadFrom != null) this.aheadFrom = w.aheadFrom;
 		}
 		this.packets += w.packets ?? 0;
 		merge(this.wait, w.wait);
@@ -95,6 +97,7 @@ class Summary {
 				rollbackTicksAvg: this.rollbacks ? r(this.rollbackTicks / this.rollbacks, 1) : 0,
 				rollbackTicksMax: this.deepestRollback,
 				slowingDownPercent: this.netplayFrames ? r((100 * this.aheadFrames) / this.netplayFrames, 0) : 0,
+				slowDownFromTicksAhead: this.aheadFrom, // (web/Netplay/AheadThreshold.cs; TF.EX's own rule is 1)
 				catchUpDroppedMs: r(this.droppedMs, 0),
 				pingMs: this.ping.n ? { avg: r(this.ping.sum / this.ping.n, 0), max: this.ping.max } : null,
 				// The same round trip measured by WebRTC: the network alone. Ping minus this is what

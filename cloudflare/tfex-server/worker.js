@@ -15,7 +15,7 @@ import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
 import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
-import { KEEP, LIST_LIMIT, MAX_REPORT, parseReport, RateLimit } from "./reports.js";
+import { KEEP, LIST_LIMIT, MAX_REPORT, parseReport, RateLimit, TAG_OLD_ONLINE_REPORTS } from "./reports.js";
 
 export default {
 	async fetch(request, env) {
@@ -280,6 +280,7 @@ export class ReportsObject extends DurableObject {
 		super(ctx, env);
 		this.limit = new RateLimit();
 		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, report TEXT NOT NULL)");
+		ctx.storage.sql.exec(TAG_OLD_ONLINE_REPORTS);
 	}
 
 	async fetch(request) {

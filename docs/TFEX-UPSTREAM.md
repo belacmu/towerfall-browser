@@ -66,8 +66,11 @@ noted; desktop .NET is faster, but the costs grow the same way.
   in `BorderButton.OnConfirm`) and `TrialsButton.MenuAction`.
 - **Ours:** `TfexPatches.PatchCoOpButtons` (`web/Netplay/TfexPatches.cs`).
 
-## Not yet measured
+## 6. Both players spend much of a match in slow motion (TF.EX's tick loop)
 
-- TF.EX slows the whole game by 10% whenever it's even one tick (4 ms) ahead of another player
-  (`IsFramesAhead`: `_framesAhead > 0`). In a ~90 ms ping match it was on 12-14% of the time. A
-  higher threshold might give steadier pacing; untested.
+- **What happens:** `IsFramesAhead` (`_framesAhead > 0`) slows the game 10% whenever GGRS's averaged
+  frame advantage is 1 tick (4 ms). Ordinary network jitter keeps it there much of the time.
+- **Measured (two equal players, ~92 ms ping with jitter, 2 matches each):** slowed down 20-29% of
+  the match at 1 tick, 2% at 2, 1% at 3; rollbacks per second and their depth about the same.
+- **Fix:** slow down from 2 ticks ahead.
+- **Ours:** `web/Netplay/AheadThreshold.cs`; reports carry `slowDownFromTicksAhead`.

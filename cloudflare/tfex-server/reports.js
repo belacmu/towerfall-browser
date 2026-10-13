@@ -23,8 +23,14 @@ export function parseReport(text) {
 	}
 	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 	if (value.kind !== "online" && value.kind !== "solo") return null;
+	// Pages from before reports named it slowed down from 1 tick ahead (TF.EX's own rule).
+	if (value.kind === "online" && value.slowDownFromTicksAhead == null) value.slowDownFromTicksAhead = 1;
 	return JSON.stringify(value);
 }
+
+// The same for reports stored before that (SQLite, run once by the Durable Object).
+export const TAG_OLD_ONLINE_REPORTS =
+	"UPDATE reports SET report = json_set(report, '$.slowDownFromTicksAhead', 1) WHERE json_extract(report, '$.kind') = 'online' AND json_extract(report, '$.slowDownFromTicksAhead') IS NULL";
 
 // Reports per address in the last hour (addresses are only held in memory, for this).
 export class RateLimit {

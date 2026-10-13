@@ -51,7 +51,7 @@ public static class Diagnostics
 		if (InSession() && framesAhead?.GetValue(netplay) is int ahead)
 		{
 			netplayFrames++;
-			if (ahead > 0) aheadFrames++; // TF.EX runs 10% slow while it's ahead of another player
+			if (ahead >= AheadThreshold.From) aheadFrames++; // TF.EX runs 10% slow while it's ahead of another player
 		}
 	}
 
@@ -74,7 +74,7 @@ public static class Diagnostics
 		{
 			if (lastCurrentFrame > 0 && frame >= lastCurrentFrame) sb.Append($",\"ticks\":{frame - lastCurrentFrame}");
 			lastCurrentFrame = frame;
-			sb.Append($",\"aheadFrames\":{aheadFrames},\"netplayFrames\":{netplayFrames}");
+			sb.Append($",\"aheadFrames\":{aheadFrames},\"netplayFrames\":{netplayFrames},\"aheadFrom\":{AheadThreshold.From}");
 			sb.Append($",\"rollbacks\":{rollbacks},\"rollbackTicks\":{rollbackTicks},\"deepestRollback\":{deepestRollback}");
 			sb.Append($",\"droppedMs\":{TickCatchUp.DroppedTotalMs - lastDroppedMs:0}");
 			try
