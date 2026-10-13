@@ -33,6 +33,7 @@
 #include "nn/fs.hpp"
 #include "patch/code_patcher.hpp"
 #include <lib/util/sys/modules.hpp>
+#include <common.hpp>
 
 #include <cstdint>
 #include <cstring>
@@ -287,6 +288,87 @@ static void GetFullKeyHook(NpadFullKeyState* out, const uint32_t& id) {
     }
 }
 
+/* ---- Rollback feasibility, phase 1: a read-only memory census ------------------------------------
+ * At frame kCensusFrame of the level (the game thread, frame start): the memory map, then a
+ * fingerprint of every 4 KB page of the region holding the player object (where the game's
+ * objects live) on two consecutive frames and 60 frames later: how big the state is, and how much
+ * of it changes per frame. Reads only. */
+constexpr int kCensusFrame = 120;
+constexpr size_t kMaxPages = 1u << 20;       /* 4 GB of 4 KB pages */
+static uint32_t g_pageHash[kMaxPages];       /* 4 MB */
+static uint32_t PageHash(const uint8_t* p) {
+    const uint64_t* q = reinterpret_cast<const uint64_t*>(p);
+    uint64_t h = 0;
+    for (int i = 0; i < 512; i++) h = (h ^ q[i]) * 0x100000001b3ull;
+    return (uint32_t)(h ^ (h >> 32));
+}
+
+/* Rollback feasibility, phase 1b: Boehm's own list of heap sections (GC_add_to_heap, +0x2857ed0,
+ * appends {start, bytes} at GC_arrays + 0x68e0 and counts them in GC_n_heap_sects; both found
+ * through pointers the code loads from +0x483b648 and +0x483b6e8). Everything the game allocates
+ * is in these sections; with the main module's globals (.data/.bss, Boehm's state included) that is
+ * what a rollback snapshot would copy. How big, and how many pages change per frame? Reads only. */
+struct MemRange { uintptr_t start, size; };
+constexpr int kMaxRanges = 1100;
+static MemRange g_ranges[kMaxRanges];
+static int g_nRanges = 0, g_nHeap = 0;
+
+static void CollectRanges() {
+    g_nRanges = 0;
+    uintptr_t arrays = *reinterpret_cast<uintptr_t*>(Base() + 0x483b648);
+    uintptr_t count = **reinterpret_cast<uintptr_t**>(Base() + 0x483b6e8);
+    Logging.Log("[xplay] census: GC_arrays %#lx, %lu heap sections", (unsigned long)arrays, (unsigned long)count);
+    if (count > 1024) return;
+    uintptr_t total = 0, player = reinterpret_cast<uintptr_t>(g_player);
+    for (uintptr_t i = 0; i < count; i++) {
+        uintptr_t start = *reinterpret_cast<uintptr_t*>(arrays + 0x68e0 + i * 16);
+        uintptr_t bytes = *reinterpret_cast<uintptr_t*>(arrays + 0x68e8 + i * 16);
+        for (uintptr_t a = start; a < start + bytes && g_nRanges < kMaxRanges - 1;) {
+            MemoryInfo mi{}; u32 pi;
+            if (R_FAILED(svcQueryMemory(&mi, &pi, a))) break;
+            uintptr_t end = mi.addr + mi.size < start + bytes ? mi.addr + mi.size : start + bytes;
+            if (mi.perm & Perm_R) g_ranges[g_nRanges++] = { a, end - a };
+            else Logging.Log("[xplay] census:   (unreadable: %#lx, %lu KB)", (unsigned long)a, (unsigned long)((end - a) >> 10));
+            a = end;
+        }
+        total += bytes;
+        if (i < 12 || (player >= start && player < start + bytes))
+            Logging.Log("[xplay] census:   section %lu at %#lx, %lu KB%s", (unsigned long)i, (unsigned long)start,
+                        (unsigned long)(bytes >> 10), player >= start && player < start + bytes ? "  <- player" : "");
+    }
+    g_nHeap = g_nRanges;
+    auto& d = exl::util::GetMainModuleInfo().m_Data;
+    g_ranges[g_nRanges++] = { d.m_Start, d.m_Size };
+    Logging.Log("[xplay] census: GC heap total %lu KB; main module globals %lu KB at %#lx", (unsigned long)(total >> 10),
+                (unsigned long)(d.m_Size >> 10), (unsigned long)d.m_Start);
+}
+
+/* Fingerprints every page of the ranges; counts pages that differ from the last call, for the heap
+ * and for the globals. */
+static void ScanRanges(bool compare, size_t* heapChanged, size_t* globalsChanged) {
+    size_t k = 0, hc = 0, gc = 0;
+    for (int r = 0; r < g_nRanges; r++)
+        for (uintptr_t off = 0; off + 0x1000 <= g_ranges[r].size && k < kMaxPages; off += 0x1000, k++) {
+            uint32_t h = PageHash(reinterpret_cast<const uint8_t*>(g_ranges[r].start + off));
+            if (compare && h != g_pageHash[k]) (r < g_nHeap ? hc : gc)++;
+            g_pageHash[k] = h;
+        }
+    if (heapChanged) *heapChanged = hc;
+    if (globalsChanged) *globalsChanged = gc;
+}
+
+static void Census(int frame) {
+    size_t hc, gc;
+    if (frame == kCensusFrame) {
+        CollectRanges();
+        ScanRanges(false, nullptr, nullptr);
+    } else if (g_nRanges && (frame == kCensusFrame + 1 || frame == kCensusFrame + 2 || frame == kCensusFrame + 9)) {
+        ScanRanges(true, &hc, &gc);
+        Logging.Log("[xplay] census: frame %d: changed pages: heap %lu (%lu KB), globals %lu (%lu KB)", frame,
+                    (unsigned long)hc, (unsigned long)(hc * 4), (unsigned long)gc, (unsigned long)(gc * 4));
+    }
+}
+
 /* The game's InputState (natural layout: 9 bools, then MoveX, MoveY, AimAxis), in the registers
  * Player.Update is about to store: x8 = bytes 0..7, x9 = 8..15, x10 = 16..23, w11 = 24..27. */
 static bool g_prevJump, g_prevShoot, g_prevDodge, g_prevAlt;
@@ -296,6 +378,7 @@ HOOK_DEFINE_INLINE(InputStoreHook) {
         void* player = reinterpret_cast<void*>(ctx->X[19]);
         if (!g_player || player != g_player) return;
         g_frame++;
+        Census(g_frame);
         Logging.Log("[xplay] T %d %08x %08x %08x %08x", g_frame,
                     AsU32(Field(fld::Entity_PositionX)), AsU32(Field(fld::Entity_PositionY)),
                     AsU32(Field(fld::Player_SpeedX)), AsU32(Field(fld::Player_SpeedY)));
