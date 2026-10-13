@@ -65,10 +65,18 @@ jobs:
           } | tee SOURCE.txt
 
       # MonoMod's detours: interpreter hooks and the hot-reload component, built against this
-      # runtime's headers (the interpreter's structures differ between the branches).
+      # runtime's headers (the interpreter's structures differ between the branches). Detours go
+      # through the runtime's own body replacement (mono_body_set_il), which also drops code the JIT
+      # compiled from the old body: patches/runtime/liba-body-override.patch.
+      - uses: actions/checkout@v4
+        with:
+          path: towerfall-browser
+          sparse-checkout: patches/runtime
       - name: liba
         working-directory: liba
         run: |
+          patch -p2 < ../towerfall-browser/patches/runtime/liba-body-override.patch
+          echo "liba-body-override.patch $(sha256sum < ../towerfall-browser/patches/runtime/liba-body-override.patch | cut -c1-16)" >> ../SOURCE.txt
           for f in liba hot_reload_detour; do
             emcc $f.c -r -o $f.o -DHOST_BROWSER -DHOST_WASM -DTARGET_WASM \
               -Iruntime/src/mono/ -Iruntime/src/mono/mono/ -Iruntime/src/native/public/ -Iruntime/src/mono/mono/eglib/ -Iruntime/src/native/ -I.

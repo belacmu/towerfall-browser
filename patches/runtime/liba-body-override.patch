@@ -1,0 +1,37 @@
+--- a/liba/liba.c	2026-10-13 17:03:32
++++ b/liba/liba.c	2026-10-13 17:03:32
+@@ -109,9 +109,11 @@
+   mono->transformed = 0;
+ }
+ 
+-extern void hot_reload_insert_detour(MonoImage *image, guint32 token,
+-                                     gpointer code);
+-extern void hot_reload_remove_detour(MonoImage *image, guint32 token);
++// r58playz's JIT runtime (wasm-jspi-jit) replaces method bodies itself, so that it can also
++// invalidate code the JIT compiled from the old body (mini/interp/tiering.c). `code` is the header
++// and IL MonoMod's WasmDetourFactory builds; length 0 = read it from the header.
++extern int mono_body_set_il(MonoMethod *target, const guint8 *blob, guint32 len, int flags);
++extern int mono_body_clear(MonoMethod *target, int flags);
+ 
+ int magicdetour2allowed(gpointer ftnptr) {
+   InterpMethod *mono = ftnptr_to_imethod_local(ftnptr);
+@@ -126,16 +128,13 @@
+   InterpMethod *mono = ftnptr_to_imethod_local(ftnptr);
+   if (!mono || !mono->method || !mono->method->klass)
+     return;
+-  mono_class_get_image(mono->method->klass)->has_updates = TRUE;
+-  hot_reload_insert_detour(mono_class_get_image(mono->method->klass),
+-                           mono_metadata_token_index(mono->method->token),
+-                           code);
++  if (mono_body_set_il(mono->method, code, 0, 0) != 1)
++    fprintf(stderr, "[liba] detour refused for %s\n", mono->method->name);
+ }
+ 
+ void magicundetour2(gpointer ftnptr) {
+   InterpMethod *mono = ftnptr_to_imethod_local(ftnptr);
+   if (!mono || !mono->method || !mono->method->klass)
+     return;
+-  hot_reload_remove_detour(mono_class_get_image(mono->method->klass),
+-                           mono_metadata_token_index(mono->method->token));
++  mono_body_clear(mono->method, 0);
+ }
