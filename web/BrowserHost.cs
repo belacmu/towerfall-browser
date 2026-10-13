@@ -237,6 +237,7 @@ public static partial class BrowserHost
 				// (TFGame.Initialize, run by DoInitialize, loaded the save.)
 				UnlockArchers();
 				TfexPatches.Apply();
+				ReplayRecordFix.Install();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
 			// then e.g. "test" is the base game's own command)...
