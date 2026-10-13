@@ -238,6 +238,7 @@ public static partial class BrowserHost
 				UnlockArchers();
 				TfexPatches.Apply();
 				ReplayRecordFix.Install();
+				AheadThreshold.Install();
 				ReplayKeyStates.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until

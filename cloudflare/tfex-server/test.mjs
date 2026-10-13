@@ -154,6 +154,7 @@ test("reports: the site's pages can send one; other pages, non-reports and huge 
 	const marker = `test-${Math.random()}`;
 	const res = await send("https://belacmu.github.io", JSON.stringify({ kind: "online", marker, fps: 60 }));
 	eq(res.status, 204, "accepted");
+	eq((await send("https://belacmu.github.io", JSON.stringify({ kind: "online", marker: marker + "2", slowDownFromTicksAhead: 2 }))).status, 204, "accepted, with its setting");
 	eq(res.headers.get("access-control-allow-origin"), "https://belacmu.github.io", "CORS");
 	eq((await fetch(http + "/report", { method: "OPTIONS", headers: { Origin: "https://belacmu.github.io" } })).status, 204, "preflight");
 	eq((await send("https://example.com", JSON.stringify({ kind: "online" }))).status, 403, "another page");
@@ -163,7 +164,8 @@ test("reports: the site's pages can send one; other pages, non-reports and huge 
 	if (child) {
 		// (Locally /reports needs no key.)
 		const { reports } = await (await fetch(http + "/reports")).json();
-		eq(reports.some((r) => r.report.marker === marker), true, "listed");
+		eq(reports.find((r) => r.report.marker === marker)?.report.slowDownFromTicksAhead, 1, "listed; from before the setting was reported: 1");
+		eq(reports.find((r) => r.report.marker === marker + "2")?.report.slowDownFromTicksAhead, 2, "listed with its setting");
 	}
 });
 
