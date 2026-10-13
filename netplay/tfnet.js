@@ -79,6 +79,20 @@ var LibraryTFNet = {
 			if (ms > 16.7) t.over16++;
 		},
 
+		// ?netdelay=N[&netjitter=M], for testing online play over a slower network on one machine:
+		// received packets are held N ms (plus up to M ms at random) before the game can take them.
+		// Each player delays what it receives, so netdelay=40 on both makes about 80 ms of ping.
+		netDelay: null,
+		delay() {
+			if (TFNet.netDelay === null) {
+				const p = new URLSearchParams(globalThis.location?.search ?? "");
+				TFNet.netDelay = { ms: Math.max(0, Number(p.get("netdelay")) || 0), jitter: Math.max(0, Number(p.get("netjitter")) || 0) };
+				if (TFNet.netDelay.ms || TFNet.netDelay.jitter) console.log(`[tfnet] test: received packets held ${TFNet.netDelay.ms} ms + up to ${TFNet.netDelay.jitter} ms`);
+			}
+			const d = TFNet.netDelay;
+			return d.ms || d.jitter ? d.ms + Math.random() * d.jitter : 0;
+		},
+
 		// Bumps one of a socket's signal counters (see the top).
 		bump(s, counter) {
 			if (s.signal) Atomics.add(HEAP32, (s.signal >> 2) + counter, 1);
@@ -131,9 +145,16 @@ var LibraryTFNet = {
 				};
 				dc.onmessage = (e) => {
 					if (!(e.data instanceof ArrayBuffer)) return;
-					TFNet.stats.packets++;
-					s.inbox.push([uuid, new Uint8Array(e.data), performance.now()]);
-					TFNet.bump(s, 0);
+					const bytes = new Uint8Array(e.data);
+					const deliver = () => {
+						if (s.state !== 0) return;
+						TFNet.stats.packets++;
+						s.inbox.push([uuid, bytes, performance.now()]);
+						TFNet.bump(s, 0);
+					};
+					const held = TFNet.delay();
+					if (held) setTimeout(deliver, held);
+					else deliver();
 				};
 				dc.onclose = () => {
 					if (peer.connected) {
