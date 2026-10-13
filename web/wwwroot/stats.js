@@ -29,6 +29,7 @@ class Summary {
 		this.late = timing();
 		this.rtt = timing(); // WebRTC's own round trip: the network alone
 		this.path = "";
+		this.routes = "";
 		this.timeline = [];
 		this.step = null;
 	}
@@ -63,6 +64,7 @@ class Summary {
 		merge(this.late, w.late);
 		merge(this.rtt, w.rtt);
 		if (w.path) this.path = w.path;
+		if (w.routes) this.routes = w.routes;
 		// A coarse timeline, one row per TIMELINE_STEP_S.
 		this.step ??= new Summary.Step();
 		this.step.add(w);
@@ -101,6 +103,7 @@ class Summary {
 				framesBehindMax: this.behind,
 				inputDelayTicks: this.inputDelay,
 				connection: this.path,
+				routes: this.routes, // what each side found and tried (tfnet.js TFNet.routes)
 				packetsPerSecond: r(this.packets / this.online, 0),
 				packetToGameMs: summarize(this.wait),
 			});
@@ -182,7 +185,7 @@ function lateTimer() {
 function takePackets() {
 	const s = globalThis.tfnetStats;
 	if (!s) return {};
-	const out = { packets: s.packets, wait: s.wait, rtt: s.rtt, path: s.path };
+	const out = { packets: s.packets, wait: s.wait, rtt: s.rtt, path: s.path, routes: s.routes };
 	s.packets = 0;
 	s.wait = null;
 	s.rtt = null;
