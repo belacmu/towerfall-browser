@@ -144,3 +144,54 @@ read on real hardware still has to confirm it.
 - **Random.** The seed constant is present, and `System.Random` is converted from Mono's
   managed source, not hand-written like `Round`, so it should match. Step 3 checks it.
 - **Sort ties.** The treasure-spot sort gets a tie-proof comparison on both sides in any case.
+
+## 3. Determinism test: Trials, single player: pass (2026-10-13)
+
+**Scenario.** The first Trials level (Sacred Ground I), one player, the same scripted input on both
+sides. All 49 Trials level files are identical between the two versions, and Trials uses no random
+numbers in its rules, so this tests physics, input handling and rounding without a seed to align.
+
+**Result.** Player 1's position and speed (float bits) at the start of every frame are
+**bit-identical on the Switch (Ryujinx) and in the browser, across all 700 frames**. The script
+walks, jumps, lands, shoots, dodges diagonally and turns around (`tools/switch-probe/trial-script.txt`;
+the logs are `result-switch-700.txt` and `result-browser-700.txt`). Two Switch runs are also
+identical to each other.
+
+**What it took** (each is a requirement for real cross-play, not just for the test):
+- **Input at the game's level, frame-exact.**
+  - Controller polls (`nn::hid`) aren't in step with game frames on the Switch: the same poll-indexed
+    script landed on different frames run to run.
+  - So both sides replace player 1's `InputState` right after `PlayerInputs[i].GetState()` in
+    `Player.Update`:
+    - Switch: an inline hook at `+0xaef934`, where the 28 bytes sit in x8/x9/x10/w11.
+    - Browser: a Harmony transpiler.
+  - The script is written in the game's own terms (held flags, MoveX/MoveY; pressed = held now but not
+    last frame). That's also what online play exchanges, so controller mapping differences between
+    platforms don't matter.
+- **Fixed timestep.** Both games measure real frame time by default (Monocle's Engine turns
+  `IsFixedTimeStep` off), and that jitters.
+  - Switch: `Engine.Update`'s `IsFixedTimeStep` branch is forced (`+0x92d15c` → nop).
+  - Browser: the game runs with `IsFixedTimeStep = true`.
+- **The same timestep formula: a version difference.** In its fixed branch, PC 1.3.3.3's
+  `Engine.Update` sets `TimeMult = ActualDeltaTime * 60` (0.999996 with 166,666-tick frames). The
+  Switch's 1.4.1.6 sets `TimeMult = TimeRate` and `DeltaTime = TimeRate * (1/60f)`. The browser gets
+  the Switch's values (a transpiler on `Engine.Update`). This is the first game-logic difference
+  between the versions; the determinism test is what found it.
+- **The two fixes from step 2:** musl's `pow`, and ties-to-even `Math.Round`, applied on the Switch.
+- **No TF.EX in the browser for this test.** It's ticked by default in the mod list, so the test
+  uses `?fortrise&mods=` (FortRise for Harmony, no mods).
+
+**How to run it.**
+- **Switch:** the probe (`tools/switch-probe`) in Ryujinx, with `menu-to-trials.txt` + `trial-script.txt`
+  as `sdmc:/xplay/script.txt`. The menu part is controller input timed in polls from boot: through
+  the title, main menu and Trials select, then A presses to confirm the intro screens.
+- **Browser:** `?mute&autoplay&fortrise&mods=&mode=trials&command=xplay%20<script>`, where the script
+  is the T lines as `frame:flags:moveX:moveY`, comma-separated. Then press confirm (C) about seven times
+  to join, start and confirm the intro screens. The `[xplay] T` lines are the trajectory.
+
+**Not covered yet:**
+- **Random numbers:** a versus match, with `Calc.Random` seeded identically at round start on both
+  sides.
+- **Arrows' own positions,** and anything with two or more players (kills, catches, stomps).
+- **Slow motion** (`TimeRate` < 1, where `pow` matters).
+- **Real hardware,** for the FPCR value and timings.
