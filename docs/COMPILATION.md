@@ -226,6 +226,34 @@ the game and reaches the menu, but crashes as soon as the sync test starts. What
   made since 2026-07-25 (ikvmcraft uses the same one). Picking this up means building the runtime
   from that branch (FNA-WASM-Build's `build-dotnet.sh`, likely 1–2 h of CI per build).
 
+**Step 3, the JIT built from source: blocked on the runtime (2026-10-13).** Branch `ci/runtime-jit`
+(`perf/wasm-jit` plus main). The "Runtime (JIT)" workflow (`.github/workflows/runtime-jit.yml`)
+builds `wasm-jspi-jit-10.0.3` (tested: 814d531, 2026-10-12) in ~23 min on GitHub's runners, with
+liba built against the same headers and the runtime's own internal-call table. Use it with
+`RUNTIME_RUN=<run id> tools/fetch-runtime.sh`, then `MSBUILD_ARGS=-p:WasmJit=true tools/build.sh`.
+The JIT is now on by default (`MONO_WASM_JIT_AUTO=0` turns it off), so `?jit` isn't needed.
+- **With the JIT off it works:** FortRise's patch, TF.EX and the sync test run, at ~10–17 ms/frame
+  (SIMD off; same machine, other sessions idle). That's the figure the JIT has to beat.
+- **Detours now go through the runtime.** The runtime replaces method bodies itself
+  (`mono_body_set_il` / `mono_body_clear`, tiering.c), so it can drop code the JIT compiled from
+  the old body, and it expects liba's `magicdetour2` to call it. FNA-WASM-Build's liba still uses
+  the old hot-reload hook; `patches/runtime/liba-body-override.patch` switches it (verified with
+  the JIT off: TF.EX's patches apply and the sync test runs).
+- **Blocker 1, a JIT bug: delegates created in JIT-compiled code.** `ves_icall_mono_delegate_ctor_interp`
+  gets a function pointer the interpreter can't read and asserts (`loader.c:1827`,
+  `mono_metadata_token_table (m->token) == MONO_TABLE_METHOD`). First hit in FortRise's startup
+  patch (`MonoMod.MonoModder.PrePatchType`); the host runs that patch even without mods.
+  `MONO_WASM_JIT_HOOKABLE=none` doesn't change it. `MONO_WASM_JIT_NO_IMAGE=MonoMod.Patcher,MonoMod.Utils,MonoMod.RuntimeDetour,Mono.Cecil,FortRise`
+  gets past it, but game code makes delegates everywhere, so this needs a fix in the runtime.
+- **Blocker 2: MonoMod can't detour with the JIT on.** TF.EX's first Harmony patch
+  (`GameplayLayer.BatchedRender`) fails with "Jump patch was too big for code (code len 0)": liba's
+  `magicdetour2allowed` refuses the method before the runtime is asked, most likely because the
+  function pointer MonoMod takes (`GetFunctionPointer`) isn't a tagged `InterpMethod` once the JIT
+  is on. A fix would pass the `MonoMethod*` (`RuntimeMethodHandle.Value`) from WasmDetourFactory
+  to a new liba entry that calls `mono_body_set_il` directly.
+- Not yet measured: any JIT speed-up on TowerFall. Not yet answered: SIMD with the newer JIT, and
+  iPhone (Safari 27 reportedly has JSPI; memory per compiled module).
+
 ## Precompiling TF.State: not possible; generated MessagePack formatters: no gain (2026-10-13)
 
 - **Mono AOT can't cover TF.State as it loads.** FortRise loads mods into a collectible
