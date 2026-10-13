@@ -197,7 +197,9 @@ async function launch(name, debugPort) {
 		const d = JSON.parse(m.data);
 		if (d.method === "Target.attachedToTarget") {
 			workerSessions.push(d.params.sessionId);
+			// (Workers wait for this before running anything, so their earliest errors are seen too.)
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.enable" }));
+			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Log.enable" }));
 			ws.send(JSON.stringify({ id: nextId++, sessionId: d.params.sessionId, method: "Runtime.runIfWaitingForDebugger" }));
 		} else if (d.method === "Debugger.paused" && catching.has(d.sessionId)) {
 			// An exception in a worker we're watching: record where, then let it continue.
@@ -208,6 +210,12 @@ async function launch(name, debugPort) {
 		} else if (d.method?.startsWith("Network.webSocket")) {
 			const q = d.params;
 			consoleLines.push(`network ${d.method.slice(8)}: ${q.url ?? ""}${q.response ? ` ${q.response.status}` : ""}${q.errorMessage ? ` ${q.errorMessage}` : ""}`);
+		} else if (d.method === "Runtime.exceptionThrown") {
+			const x = d.params.exceptionDetails;
+			consoleLines.push(`${d.sessionId ? "worker" : "page"} exception: ${x.exception?.description ?? x.text} ${x.url ?? ""}:${x.lineNumber ?? ""}`);
+		} else if (d.method === "Log.entryAdded") {
+			const e = d.params.entry;
+			consoleLines.push(`${d.sessionId ? "worker" : "page"} log ${e.level} (${e.source}): ${e.text} ${e.url ?? ""}`);
 		} else if (d.method === "Runtime.consoleAPICalled") {
 			const text = d.params.args.map((a) => a.value ?? a.description ?? "").join(" ");
 			consoleLines.push(`${d.sessionId ? "worker" : "page"} ${d.params.type}: ${text}`);
@@ -222,7 +230,8 @@ async function launch(name, debugPort) {
 		await send("Network.setCacheDisabled", { cacheDisabled: true });
 		await send("Network.setBypassServiceWorker", { bypass: true });
 	}
-	await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+	await send("Log.enable");
+	await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
 	// The page main thread's stack right now (for hangs): pause, read, resume.
 	const stack = async () => {
 		await send("Debugger.enable");
