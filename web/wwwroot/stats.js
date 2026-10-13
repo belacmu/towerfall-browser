@@ -4,7 +4,7 @@
 //    rate, rollbacks, ping, input delay, slow-down), the packet timing from netplay/tfnet.js
 //    (globalThis.tfnetStats) and how late the page's main thread runs timers.
 //  - A report goes to the server when an online match ends (after MIN_ONLINE_S of play), after every
-//    SOLO_REPORT_S of play in levels, and when the page closes. It holds numbers, the device type
+//    SOLO_REPORT_S of play in levels, and when the page is hidden or closes. It holds numbers, the device type
 //    (user agent, cores, memory, screen) and the site version: no names or lobby codes.
 //  - Reports only go to our own server: not with ?tfexserver=official, and from a localhost page
 //    only to a local server (so test runs don't fill the real one).
@@ -249,12 +249,16 @@ export function startStats(host, { serverUrl, official, version }) {
 		render();
 	}, 1000);
 
-	addEventListener("pagehide", () => {
+	// Leaving the page sends what's there. iPhones often skip pagehide (switching apps, locking the
+	// phone, closing from the tab switcher), but do report the page being hidden.
+	const flush = () => {
 		if (online?.online >= MIN_ONLINE_S) send("online", online, true);
 		if (solo.seconds >= 60) send("solo", solo, true);
 		online = null;
 		solo = new Summary();
-	});
+	};
+	addEventListener("pagehide", flush);
+	document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush());
 
 	// The panel.
 	const button = document.getElementById("statsToggle");
