@@ -238,6 +238,7 @@ public static partial class BrowserHost
 				UnlockArchers();
 				TfexPatches.Apply();
 				ReplayRecordFix.Install();
+				ReplayKeyStates.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until
 			// then e.g. "test" is the base game's own command)...
@@ -624,6 +625,14 @@ public static partial class BrowserHost
 					var owners = string.Join(",", info.Owners.Distinct());
 					Console.WriteLine($"[patches]   {m.DeclaringType?.FullName}::{m.Name} ({owners})");
 				}
+				return;
+			}
+			if (words[0] == "save")
+			{
+				// TowerFall's own save, which FortRise extends to every mod's settings and save data.
+				object save = towerFall.GetType("TowerFall.SaveData")?.GetField("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+				save?.GetType().GetMethod("Save", BindingFlags.Public | BindingFlags.Instance, Type.EmptyTypes)?.Invoke(save, null);
+				Console.WriteLine($"[command] save: {(save != null ? "saved" : "no save data")}");
 				return;
 			}
 			if (words[0] == "bench")
