@@ -27,6 +27,7 @@ class Summary {
 		this.packets = 0;
 		this.wait = timing();
 		this.late = timing();
+		this.rtt = timing(); // WebRTC's own round trip: the network alone
 		this.path = "";
 		this.timeline = [];
 		this.step = null;
@@ -60,6 +61,7 @@ class Summary {
 		this.packets += w.packets ?? 0;
 		merge(this.wait, w.wait);
 		merge(this.late, w.late);
+		merge(this.rtt, w.rtt);
 		if (w.path) this.path = w.path;
 		// A coarse timeline, one row per TIMELINE_STEP_S.
 		this.step ??= new Summary.Step();
@@ -93,6 +95,9 @@ class Summary {
 				slowingDownPercent: this.netplayFrames ? r((100 * this.aheadFrames) / this.netplayFrames, 0) : 0,
 				catchUpDroppedMs: r(this.droppedMs, 0),
 				pingMs: this.ping.n ? { avg: r(this.ping.sum / this.ping.n, 0), max: this.ping.max } : null,
+				// The same round trip measured by WebRTC: the network alone. Ping minus this is what
+				// the two games and browsers add.
+				networkRttMs: summarize(this.rtt),
 				framesBehindMax: this.behind,
 				inputDelayTicks: this.inputDelay,
 				connection: this.path,
@@ -177,9 +182,10 @@ function lateTimer() {
 function takePackets() {
 	const s = globalThis.tfnetStats;
 	if (!s) return {};
-	const out = { packets: s.packets, wait: s.wait, path: s.path };
+	const out = { packets: s.packets, wait: s.wait, rtt: s.rtt, path: s.path };
 	s.packets = 0;
 	s.wait = null;
+	s.rtt = null;
 	return out;
 }
 
@@ -310,7 +316,8 @@ export function startStats(host, { serverUrl, official, version }) {
 			lines.push(`${n.fps} fps · ${n.gameMsPerFrame} ms/frame · worst ${n.worstFrameMs} · page late ${ms(n.mainThreadLateMs)} ms`);
 			if (n.onlineSeconds) {
 				lines.push(`${n.ticksPerSecond}/240 ticks/s · ${n.rollbacksPerSecond} rollbacks/s (max ${n.rollbackTicksMax}) · slow-down ${n.slowingDownPercent}%`);
-				lines.push(`ping ${n.pingMs?.avg ?? "–"} ms · delay ${n.inputDelayTicks ?? "–"} · packets wait ${ms(n.packetToGameMs)} ms · ${n.connection || "?"}`);
+				lines.push(`ping ${n.pingMs?.avg ?? "–"} ms (network ${n.networkRttMs ? Math.round(n.networkRttMs.avg) : "–"}) · delay ${n.inputDelayTicks ?? "–"} · packets wait ${ms(n.packetToGameMs)} ms`);
+				lines.push(`${n.connection || "connection ?"}`);
 			}
 		}
 		lines.push(`all ${Math.round(t.seconds || 0)} s: ${t.framesOver16ms ?? 0} slow frames, worst ${t.worstFrameMs ?? 0} ms${t.onlineSeconds ? `, ${t.ticksPerSecond} ticks/s, ${t.rollbacksPerSecond} rollbacks/s` : ""}`);

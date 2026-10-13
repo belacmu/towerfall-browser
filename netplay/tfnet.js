@@ -67,7 +67,29 @@ var LibraryTFNet = {
 		// Packet timing for the page's Stats panel (stats.js reads and resets it): how long each
 		// received packet waited on the page before the game took it (tfnet_recv_all). (How long the
 		// browser held it before the handler ran can't be read: the event is stamped at dispatch.)
-		stats: { packets: 0, wait: null, path: "" },
+		stats: { packets: 0, wait: null, path: "", rtt: null },
+
+		// The connection's path and WebRTC's own round-trip time (its connectivity checks, so the
+		// network alone, without either game in it), from a peer connection's stats. Safari doesn't
+		// always name the selected pair on the transport, so a succeeded nominated pair also counts.
+		network: async function (pc) {
+			const stats = await pc.getStats();
+			let pair = null;
+			stats.forEach((x) => {
+				if (x.type === "transport" && x.selectedCandidatePairId) pair = stats.get(x.selectedCandidatePairId) ?? pair;
+			});
+			if (!pair) stats.forEach((x) => {
+				if (x.type === "candidate-pair" && (x.selected || (x.nominated && x.state === "succeeded"))) pair = x;
+			});
+			if (!pair) return null;
+			const local = stats.get(pair.localCandidateId);
+			const remote = stats.get(pair.remoteCandidateId);
+			const relayed = local?.candidateType === "relay" || remote?.candidateType === "relay";
+			return {
+				path: relayed ? `through the relay (${local?.relayProtocol ?? local?.protocol ?? "?"})` : `directly (${local?.candidateType ?? "?"} to ${remote?.candidateType ?? "?"})`,
+				rttMs: typeof pair.currentRoundTripTime === "number" ? pair.currentRoundTripTime * 1000 : null,
+			};
+		},
 		timing() {
 			return { n: 0, sum: 0, max: 0, over4: 0, over16: 0 };
 		},
@@ -170,15 +192,23 @@ var LibraryTFNet = {
 					// Direct or through the TURN relay, for reports of slow or failed connections.
 					let path = "";
 					try {
-						const stats = await pc.getStats();
-						stats.forEach((s) => {
-							const pair = s.type === "transport" && stats.get(s.selectedCandidatePairId);
-							const local = pair && stats.get(pair.localCandidateId);
-							if (local) path = local.candidateType === "relay" ? ` through the relay (${local.relayProtocol})` : ` directly (${local.candidateType})`;
-						});
+						const n = await TFNet.network(pc);
+						if (n) path = ` ${n.path}${n.rttMs != null ? `, network round trip ${Math.round(n.rttMs)} ms` : ""}`;
 					} catch {}
 					console.log(`[tfnet] connected to peer ${uuid}${path} in ${Math.round(performance.now() - started)} ms`);
-					TFNet.stats.path = path.trim();
+					TFNet.stats.path = path.trim().replace(/, network.*/, "");
+					// While connected, the path (it can change) and WebRTC's round trip every 2 s, for the
+					// Stats panel and reports (stats.js), next to the game's own ping.
+					clearInterval(peer.sampler);
+					peer.sampler = setInterval(async () => {
+						if (pc.connectionState !== "connected") return clearInterval(peer.sampler);
+						try {
+							const n = await TFNet.network(pc);
+							if (!n) return;
+							TFNet.stats.path = n.path;
+							if (n.rttMs != null) TFNet.time((TFNet.stats.rtt ??= TFNet.timing()), n.rttMs);
+						} catch {}
+					}, 2000);
 				};
 				s.peers.set(uuid, peer);
 				return peer;
