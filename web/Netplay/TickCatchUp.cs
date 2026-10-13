@@ -13,14 +13,21 @@ namespace TowerFallBrowser;
 // Accumulator) forward; time beyond that is dropped, so a slow computer plays in slow motion
 // instead, and GGRS has the other players wait for it as it would for any slow player. Nothing
 // changes in what's simulated or sent. If TF.EX's fields aren't as expected, it stays off.
-// ?env=TOWERFALL_TICK_CAP=0 turns it off (for comparing).
+// While TF.EX's round-end instant replay plays, the player's match is paused and each owed tick
+// only steps the replay (cheap), which is how TF.EX makes up the time the replay took to build
+// (InstantReplayFootage.Bake re-simulates the round's end in one frame: 0.5-0.8 s in real matches,
+// longer on slow devices). Dropping that time would leave this player behind the others after
+// every round, and the others would run 10% slow until they're level, so it isn't capped then
+// (up to ReplayCap). ?env=TOWERFALL_TICK_CAP=0 turns it all off, =8 caps the replay too (for comparing).
 public static class TickCatchUp
 {
 	private const int MaxTicks = 8; // two 60 Hz frames' worth: room to recover from a short hitch
 	private static readonly TimeSpan Cap = TimeSpan.FromSeconds(MaxTicks / 240.0);
+	private static readonly TimeSpan ReplayCap = TimeSpan.FromSeconds(3); // a replay lasts longer
 
 	private static Stopwatch clock;
 	private static FieldInfo lastUpdate, accumulator;
+	private static Func<bool> replayPaused = () => false;
 	private static bool off = Environment.GetEnvironmentVariable("TOWERFALL_TICK_CAP") == "0";
 	private static int lookAgain;
 
@@ -36,15 +43,16 @@ public static class TickCatchUp
 		var acc = (TimeSpan)accumulator.GetValue(null);
 		var last = (TimeSpan)lastUpdate.GetValue(null);
 		TimeSpan owed = acc + (now - last);
-		if (owed <= Cap) return;
-		DroppedMs += (owed - Cap).TotalMilliseconds;
-		DroppedTotalMs += (owed - Cap).TotalMilliseconds;
-		if (acc > Cap)
+		TimeSpan cap = replayPaused() ? ReplayCap : Cap;
+		if (owed <= cap) return;
+		DroppedMs += (owed - cap).TotalMilliseconds;
+		DroppedTotalMs += (owed - cap).TotalMilliseconds;
+		if (acc > cap)
 		{
-			accumulator.SetValue(null, Cap);
-			acc = Cap;
+			accumulator.SetValue(null, cap);
+			acc = cap;
 		}
-		lastUpdate.SetValue(null, now - (Cap - acc));
+		lastUpdate.SetValue(null, now - (cap - acc));
 	}
 
 	private static bool Find()
@@ -65,6 +73,10 @@ public static class TickCatchUp
 			return false;
 		}
 		clock = (Stopwatch)clockField.GetValue(null);
+		Type footage = patch.Assembly.GetType("TF.EX.Domain.InstantReplayFootage") ?? AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("TF.EX.Domain.InstantReplayFootage")).FirstOrDefault(t => t != null);
+		MethodInfo isPaused = footage?.GetProperty("IsPaused", BindingFlags.Public | BindingFlags.Static)?.GetMethod;
+		if (isPaused?.ReturnType != typeof(bool)) Console.WriteLine("[netplay] TF.EX's instant replay isn't as expected; catch-up stays capped during it.");
+		else if (Environment.GetEnvironmentVariable("TOWERFALL_TICK_CAP") != "8") replayPaused = isPaused.CreateDelegate<Func<bool>>();
 		Console.WriteLine($"[netplay] Online catch-up capped at {MaxTicks} ticks a frame.");
 		return true;
 	}
