@@ -49,6 +49,19 @@ noted; desktop .NET is faster, but the costs grow the same way.
 - **Fix:** in MonoMod (not TF.EX): resolve names up front but make each accessor on first use.
 - **Ours:** `patches/MonoMod.patch` (PR #51). TF.EX could also avoid `DynamicData` in constructors.
 
+## 5. Co-op after visiting the online menu waits for "other players" forever (TF.EX)
+
+- **What happens:** opening TF.EX's online menu puts `MainMenu.VersusMatchSettings` in TF.EX's
+  online mode (`ApplyNetplayMode`). Only the Versus Fight button (and `CleanSettingsVersus` with no
+  players) clears it, so a Quest, Dark World or Trials run started afterwards still counts as
+  online: `LevelLoaderXML` shows "Waiting for other players..." and the level never starts.
+- **Reproduced** (headless, TF.EX 0.19.2): online menu, back, co-op button, Quest: stuck on "Waiting
+  for other players..."; with the fix the level starts.
+- **Fix:** clear it the way the Fight button patch does (`WiderSetMenu.IsNetplayRequested = false;
+  VersusMatchSettings.ClearNetplayMode()`) on the co-op submenu's button (`CoOpModeButton`, which acts
+  in `BorderButton.OnConfirm`) and `TrialsButton.MenuAction`.
+- **Ours:** `TfexPatches.PatchCoOpButtons` (`web/Netplay/TfexPatches.cs`).
+
 ## Not yet measured
 
 - TF.EX slows the whole game by 10% whenever it's even one tick (4 ms) ahead of another player
