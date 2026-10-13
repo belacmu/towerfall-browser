@@ -45,7 +45,57 @@ public static class TfexPatches
 		}
 		StateSpeedups.Patch(harmony);
 		PatchServer(harmony);
+		PatchCoOpButtons(harmony);
 		Console.WriteLine("[netplay] TF.EX patched for the browser (update check via the GitHub API, no self-update).");
+	}
+
+	// TF.EX's online menu switches the Versus settings to its online mode, and only the Versus Fight
+	// button (or no players) switches them back. So after visiting the online menu, starting Quest,
+	// Dark World or Trials left the online mode on: the level waited for "other players" forever. The
+	// co-op submenu's button and Trials' now do what TF.EX's Fight button patch does. (A TF.EX bug; see docs/TFEX-UPSTREAM.md.)
+	private static FieldInfo versusMatchSettings;
+	private static MethodInfo clearNetplayMode;
+	private static FieldInfo netplayRequested;
+
+	private static void PatchCoOpButtons(Harmony harmony)
+	{
+		if (Environment.GetEnvironmentVariable("TOWERFALL_COOPFIX") == "0") return; // (for comparing)
+		versusMatchSettings = FindType("TowerFall.MainMenu")?.GetField("VersusMatchSettings", BindingFlags.Public | BindingFlags.Static);
+		clearNetplayMode = FindType("TF.EX.Domain.Extensions.VersusModeExtensions")?.GetMethod("ClearNetplayMode", BindingFlags.Public | BindingFlags.Static);
+		netplayRequested = FindType("TF.EX.Patchs.Scene.WiderSetMenu")?.GetField("IsNetplayRequested", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+		if (versusMatchSettings == null || clearNetplayMode == null)
+		{
+			Console.WriteLine("[netplay] couldn't find TF.EX's netplay mode; co-op buttons left alone");
+			return;
+		}
+		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+		var postfix = new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(LeaveNetplayMode), BindingFlags.NonPublic | BindingFlags.Static));
+		// Trials' main menu button, and the co-op submenu's one button (it flips between Quest and Dark
+		// World), which has no action of its own: BorderButton.OnConfirm, shared by many menus' buttons
+		// (TF.EX's too), so its postfix only acts for that button.
+		MethodInfo trials = FindType("TowerFall.TrialsButton")?.GetMethod("MenuAction", all);
+		MethodInfo confirm = FindType("TowerFall.BorderButton")?.GetMethod("OnConfirm", all);
+		if (trials != null) harmony.Patch(trials, postfix: postfix);
+		if (confirm != null) harmony.Patch(confirm, postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(CoOpConfirmed), BindingFlags.NonPublic | BindingFlags.Static)));
+		if (trials == null || confirm == null) Console.WriteLine("[netplay] TowerFall's co-op or Trials button isn't as expected; it may still start in TF.EX's online mode");
+	}
+
+	private static void CoOpConfirmed(object __instance)
+	{
+		if (__instance.GetType().FullName == "TowerFall.CoOpModeButton") LeaveNetplayMode();
+	}
+
+	private static void LeaveNetplayMode()
+	{
+		try
+		{
+			netplayRequested?.SetValue(null, false);
+			clearNetplayMode.Invoke(null, new[] { versusMatchSettings.GetValue(null) });
+		}
+		catch (Exception e)
+		{
+			Console.WriteLine($"[netplay] couldn't leave TF.EX's online mode: {e.Message}");
+		}
 	}
 
 	private const string BrowserLabel = "BROWSER";

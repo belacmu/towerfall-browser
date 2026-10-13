@@ -537,13 +537,24 @@ public static partial class BrowserHost
 			if (startMode == "menu") startMode = null;
 			return;
 		}
-		if (menuState != "Main")
+		// Quest and Dark World are in the co-op submenu when TF.EX replaces their main menu buttons with
+		// its own co-op button: open it (as that button does) and press the mode's button there.
+		bool coOp = menuState == "CoOp" && (startMode == "quest" || startMode == "darkworld");
+		if (menuState != "Main" && !coOp)
 		{
 			if (menuState != "PressStart") mainMenuFrames = 0;
 			return;
 		}
 		if (++mainMenuFrames < 30) return;
 		string mode = startMode;
+		if (menuState == "Main" && (mode == "quest" || mode == "darkworld")
+			&& !SceneEntities(scene).Any(e => e.GetType().FullName == (mode == "quest" ? "TowerFall.QuestButton" : "TowerFall.DarkWorldButton"))
+			&& Enum.GetNames(state.PropertyType).Contains("CoOp"))
+		{
+			state.SetValue(scene, Enum.Parse(state.PropertyType, "CoOp"));
+			mainMenuFrames = 0;
+			return;
+		}
 		startMode = null;
 		if (mode == "online" || mode == "quickplay")
 		{
@@ -575,11 +586,52 @@ public static partial class BrowserHost
 			Console.WriteLine("[mode] darkworld: Dark World isn't installed");
 			return;
 		}
+		// The menu's own button when it's there, so mods that patch it (TF.EX) take part as when the
+		// player presses it; otherwise its effect, below.
+		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+		string buttonType = "TowerFall." + (rollcall == "Versus" ? "Fight" : rollcall) + "Button";
+		object button = SceneEntities(scene).FirstOrDefault(e => e.GetType().FullName == buttonType);
+		if (button == null && (rollcall == "Quest" || rollcall == "DarkWorld"))
+		{
+			// The co-op submenu's one button, turned to the mode (its buttonNames, e.g. "QUEST").
+			button = SceneEntities(scene).FirstOrDefault(e => e.GetType().FullName == "TowerFall.CoOpModeButton");
+			var names = button?.GetType().GetField("buttonNames", any)?.GetValue(button) as System.Collections.Generic.IList<string>;
+			int index = names?.ToList().FindIndex(n => n.Replace(" ", "").Contains(rollcall, StringComparison.OrdinalIgnoreCase)) ?? -1;
+			if (index >= 0) button.GetType().GetField("currentMode", any)?.SetValue(button, index);
+			else button = null;
+		}
+		// (Main menu buttons act in MenuAction; the co-op submenu's in its base's OnConfirm.)
+		MethodInfo menuAction = button?.GetType().GetMethod("MenuAction", any) ?? button?.GetType().GetMethod("OnConfirm", any);
+		if (menuAction != null)
+		{
+			menuAction.Invoke(button, null);
+			Console.WriteLine($"[mode] {mode} (pressed {button.GetType().Name})");
+			return;
+		}
 		menu.GetField("CurrentMatchSettings").SetValue(null, menu.GetField(rollcall + "MatchSettings").GetValue(null));
 		FieldInfo rollcallMode = menu.GetField("RollcallMode");
 		rollcallMode.SetValue(null, Enum.Parse(rollcallMode.FieldType, rollcall));
 		state.SetValue(scene, Enum.Parse(state.PropertyType, "Rollcall"));
 		Console.WriteLine($"[mode] {mode}");
+	}
+
+	// A scene's entities: Monocle keeps them per layer (Scene.Layers[i].Entities).
+	private static IEnumerable<object> SceneEntities(object scene)
+	{
+		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+		object layers = scene.GetType().GetField("Layers", any)?.GetValue(scene) ?? scene.GetType().GetProperty("Layers", any)?.GetValue(scene);
+		if (layers is not System.Collections.IEnumerable all) yield break;
+		foreach (object item in all)
+		{
+			// (A dictionary of layers enumerates key/value pairs.)
+			object layer = item?.GetType().GetProperty("Value")?.GetValue(item) ?? item;
+			if (layer == null) continue;
+			object entities = layer.GetType().GetField("Entities", any)?.GetValue(layer) ?? layer.GetType().GetProperty("Entities", any)?.GetValue(layer);
+			if (entities is System.Collections.IEnumerable list)
+			{
+				foreach (object e in list) yield return e;
+			}
+		}
 	}
 
 	private static int menuFrames;
@@ -625,6 +677,14 @@ public static partial class BrowserHost
 					var owners = string.Join(",", info.Owners.Distinct());
 					Console.WriteLine($"[patches]   {m.DeclaringType?.FullName}::{m.Name} ({owners})");
 				}
+				return;
+			}
+			if (words[0] == "startmode" && words.Length > 1)
+			{
+				// As ?mode=, but now: the next time the main menu's top level is up (for tests).
+				startMode = words[1].ToLowerInvariant();
+				mainMenuFrames = 0;
+				Console.WriteLine($"[command] startmode {startMode}");
 				return;
 			}
 			if (words[0] == "save")
