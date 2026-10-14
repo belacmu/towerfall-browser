@@ -44,6 +44,7 @@ public static class TfexPatches
 				postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(ClipboardSet), all)));
 		}
 		StateSpeedups.Patch(harmony);
+		TfexFps.Patch(harmony); // experiment, off unless ?tfexfps=N
 		PatchServer(harmony);
 		PatchCoOpButtons(harmony);
 		Console.WriteLine("[netplay] TF.EX patched for the browser (update check via the GitHub API, no self-update).");
