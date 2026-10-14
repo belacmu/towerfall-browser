@@ -43,7 +43,7 @@ namespace TowerFallBrowser;
 //  - Log: once per tick, only the first time the game reaches that GGRS frame (a high-water mark: ticks the
 //    sync test resimulates are at or below it). The line holds the state at the START of the tick (read in a
 //    Level.Update prefix, printed in its postfix once tick 0 is known), like the Switch's per-frame log.
-public static class XplayVersus
+public static partial class XplayVersus
 {
 	private struct Step
 	{
@@ -244,7 +244,7 @@ public static class XplayVersus
 		try
 		{
 			object manager = resolveNetplayManager.Invoke(null, null);
-			if (!(bool)isTestMode.Invoke(manager, null) || !(bool)isInit.Invoke(manager, null)) return -1;
+			if (!(bool)isInit.Invoke(manager, null) || (!netMode && !(bool)isTestMode.Invoke(manager, null))) return -1; // (xnet runs a real P2P session, not the test one)
 			return (int)netplayCurrentFrame.Invoke(null, null);
 		}
 		catch
@@ -278,6 +278,11 @@ public static class XplayVersus
 	private static void LevelUpdatePrefix(object __instance)
 	{
 		if (!active) return;
+		if (netMode)
+		{
+			NetLevelPrefix(__instance);
+			return;
+		}
 		if (coTrace) Console.WriteLine($"[xplay2co] Level.Update frame={CurrentFrame()} level={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(__instance):x} round={sessionRoundIndex.GetValue(levelSession.GetValue(__instance))} firstpass={frame > maxFrame}");
 		frame = CurrentFrame();
 		firstPass = frame > maxFrame;
@@ -291,6 +296,11 @@ public static class XplayVersus
 
 	private static void LevelUpdatePostfix(object __instance)
 	{
+		if (netMode)
+		{
+			if (active) NetLevelPostfix(__instance);
+			return;
+		}
 		if (active && coTrace) Console.WriteLine($"[xplay2co] Level.Update done level={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(__instance):x} pending={(pendingLine != null)}");
 		if (!active || pendingLine == null) return;
 		int f = frame;
@@ -479,7 +489,7 @@ public static class XplayVersus
 	// One-time dump of everything the test mode's setup left in MatchSettings / TFGame, for the setup document.
 	private static void SessionStartGamePostfix(object __instance)
 	{
-		if (!active) return;
+		if (!active || (netMode && !netStarted)) return; // (xnet: the first, held back call)
 		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 		void Line(string k, object v) => Console.WriteLine($"[xplay2setup] {k}={Describe(v)}");
 		try
@@ -548,7 +558,7 @@ public static class XplayVersus
 
 	private static object Override(object state, object self)
 	{
-		if (!active || frame < 0) return state;
+		if (!active || frame < 0 || netMode) return state; // (xnet: the seat's input comes from GGRS, nothing to override)
 		bool frozen = (int)playerState.GetValue(self) == 5; // PlayerStates.Frozen
 		if (firstPass)
 		{

@@ -702,6 +702,13 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] xplay2: {XplayVersus.Start(towerFall, game, words)}");
 				return;
 			}
+			if (words[0] == "xnet")
+			{
+				// Two-player scripted TF.EX peer-to-peer match against another browser or the Switch, over a WebSocket relay or matchbox
+				// (web/Netplay/XplayNet.cs; docs: switch-online/BROWSER-RELAY.md).
+				Console.WriteLine($"[command] xnet: {XplayVersus.StartNet(towerFall, game, words)}");
+				return;
+			}
 			if (words[0] == "bench")
 			{
 				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);
