@@ -274,7 +274,7 @@ later, at frame 3110, inside a virtual update called from the level's update (+0
 holds native resources that a restore gets out of step with, most likely audio. The audio
 layer's list of active sound instances (+0x4724770) is restored with everything else, while the
 native voices behind it are not. Audio needs the same treatment as graphics: keep it out of the
-restore (TF.EX also leaves sound outside rollback on PC).
+restore (rollback netcode generally treats sound as presentation, not game state).
 
 **Next:**
 1. Find what threw, and keep audio state out of restores.
