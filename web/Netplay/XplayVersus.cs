@@ -65,6 +65,7 @@ public static class XplayVersus
 	private static bool firstPass; // this Level.Update is the first time the game reaches `frame`
 	private static int frame = -1;
 	private static string pendingLine;
+	private static string pendingArrowLine; // "arrows=... q0=... q1=... list=..." read at the same point as pendingLine
 	private static readonly List<(int frame, string text)> pre = new();
 	private static bool cfgLogged;
 	private static int lastRound = -1;
@@ -254,6 +255,7 @@ public static class XplayVersus
 		if (frame < 0 || !firstPass) return;
 		maxFrame = frame;
 		pendingLine = Snapshot(__instance);
+		pendingArrowLine = ArrowSnapshot(__instance);
 	}
 
 	private static void LevelUpdatePostfix(object __instance)
@@ -261,7 +263,9 @@ public static class XplayVersus
 		if (!active || pendingLine == null) return;
 		int f = frame;
 		string line = pendingLine;
+		string arrowLine = pendingArrowLine;
 		pendingLine = null;
+		pendingArrowLine = null;
 		if (!cfgLogged)
 		{
 			cfgLogged = true;
@@ -286,6 +290,7 @@ public static class XplayVersus
 			return;
 		}
 		Console.WriteLine($"[xplay2] T {t} {line}");
+		Console.WriteLine($"[xplay2] R {t} {arrowLine}");
 		foreach (var (uf, seat) in unfreezes)
 			Console.WriteLine($"[xplay2] U {uf - origin} seat={seat} round={sessionRoundIndex.GetValue(levelSession.GetValue(__instance))}");
 		unfreezes.Clear();
@@ -309,6 +314,45 @@ public static class XplayVersus
 				.Append(" alive=").Append(alive ? 1 : 0);
 		}
 		return sb.ToString();
+	}
+
+	// Per-tick arrow dump, read in the Level.Update prefix like Snapshot: the same live Arrow entity set as the A lines
+	// (level[GameTags.Arrow]), each archer's quiver (Player.Arrows.Count, '-' without a Player entity), and every arrow as
+	// <Position.X bits>:<Position.Y bits>:t<ArrowType>:s<State> (8 hex each, types/states as ints), sorted ascending by (x,y) bits.
+	private static string ArrowSnapshot(object level)
+	{
+		var arrows = (System.Collections.IList)itemByTag.GetValue(level, new[] { arrowTag });
+		var items = new List<(uint x, uint y, string extra)>(arrows.Count);
+		foreach (object a in arrows)
+		{
+			var pos = (Vector2)position.GetValue(a);
+			items.Add((Bits(pos.X), Bits(pos.Y), ":t" + ArrowEnum(a, "ArrowType") + ":s" + ArrowEnum(a, "State")));
+		}
+		items.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+		var sb = new StringBuilder(64);
+		sb.Append("arrows=").Append(arrows.Count);
+		for (int i = 0; i < 2; i++)
+		{
+			object p = getPlayer.Invoke(level, new object[] { i });
+			sb.Append(" q").Append(i).Append('=').Append(p == null ? "-" : arrowListCount.GetValue(playerArrows.GetValue(p)).ToString());
+		}
+		sb.Append(" list=").Append(string.Join(";", items.Select(it => it.x.ToString("x8") + ":" + it.y.ToString("x8") + it.extra)));
+		return sb.ToString();
+	}
+
+	private static string ArrowEnum(object arrow, string name)
+	{
+		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+		try
+		{
+			Type t = arrow.GetType();
+			object v = t.GetField(name, all)?.GetValue(arrow) ?? t.GetProperty(name, all)?.GetValue(arrow);
+			return v == null ? "?" : Convert.ToInt32(v, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture);
+		}
+		catch
+		{
+			return "?";
+		}
 	}
 
 	// TF.EX's gameplay RNG (xoshiro256**, TF.State.Domain.Randomness.DeterministicRandom) state folded as s0^s1^s2^s3.
