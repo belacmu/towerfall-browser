@@ -237,6 +237,47 @@ change every frame.
   - What a garbage collection during the window does: it touches many pages, and a snapshot must
     include Boehm's free lists and mark bits, all in the heap and globals measured here.
 
-**Next, still safe:** the restore self-test. Snapshot the hot set and the globals at frame N, run
-8 frames, restore, run the same 8 frames again, and compare the logged trajectories. It runs only
-in the emulator, with the save data backed up and checked as before.
+## 5. Rollback restore test on the Switch: pass, with one known gap (2026-10-14)
+
+**The test.** At the top of `TFGame.Update` (+0xb75c60, the whole frame), at the start of a window:
+1. Copy the snapshot: the GC heap sections, Boehm's block headers and index tables, and the main
+   module's globals.
+2. Run the window.
+3. Restore the copy, rewind the scripted input, and run the window again.
+
+The 5 windows were at frames 85, 198, 236, 326 and 476. Four ran 8 frames and one ran 30. They
+cover a jump, two arrow shots and a dodge in Trials. The emulator only; the save data was checked
+before and after each run.
+
+**Results:**
+- **Every replayed frame matched the first pass:** 62 frames, position and speed bit for bit.
+- **The trajectory still matches the runs with no rollback:** all 700 frames compared, against the
+  Switch's run and the browser's (step 3).
+- **Cost in Ryujinx:** a full 66 MB save took 3–15 ms, and a full restore took about 2 ms. Each
+  window changed only 58–88 pages (230–350 KB). So an incremental snapshot would copy well under
+  1 MB, though it still needs a way to find those pages (step 4).
+
+**What it took** (each of these crashed until fixed):
+- **Boehm's block headers** (0x70 bytes each: object size, mark bits, free-block links) and its
+  index tables live outside the heap sections, in 64 KB scratch chunks. Without them the restored
+  allocator handed out the wrong memory. The snapshot finds them by walking
+  `GC_all_bottom_indices` (+0x48e2a38).
+- **The graphics layer's buffer slots must not roll back.** Managed objects hold 8-byte slots
+  pointing at native GPU buffer descriptors, and the device behind those descriptors (native
+  memory, not snapshotted) counts GPU frames. Restoring a slot to an older buffer trips an
+  assertion. The probe hooks the allocator (+0x204d0) to learn the slots, and keeps their exact
+  bytes across a restore. Keeping whole pages instead breaks neighbouring game objects.
+
+**The gap.** With rollbacks on, the game threw an `ObjectDisposedException` about 50 seconds
+later, at frame 3110, inside a virtual update called from the level's update (+0xa7c768 to
++0x992b40). With rollbacks off, the same build ran past frame 4100. Some other presentation state
+holds native resources that a restore gets out of step with, most likely audio. The audio
+layer's list of active sound instances (+0x4724770) is restored with everything else, while the
+native voices behind it are not. Audio needs the same treatment as graphics: keep it out of the
+restore (TF.EX also leaves sound outside rollback on PC).
+
+**Next:**
+1. Find what threw, and keep audio state out of restores.
+2. Run longer and with more windows.
+3. Then try the 4-player versus test.
+

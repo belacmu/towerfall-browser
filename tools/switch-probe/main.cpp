@@ -56,6 +56,13 @@ namespace off {
      * InputState returned on the stack) has loaded the 28 bytes into x8/x9/x10/w11 and before they're
      * stored to Player.input (+0x148): `str w11, [x19, #0x160]`. x19 = the Player. */
     constexpr uintptr_t Player_Update_InputStore = 0xaef934;
+    /* TFGame.Update(GameTime): the input update, then Engine.Update (+0x92d0b0). */
+    constexpr uintptr_t TFGame_Update = 0xb75c60;
+    constexpr uint32_t  kTFGameUpdateInsn = 0xa9be4ff4; /* stp x20, x19, [sp, #-0x20]! */
+    /* The graphics layer's per-frame buffer allocator: x0 = a native ring of transient GPU buffers
+     * (0x5600 bytes, inside a managed object) that tracks GPU frames (+0x55b8); rolling one back
+     * trips an assertion. */
+    constexpr uintptr_t GfxRingAlloc = 0x204d0;
     constexpr uint32_t  kInputStoreInsn = 0xb901626b;
 }
 namespace fld {
@@ -311,7 +318,38 @@ static uint32_t PageHash(const uint8_t* p) {
 struct MemRange { uintptr_t start, size; };
 constexpr int kMaxRanges = 1100;
 static MemRange g_ranges[kMaxRanges];
-static int g_nRanges = 0, g_nHeap = 0;
+static int g_nRanges = 0, g_nHeap = 0, g_nHeapSections = 0;
+
+/* Boehm's block headers (0x70 bytes: object size, mark bits, free-list links) and the "bottom
+ * index" tables that map blocks to them (0x2020 bytes) live outside the heap sections, in 64 KB
+ * scratch chunks (GC_install_header, +0x285b680). They change whenever blocks are allocated or
+ * split, so a snapshot needs them: walk GC_all_bottom_indices (+0x48e2a38, linked at +0x2000) and
+ * add every page holding a table or a header. */
+static void AddPage(uintptr_t page) {
+    for (int r = 0; r < g_nRanges; r++)
+        if (page >= g_ranges[r].start && page < g_ranges[r].start + g_ranges[r].size) return;
+    if (g_nRanges && g_ranges[g_nRanges - 1].start + g_ranges[g_nRanges - 1].size == page) { g_ranges[g_nRanges - 1].size += 0x1000; return; }
+    if (g_nRanges < kMaxRanges - 1) g_ranges[g_nRanges++] = { page, 0x1000 };
+}
+static void AddBytes(uintptr_t p, uintptr_t n) {
+    for (uintptr_t page = p & ~0xfffUL; page < p + n; page += 0x1000) AddPage(page);
+}
+static void CollectGcMetadata() {
+    int first = g_nRanges, tables = 0, headers = 0;
+    for (uintptr_t bi = *reinterpret_cast<uintptr_t*>(Base() + 0x48e2a38); bi; bi = *reinterpret_cast<uintptr_t*>(bi + 0x2000)) {
+        AddBytes(bi, 0x2020);
+        tables++;
+        for (int i = 0; i < 0x400; i++) {
+            uintptr_t h = reinterpret_cast<uintptr_t*>(bi)[i];
+            if (h > 0x1000) { AddBytes(h, 0x70); headers++; }   /* small values: "go back n blocks" */
+        }
+        if (tables > 4096) break;
+    }
+    uintptr_t bytes = 0;
+    for (int r = first; r < g_nRanges; r++) bytes += g_ranges[r].size;
+    Logging.Log("[xplay] census: GC metadata: %d index tables, %d block headers, in %d ranges, %lu KB", tables, headers,
+                g_nRanges - first, (unsigned long)(bytes >> 10));
+}
 
 static void CollectRanges() {
     g_nRanges = 0;
@@ -336,6 +374,8 @@ static void CollectRanges() {
             Logging.Log("[xplay] census:   section %lu at %#lx, %lu KB%s", (unsigned long)i, (unsigned long)start,
                         (unsigned long)(bytes >> 10), player >= start && player < start + bytes ? "  <- player" : "");
     }
+    g_nHeapSections = g_nRanges;
+    CollectGcMetadata();
     g_nHeap = g_nRanges;
     auto& d = exl::util::GetMainModuleInfo().m_Data;
     g_ranges[g_nRanges++] = { d.m_Start, d.m_Size };
@@ -357,18 +397,6 @@ static void ScanRanges(bool compare, size_t* heapChanged, size_t* globalsChanged
     if (globalsChanged) *globalsChanged = gc;
 }
 
-static void Census(int frame) {
-    size_t hc, gc;
-    if (frame == kCensusFrame) {
-        CollectRanges();
-        ScanRanges(false, nullptr, nullptr);
-    } else if (g_nRanges && (frame == kCensusFrame + 1 || frame == kCensusFrame + 2 || frame == kCensusFrame + 9)) {
-        ScanRanges(true, &hc, &gc);
-        Logging.Log("[xplay] census: frame %d: changed pages: heap %lu (%lu KB), globals %lu (%lu KB)", frame,
-                    (unsigned long)hc, (unsigned long)(hc * 4), (unsigned long)gc, (unsigned long)(gc * 4));
-    }
-}
-
 /* The game's InputState (natural layout: 9 bools, then MoveX, MoveY, AimAxis), in the registers
  * Player.Update is about to store: x8 = bytes 0..7, x9 = 8..15, x10 = 16..23, w11 = 24..27. */
 static bool g_prevJump, g_prevShoot, g_prevDodge, g_prevAlt;
@@ -378,7 +406,6 @@ HOOK_DEFINE_INLINE(InputStoreHook) {
         void* player = reinterpret_cast<void*>(ctx->X[19]);
         if (!g_player || player != g_player) return;
         g_frame++;
-        Census(g_frame);
         Logging.Log("[xplay] T %d %08x %08x %08x %08x", g_frame,
                     AsU32(Field(fld::Entity_PositionX)), AsU32(Field(fld::Entity_PositionY)),
                     AsU32(Field(fld::Player_SpeedX)), AsU32(Field(fld::Player_SpeedY)));
@@ -407,6 +434,151 @@ HOOK_DEFINE_INLINE(InputStoreHook) {
     }
 };
 
+
+/* ---- Rollback feasibility, phase 2: save and restore raw memory ------------------------------
+ * At the top of TFGame.Update (+0xb75c60, the whole frame: it runs the input update then
+ * Engine.Update), with the player's frame counter at a window's start: copy the GC heap sections
+ * and the main module's globals. When the window has run, restore them, rewind the script, and run
+ * the window again. The "[xplay] T" lines for those frames then appear twice and must match, and
+ * every page's fingerprint at the window's end must match the first pass's. Also logs how many
+ * pages the window changed (what an incremental snapshot would copy) and how long copies take.
+ * The snapshot also covers Boehm's block headers (CollectGcMetadata). Kept as they are, not
+ * restored: the graphics layer's buffer slots (GfxRingHook), which point at native buffers that
+ * track GPU frames. */
+struct Window { int start, length; };
+static const Window kWindows[] = { {85, 8}, {198, 8}, {236, 8}, {326, 30}, {476, 8} };
+constexpr size_t kSnapMax = 112u << 20;
+alignas(0x1000) static uint8_t g_snap[kSnapMax];
+static int g_win = 0, g_pass = 0;              /* g_pass: 0 waiting, 1 first run, 2 replay */
+static int g_snapSections = 0;
+static bool g_snapPrev[4];
+static size_t g_rangeBytes = 0;
+
+/* Native engine state inside managed objects, kept as it is when restoring (not game state). */
+struct Keep { uintptr_t start, size; };
+static Keep g_keep[64];
+static int g_nKeep = 0;
+alignas(0x1000) static uint8_t g_keepBuf[256u << 10];
+
+static void KeepObject(const char* what, uintptr_t obj, uintptr_t size) {
+    for (int i = 0; i < g_nKeep; i++) if (g_keep[i].start == obj) return;
+    if (g_nKeep == 64) return;
+    g_keep[g_nKeep++] = { obj, size };   /* exact bytes: neighbouring objects are game state */
+    Logging.Log("[xplay] rollback: keeping %s at %#lx (%lu bytes) out of restores", what, (unsigned long)obj, (unsigned long)size);
+}
+
+static int g_loggedGfx[2];
+HOOK_DEFINE_TRAMPOLINE(GfxRingHook) {
+    static void* Callback(void* self, void* a, void* b, void* c, void* d, void* e, void* f, void* g) {
+        uintptr_t slot = reinterpret_cast<uintptr_t>(self);
+        uintptr_t buffer = *reinterpret_cast<uintptr_t*>(slot);
+        KeepObject("graphics buffer slot", slot, 8);
+        if (!g_loggedGfx[0] && buffer) {
+            uintptr_t device = *reinterpret_cast<uintptr_t*>(buffer + 0x58);
+            Logging.Log("[xplay] gfx: slot %#lx -> buffer %#lx -> device %#lx", (unsigned long)slot, (unsigned long)buffer, (unsigned long)device);
+            if (++g_loggedGfx[1] > 16) g_loggedGfx[0] = true;
+        }
+        return Orig(self, a, b, c, d, e, f, g);
+    }
+};
+
+static uintptr_t HeapSectionCount() { return **reinterpret_cast<uintptr_t**>(Base() + 0x483b6e8); }
+static double Ms(uint64_t ticks) { return ticks / 19200.0; }
+
+/* Debug: the audio layer's list of active sound instances (static at +0x4724770 -> List: items
+ * +0x10, count +0x18; items array: length at [+0x20], elements from [+0x10]). */
+static const char* Where(uintptr_t a) {
+    for (int r = 0; r < g_nRanges; r++)
+        if (a >= g_ranges[r].start && a < g_ranges[r].start + g_ranges[r].size)
+            return r < g_nHeapSections ? "GC heap" : r < g_nHeap ? "GC metadata" : "globals";
+    return "not snapshotted";
+}
+
+static void DumpSoundList(const char* when) {
+    uintptr_t list = **reinterpret_cast<uintptr_t**>(Base() + 0x4724770);
+    if (!list) { Logging.Log("[xplay] sounds %s: no list", when); return; }
+    uintptr_t arr = *reinterpret_cast<uintptr_t*>(list + 0x10);
+    int count = *reinterpret_cast<int*>(list + 0x18);
+    uintptr_t elems = arr ? *reinterpret_cast<uintptr_t*>(arr + 0x10) : 0;
+    Logging.Log("[xplay] sounds %s: list %#lx count %d array %#lx elems %#lx", when, (unsigned long)list, count, (unsigned long)arr, (unsigned long)elems);
+    for (int i = 0; i < count && i < 8 && elems; i++) {
+        uintptr_t e = reinterpret_cast<uintptr_t*>(elems)[i];
+        Logging.Log("[xplay] sounds %s:   [%d] %#lx%s", when, i, (unsigned long)e, e ? (*reinterpret_cast<uint8_t*>(e + 0x10) ? " disposed" : "") : "");
+    }
+}
+
+static void Save() {
+    CollectRanges();
+    g_rangeBytes = 0;
+    for (int r = 0; r < g_nRanges; r++) g_rangeBytes += g_ranges[r].size;
+    if (g_rangeBytes > kSnapMax) { Logging.Log("[xplay] rollback: %lu KB too big", (unsigned long)(g_rangeBytes >> 10)); g_nRanges = 0; return; }
+    DumpSoundList("at save");
+    for (int i = 0; i < g_nKeep; i++) {
+        uintptr_t buffer = *reinterpret_cast<uintptr_t*>(g_keep[i].start);
+        uintptr_t device = buffer ? *reinterpret_cast<uintptr_t*>(buffer + 0x58) : 0;
+        Logging.Log("[xplay] gfx: slot %#lx (%s) -> buffer %#lx (%s) -> device %#lx (%s)", (unsigned long)g_keep[i].start, Where(g_keep[i].start),
+                    (unsigned long)buffer, Where(buffer), (unsigned long)device, Where(device));
+    }
+    uint64_t t0 = svcGetSystemTick();
+    size_t at = 0;
+    for (int r = 0; r < g_nRanges; r++) { std::memcpy(g_snap + at, (void*)g_ranges[r].start, g_ranges[r].size); at += g_ranges[r].size; }
+    uint64_t t1 = svcGetSystemTick();
+    g_snapSections = (int)HeapSectionCount();
+    g_snapPrev[0] = g_prevJump; g_snapPrev[1] = g_prevShoot; g_snapPrev[2] = g_prevDodge; g_snapPrev[3] = g_prevAlt;
+    Logging.Log("[xplay] rollback: saved at frame %d: %lu KB in %d ranges, %.2f ms", g_frame,
+                (unsigned long)(g_rangeBytes >> 10), g_nRanges, Ms(t1 - t0));
+}
+
+static void Restore() {
+    if ((int)HeapSectionCount() != g_snapSections) {
+        Logging.Log("[xplay] rollback: heap grew (%d -> %lu sections); not restoring", g_snapSections, (unsigned long)HeapSectionCount());
+        g_nRanges = 0;
+        return;
+    }
+    size_t dirty = 0, at = 0;
+    for (int r = 0; r < g_nRanges; r++) {
+        for (uintptr_t off = 0; off < g_ranges[r].size; off += 0x1000) {
+            size_t n = g_ranges[r].size - off < 0x1000 ? g_ranges[r].size - off : 0x1000;
+            if (std::memcmp(g_snap + at + off, (void*)(g_ranges[r].start + off), n) != 0) dirty++;
+        }
+        at += g_ranges[r].size;
+    }
+    DumpSoundList("before restore");
+    ScanRanges(false, nullptr, nullptr);    /* fingerprints at the window's end, first pass */
+    uint64_t t0 = svcGetSystemTick();
+    size_t kept = 0;
+    for (int i = 0; i < g_nKeep && kept + g_keep[i].size <= sizeof(g_keepBuf); i++) { std::memcpy(g_keepBuf + kept, (void*)g_keep[i].start, g_keep[i].size); kept += g_keep[i].size; }
+    at = 0;
+    for (int r = 0; r < g_nRanges; r++) { std::memcpy((void*)g_ranges[r].start, g_snap + at, g_ranges[r].size); at += g_ranges[r].size; }
+    kept = 0;
+    for (int i = 0; i < g_nKeep && kept + g_keep[i].size <= sizeof(g_keepBuf); i++) { std::memcpy((void*)g_keep[i].start, g_keepBuf + kept, g_keep[i].size); kept += g_keep[i].size; }
+    uint64_t t1 = svcGetSystemTick();
+    Logging.Log("[xplay] rollback: frame %d -> %d: %lu pages had changed (%lu KB); restored in %.2f ms", g_frame,
+                kWindows[g_win].start, (unsigned long)dirty, (unsigned long)(dirty * 4), Ms(t1 - t0));
+    DumpSoundList("after restore");
+    g_frame = kWindows[g_win].start;
+    g_prevJump = g_snapPrev[0]; g_prevShoot = g_snapPrev[1]; g_prevDodge = g_snapPrev[2]; g_prevAlt = g_snapPrev[3];
+}
+
+HOOK_DEFINE_TRAMPOLINE(FrameHook) {
+    static void Callback(void* game, void* gameTime) {
+        constexpr int kWindowCount = sizeof(kWindows) / sizeof(kWindows[0]);
+        if (g_player && g_win < kWindowCount) {
+            const Window& w = kWindows[g_win];
+            if (g_pass == 0 && g_frame == w.start) { Save(); g_pass = g_nRanges ? 1 : 0; if (!g_nRanges) g_win++; }
+            else if (g_pass == 1 && g_frame == w.start + w.length) { Restore(); g_pass = g_nRanges ? 2 : 0; if (!g_nRanges) g_win++; }
+            else if (g_pass == 2 && g_frame == w.start + w.length) {
+                size_t hc, gc;
+                ScanRanges(true, &hc, &gc);
+                Logging.Log("[xplay] rollback: replayed to frame %d: pages unlike the first pass: heap %lu, globals %lu%s",
+                            g_frame, (unsigned long)hc, (unsigned long)gc, hc + gc ? "" : " (identical)");
+                g_pass = 0; g_win++;
+            }
+        }
+        Orig(game, gameTime);
+    }
+};
+
 } // namespace xplay
 
 extern "C" void exl_main(void* x0, void* x1) {
@@ -421,6 +593,12 @@ extern "C" void exl_main(void* x0, void* x1) {
             reinterpret_cast<uintptr_t>(&xplay::GetFullKeyHook);
     }
     xplay::NormalUpdateHook::InstallAtOffset(xplay::off::Player_NormalUpdate);
+    if (*reinterpret_cast<uint32_t*>(xplay::Base() + xplay::off::TFGame_Update) == xplay::off::kTFGameUpdateInsn) {
+        xplay::FrameHook::InstallAtOffset(xplay::off::TFGame_Update);
+        xplay::GfxRingHook::InstallAtOffset(xplay::off::GfxRingAlloc);
+    }
+    else
+        Logging.Log("[xplay] TFGame.Update isn't as expected: rollback test off");
     if (*reinterpret_cast<uint32_t*>(xplay::Base() + xplay::off::Player_Update_InputStore) == xplay::off::kInputStoreInsn)
         xplay::InputStoreHook::InstallAtOffset(xplay::off::Player_Update_InputStore);
     else
