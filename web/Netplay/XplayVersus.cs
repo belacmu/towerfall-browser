@@ -14,11 +14,13 @@ namespace TowerFallBrowser;
 // Mods/switch-online, TEST5-MATCH-SETUP.md): TF.EX's own sync-test session ("test lms 0 0 42 2 #NONE# 2",
 // run at 60 ticks/s, see TfexFps.cs) with both archers driven by scripts, and one log line per tick.
 //
-// "xplay2 <script0> <script1> [seed=42] [maxticks=6000] [rngtrace=N] [impure=1] [replay=off]" host command (needs ?fortrise&tfexfps=60 and TF.EX).
+// "xplay2 <script0> <script1> [seed=42] [maxticks=6000] [rngtrace=N] [impure=1] [replay=off] [cd=N] [cotrace=1]" host command (needs ?fortrise&tfexfps=60 and TF.EX).
 // It installs the patches below, then runs TF.EX's `test` command exactly as the dev console would
 // (TF.EX.Core.TFCommands.LaunchTestMode); rngtrace=N also logs who made each of the first N draws of the
 // gameplay RNG (the call stack), to line the Switch's draw order up with it; impure=1 is a negative control that
 // indexes the script by call count instead of tick (the sync test must then report a desync); replay=off sets the
+// cd=N sets the GGRS SyncTest check distance (default 2; 0 = no rollbacks at all; with replay=off a plain forward run);
+// cotrace=1 logs [xplay2co] lines (every VersusStart Coroutine.Update, each Level.Update, each Engine.Scene change);
 // game's Replay option to off for this run (TF.EX's instant replay is on by default and runs between rounds). Script: frame:flags:moveX:moveY steps joined by commas, each held
 // until the next; flags 1 jump, 2 shoot, 4 dodge, 8 alt shoot, 0x10 arrows (hex). "-" is "no input".
 //
@@ -53,6 +55,7 @@ public static class XplayVersus
 	private static int maxTicks = 6000;
 	private static int rngTrace; // log the callers of the first N gameplay RNG draws
 	private static int rngDraws;
+	private static bool coTrace; // cotrace=1: log every Coroutine.Update of a VersusStart (and each Level.Update / scene change near a round change)
 	private static bool impure; // negative control: script index = calls so far, not the tick
 	private static readonly int[] impureCalls = new int[2];
 	private static bool patched;
@@ -102,7 +105,10 @@ public static class XplayVersus
 		rngDraws = 0;
 		impure = options.TryGetValue("impure", out string im) && im == "1";
 		impureCalls[0] = impureCalls[1] = 0;
+		coTrace = options.TryGetValue("cotrace", out string ct) && ct == "1";
 		bool replayOff = options.TryGetValue("replay", out string rp) && rp == "off";
+		// cd=N: GGRS SyncTest check distance (LaunchTestMode's 5th argument; TF.EX clamps it to <= 7). Default 2.
+		int checkDistance = options.TryGetValue("cd", out string cdText) ? int.Parse(cdText, CultureInfo.InvariantCulture) : 2;
 		Resolve(towerFall);
 		if (!patched) Patch(towerFall);
 		Reset();
@@ -115,12 +121,12 @@ public static class XplayVersus
 			FieldInfo mode = opts.GetType().GetField("ReplayMode");
 			mode.SetValue(opts, Enum.Parse(mode.FieldType, "Off"));
 		}
-		Console.WriteLine($"[xplay2] cfg scripts={scripts[0].Count}/{scripts[1].Count} steps seed={seed} maxticks={maxTicks} fps=60 replay={(replayOff ? "off" : "as saved")} impure={impure} rngtrace={rngTrace}");
+		Console.WriteLine($"[xplay2] cfg scripts={scripts[0].Count}/{scripts[1].Count} steps seed={seed} maxticks={maxTicks} fps=60 replay={(replayOff ? "off" : "as saved")} cd={checkDistance} impure={impure} rngtrace={rngTrace}");
 		// TF.EX's own `test lms 0 0 42 2 #NONE# 2`: mode, start level, map (the arguments' order differs from
 		// the spec text: LaunchTestMode reads them as mode, startLevel, map, seed, checkDistance, variants, players).
 		MethodInfo launch = commands.GetMethod("LaunchTestMode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-		launch.Invoke(null, new object[] { new[] { "lms", "0", "0", seed.ToString(CultureInfo.InvariantCulture), "2", "#NONE#", "2" } });
-		return "TF.EX test session started (lms, level 0, map 0, 2 players, check distance 2)";
+		launch.Invoke(null, new object[] { new[] { "lms", "0", "0", seed.ToString(CultureInfo.InvariantCulture), checkDistance.ToString(CultureInfo.InvariantCulture), "#NONE#", "2" } });
+		return $"TF.EX test session started (lms, level 0, map 0, 2 players, check distance {checkDistance})";
 	}
 
 	private static void Reset()
@@ -206,6 +212,8 @@ public static class XplayVersus
 		harmony.Patch(AccessTools.Method(sessionType, "StartGame"), postfix: new HarmonyMethod(typeof(XplayVersus), nameof(SessionStartGamePostfix)));
 		foreach (string name in new[] { "LevelLoadStart", "OnLevelLoadFinish", "StartRound", "GotoNextRound" })
 			harmony.Patch(AccessTools.Method(sessionType, name), postfix: new HarmonyMethod(typeof(XplayVersus), nameof(SessionPostfix)));
+		harmony.Patch(AccessTools.Method(towerFall.GetType("Monocle.Coroutine", true), "Update"), prefix: new HarmonyMethod(typeof(XplayVersus), nameof(CoroutineUpdateTrace)));
+		harmony.Patch(AccessTools.PropertySetter(towerFall.GetType("Monocle.Engine", true), "Scene"), prefix: new HarmonyMethod(typeof(XplayVersus), nameof(SceneSetTrace)));
 		Type rnd = Find("TF.State.Domain.Randomness.DeterministicRandom");
 		harmony.Patch(rnd.GetMethod("NextULong"), prefix: new HarmonyMethod(typeof(XplayVersus), nameof(RngDrawPrefix)));
 		harmony.Patch(AccessTools.Method(levelType, "Update"),
@@ -245,9 +253,32 @@ public static class XplayVersus
 		}
 	}
 
+	// cotrace=1 only (read-only reflection, no game state touched). A line per Coroutine.Update of a VersusStart:
+	// the GGRS frame, the round, the coroutine's enumerator stack depth, its `delay` and its waitTimer counter before the update.
+	private static void CoroutineUpdateTrace(object __instance)
+	{
+		if (!active || !coTrace) return;
+		object entity = __instance.GetType().GetProperty("Entity")?.GetValue(__instance);
+		if (entity == null || entity.GetType().Name != "VersusStart") return;
+		const BindingFlags priv = BindingFlags.NonPublic | BindingFlags.Instance;
+		var stack = (System.Collections.ICollection)__instance.GetType().GetField("enumerators", priv).GetValue(__instance);
+		object wt = __instance.GetType().GetField("waitTimer", priv).GetValue(__instance);
+		float counter = (float)wt.GetType().GetField("counter", priv).GetValue(wt);
+		float delay = (float)__instance.GetType().GetField("delay", priv).GetValue(__instance);
+		object round = sessionRoundIndex.GetValue(entity.GetType().GetField("session", priv).GetValue(entity));
+		Console.WriteLine($"[xplay2co] VS frame={CurrentFrame()} round={round} depth={stack.Count} wait={counter.ToString("R", CultureInfo.InvariantCulture)} delay={delay.ToString("R", CultureInfo.InvariantCulture)} timemult={Bits((float)timeMult.GetValue(null)):x8}");
+	}
+
+	private static void SceneSetTrace(object value)
+	{
+		if (!active || !coTrace) return;
+		Console.WriteLine($"[xplay2co] Engine.Scene = {value?.GetType().Name ?? "null"} frame={CurrentFrame()}");
+	}
+
 	private static void LevelUpdatePrefix(object __instance)
 	{
 		if (!active) return;
+		if (coTrace) Console.WriteLine($"[xplay2co] Level.Update frame={CurrentFrame()} level={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(__instance):x} round={sessionRoundIndex.GetValue(levelSession.GetValue(__instance))} firstpass={frame > maxFrame}");
 		frame = CurrentFrame();
 		firstPass = frame > maxFrame;
 		pendingLine = null;
@@ -260,6 +291,7 @@ public static class XplayVersus
 
 	private static void LevelUpdatePostfix(object __instance)
 	{
+		if (active && coTrace) Console.WriteLine($"[xplay2co] Level.Update done level={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(__instance):x} pending={(pendingLine != null)}");
 		if (!active || pendingLine == null) return;
 		int f = frame;
 		string line = pendingLine;
