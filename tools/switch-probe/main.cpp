@@ -43,6 +43,10 @@
  * -ffp-contract=off). The SDK's pow differs from the browser's; this is the fix. */
 extern "C" double xplay_musl_pow(double, double);
 
+#ifndef XPLAY_ROLLBACK
+#define XPLAY_ROLLBACK 1
+#endif
+
 namespace xplay {
 
 namespace off {
@@ -58,6 +62,9 @@ namespace off {
     constexpr uintptr_t Player_Update_InputStore = 0xaef934;
     /* TFGame.Update(GameTime): the input update, then Engine.Update (+0x92d0b0). */
     constexpr uintptr_t TFGame_Update = 0xb75c60;
+    constexpr uintptr_t CxaThrowSlot = 0x47223c0;
+    constexpr uintptr_t SoundInstanceDispose = 0x47bac;
+    constexpr uintptr_t SoundEffectPlay = 0x46760;        /* bool SoundEffect.Play(float volume, float pitch, float pan) */   /* SoundEffectInstance.Dispose(bool disposing) */          /* __cxa_throw(exception, typeinfo, dtor) */
     constexpr uint32_t  kTFGameUpdateInsn = 0xa9be4ff4; /* stp x20, x19, [sp, #-0x20]! */
     /* The graphics layer's per-frame buffer allocator: x0 = a native ring of transient GPU buffers
      * (0x5600 bytes, inside a managed object) that tracks GPU frames (+0x55b8); rolling one back
@@ -446,7 +453,14 @@ HOOK_DEFINE_INLINE(InputStoreHook) {
  * restored: the graphics layer's buffer slots (GfxRingHook), which point at native buffers that
  * track GPU frames. */
 struct Window { int start, length; };
-static const Window kWindows[] = { {85, 8}, {198, 8}, {236, 8}, {326, 30}, {476, 8} };
+/* The step 5 windows (a jump, two shots, a dodge), then one every 37 frames to frame 3000,
+ * alternating 8 and 20 frames long. */
+static Window kWindows[100] = { {85, 8}, {198, 8}, {236, 8}, {326, 30}, {476, 8} };
+static int kWindowCount = XPLAY_ROLLBACK ? 5 : 0;
+static void MakeWindows() {
+    if (!XPLAY_ROLLBACK) return;
+    for (int f = 520, k = 0; f < 3000 && kWindowCount < 100; f += 37, k++) kWindows[kWindowCount++] = { f, k % 2 ? 20 : 8 };
+}
 constexpr size_t kSnapMax = 112u << 20;
 alignas(0x1000) static uint8_t g_snap[kSnapMax];
 static int g_win = 0, g_pass = 0;              /* g_pass: 0 waiting, 1 first run, 2 replay */
@@ -482,6 +496,12 @@ HOOK_DEFINE_TRAMPOLINE(GfxRingHook) {
     }
 };
 
+/* Debug: the first pass's end state for pages the window changed, to diff the replay word by word. */
+constexpr int kMaxEndPages = 2048;
+static uintptr_t g_endAddr[kMaxEndPages];
+alignas(0x1000) static uint8_t g_endPages[kMaxEndPages][0x1000];
+static int g_nEnd = 0;
+
 static uintptr_t HeapSectionCount() { return **reinterpret_cast<uintptr_t**>(Base() + 0x483b6e8); }
 static double Ms(uint64_t ticks) { return ticks / 19200.0; }
 
@@ -494,17 +514,26 @@ static const char* Where(uintptr_t a) {
     return "not snapshotted";
 }
 
-static void DumpSoundList(const char* when) {
-    uintptr_t list = **reinterpret_cast<uintptr_t**>(Base() + 0x4724770);
-    if (!list) { Logging.Log("[xplay] sounds %s: no list", when); return; }
+/* Debug: the audio layer's sound instances: the active list (static +0x4724770) and the pool of
+ * finished fire-and-forget instances (static +0x4724788). Both are Lists: items +0x10, count +0x18;
+ * the items array: length at [+0x20], elements from [+0x10]. */
+static void DumpList(const char* when, const char* name, uintptr_t staticOff) {
+    uintptr_t list = **reinterpret_cast<uintptr_t**>(Base() + staticOff);
+    if (!list) return;
     uintptr_t arr = *reinterpret_cast<uintptr_t*>(list + 0x10);
     int count = *reinterpret_cast<int*>(list + 0x18);
     uintptr_t elems = arr ? *reinterpret_cast<uintptr_t*>(arr + 0x10) : 0;
-    Logging.Log("[xplay] sounds %s: list %#lx count %d array %#lx elems %#lx", when, (unsigned long)list, count, (unsigned long)arr, (unsigned long)elems);
-    for (int i = 0; i < count && i < 8 && elems; i++) {
+    char buf[400]; int at = 0;
+    for (int i = 0; i < count && i < 24 && elems && at < 360; i++) {
         uintptr_t e = reinterpret_cast<uintptr_t*>(elems)[i];
-        Logging.Log("[xplay] sounds %s:   [%d] %#lx%s", when, i, (unsigned long)e, e ? (*reinterpret_cast<uint8_t*>(e + 0x10) ? " disposed" : "") : "");
+        at += snprintf(buf + at, sizeof(buf) - at, " %lx%s", (unsigned long)(e & 0xffffff), e && *reinterpret_cast<uint8_t*>(e + 0x10) ? "D" : "");
     }
+    buf[at] = 0;
+    Logging.Log("[xplay] sounds %s %s (%d):%s", when, name, count, buf);
+}
+static void DumpSoundList(const char* when) {
+    DumpList(when, "active", 0x4724770);
+    DumpList(when, "pool", 0x4724788);
 }
 
 static void Save() {
@@ -529,7 +558,10 @@ static void Save() {
                 (unsigned long)(g_rangeBytes >> 10), g_nRanges, Ms(t1 - t0));
 }
 
+static void WatchSounds(const char* when);
+
 static void Restore() {
+    g_nEnd = 0;
     if ((int)HeapSectionCount() != g_snapSections) {
         Logging.Log("[xplay] rollback: heap grew (%d -> %lu sections); not restoring", g_snapSections, (unsigned long)HeapSectionCount());
         g_nRanges = 0;
@@ -539,7 +571,13 @@ static void Restore() {
     for (int r = 0; r < g_nRanges; r++) {
         for (uintptr_t off = 0; off < g_ranges[r].size; off += 0x1000) {
             size_t n = g_ranges[r].size - off < 0x1000 ? g_ranges[r].size - off : 0x1000;
-            if (std::memcmp(g_snap + at + off, (void*)(g_ranges[r].start + off), n) != 0) dirty++;
+            if (std::memcmp(g_snap + at + off, (void*)(g_ranges[r].start + off), n) != 0) {
+                dirty++;
+                if (g_nEnd < kMaxEndPages && n == 0x1000) {
+                    g_endAddr[g_nEnd] = g_ranges[r].start + off;
+                    std::memcpy(g_endPages[g_nEnd++], (void*)(g_ranges[r].start + off), 0x1000);
+                }
+            }
         }
         at += g_ranges[r].size;
     }
@@ -556,13 +594,89 @@ static void Restore() {
     Logging.Log("[xplay] rollback: frame %d -> %d: %lu pages had changed (%lu KB); restored in %.2f ms", g_frame,
                 kWindows[g_win].start, (unsigned long)dirty, (unsigned long)(dirty * 4), Ms(t1 - t0));
     DumpSoundList("after restore");
+    WatchSounds("after restore");
     g_frame = kWindows[g_win].start;
     g_prevJump = g_snapPrev[0]; g_prevShoot = g_snapPrev[1]; g_prevDodge = g_snapPrev[2]; g_prevAlt = g_snapPrev[3];
 }
 
+
+/* After a replay: every word that differs from the first pass (pages the first pass changed;
+ * other pages are compared with the snapshot). */
+static void DiffReplay() {
+    int logged = 0;
+    auto where = [](uintptr_t a) -> const char* { return Where(a); };
+    for (int i = 0; i < g_nEnd && logged < 120; i++) {
+        const uint64_t* first = reinterpret_cast<const uint64_t*>(g_endPages[i]);
+        const uint64_t* now = reinterpret_cast<const uint64_t*>(g_endAddr[i]);
+        for (int w = 0; w < 512 && logged < 120; w++)
+            if (first[w] != now[w]) {
+                uintptr_t a = g_endAddr[i] + w * 8;
+                Logging.Log("[xplay] replay diff %#lx (%s%s): first %#lx, replay %#lx", (unsigned long)a, where(a),
+                            a >= Base() && a < Base() + 0x5000000 ? ", module" : "", (unsigned long)first[w], (unsigned long)now[w]);
+                logged++;
+            }
+    }
+    /* pages the first pass left alone but the replay changed */
+    size_t at = 0;
+    int extra = 0;
+    for (int r = 0; r < g_nRanges; r++) {
+        for (uintptr_t off = 0; off + 0x1000 <= g_ranges[r].size; off += 0x1000) {
+            uintptr_t page = g_ranges[r].start + off;
+            bool seen = false;
+            for (int i = 0; i < g_nEnd && !seen; i++) seen = g_endAddr[i] == page;
+            if (seen || std::memcmp(g_snap + at + off, (void*)page, 0x1000) == 0) continue;
+            extra++;
+            const uint64_t* snap = reinterpret_cast<const uint64_t*>(g_snap + at + off);
+            const uint64_t* now = reinterpret_cast<const uint64_t*>(page);
+            for (int w = 0; w < 512 && logged < 160; w++)
+                if (snap[w] != now[w]) {
+                    Logging.Log("[xplay] replay-only change %#lx (%s): was %#lx, now %#lx", (unsigned long)(page + w * 8), Where(page),
+                                (unsigned long)snap[w], (unsigned long)now[w]);
+                    logged++;
+                }
+        }
+        at += g_ranges[r].size;
+    }
+    Logging.Log("[xplay] replay diff: %d pages changed only in the replay", extra);
+}
+
+
+/* Debug: sound instances known to the audio layer's two lists; logs the frame where one leaves both. */
+static uintptr_t g_known[64];
+static int g_nKnown = 0;
+static void CollectList(uintptr_t staticOff, uintptr_t* out, int* n) {
+    uintptr_t list = **reinterpret_cast<uintptr_t**>(Base() + staticOff);
+    if (!list) return;
+    uintptr_t arr = *reinterpret_cast<uintptr_t*>(list + 0x10);
+    int count = *reinterpret_cast<int*>(list + 0x18);
+    uintptr_t elems = arr ? *reinterpret_cast<uintptr_t*>(arr + 0x10) : 0;
+    for (int i = 0; i < count && elems && *n < 64; i++) out[(*n)++] = reinterpret_cast<uintptr_t*>(elems)[i];
+}
+static void WatchSounds(const char* when) {
+    uintptr_t now[64]; int n = 0;
+    CollectList(0x4724770, now, &n);
+    CollectList(0x4724788, now, &n);
+    for (int i = 0; i < g_nKnown; i++) {
+        bool found = false;
+        for (int j = 0; j < n && !found; j++) found = now[j] == g_known[i];
+        if (!found) {
+            Logging.Log("[xplay] sound instance %#lx left both lists (%s, frame %d, window %d pass %d)", (unsigned long)g_known[i], when, g_frame, g_win, g_pass);
+            DumpSoundList(when);
+            g_known[i] = g_known[--g_nKnown]; i--;
+        }
+    }
+    for (int j = 0; j < n; j++) {
+        bool found = false;
+        for (int i = 0; i < g_nKnown && !found; i++) found = g_known[i] == now[j];
+        if (!found && g_nKnown < 64) g_known[g_nKnown++] = now[j];
+    }
+}
+
+static int g_dumpEvery = 0, g_lastDump = -1;
 HOOK_DEFINE_TRAMPOLINE(FrameHook) {
     static void Callback(void* game, void* gameTime) {
-        constexpr int kWindowCount = sizeof(kWindows) / sizeof(kWindows[0]);
+        if (g_player) WatchSounds("frame start");
+        if (g_dumpEvery && g_frame % 300 == 0 && g_frame != g_lastDump) { g_lastDump = g_frame; char w[24]; snprintf(w, sizeof w, "frame %d", g_frame); DumpSoundList(w); }
         if (g_player && g_win < kWindowCount) {
             const Window& w = kWindows[g_win];
             if (g_pass == 0 && g_frame == w.start) { Save(); g_pass = g_nRanges ? 1 : 0; if (!g_nRanges) g_win++; }
@@ -570,13 +684,77 @@ HOOK_DEFINE_TRAMPOLINE(FrameHook) {
             else if (g_pass == 2 && g_frame == w.start + w.length) {
                 size_t hc, gc;
                 ScanRanges(true, &hc, &gc);
+                if (g_win < 5) DiffReplay();
+                DumpSoundList("after replay");
                 Logging.Log("[xplay] rollback: replayed to frame %d: pages unlike the first pass: heap %lu, globals %lu%s",
                             g_frame, (unsigned long)hc, (unsigned long)gc, hc + gc ? "" : " (identical)");
                 g_pass = 0; g_win++;
+
             }
         }
         Orig(game, gameTime);
+        if (g_player) WatchSounds("frame end");
     }
+};
+
+/* Debug: every C++ throw (BRUTE throws managed exceptions with __cxa_throw) once the rollback test
+ * has started: the call chain, by frame pointers, as module offsets. */
+using CxaThrowFn = void (*)(void*, void*, void*);
+static CxaThrowFn g_cxaThrow = nullptr;
+static int g_throwsLogged = 0;
+[[noreturn]] static void CxaThrowHook(void* exc, void* type, void* dtor) {
+    if (g_win > 0 && g_throwsLogged < 40) {
+        g_throwsLogged++;
+        uintptr_t base = Base(), end = base + exl::util::GetMainModuleInfo().m_Total.m_Size;
+        uintptr_t chain[12] = {}; int n = 0;
+        uintptr_t* fp = reinterpret_cast<uintptr_t*>(__builtin_frame_address(0));
+        for (; fp && n < 12; fp = reinterpret_cast<uintptr_t*>(fp[0])) {
+            uintptr_t lr = fp[1];
+            chain[n++] = lr >= base && lr < end ? lr - base : 0;
+            if (fp[0] <= reinterpret_cast<uintptr_t>(fp)) break;
+        }
+        uintptr_t managed = exc ? *reinterpret_cast<uintptr_t*>(exc) : 0;
+        Logging.Log("[xplay] throw at frame %d (window %d, pass %d): type %#lx obj vt %#lx; %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx", g_frame, g_win, g_pass,
+                    (unsigned long)(reinterpret_cast<uintptr_t>(type) - base), (unsigned long)(managed ? *reinterpret_cast<uintptr_t*>(managed) - base : 0),
+                    chain[0], chain[1], chain[2], chain[3], chain[4], chain[5], chain[6], chain[7], chain[8], chain[9]);
+    }
+    g_cxaThrow(exc, type, dtor);
+    __builtin_unreachable();
+}
+
+/* Debug: who disposes sound instances (a disposed instance in the sound pool is what throws). */
+static int g_disposeLogged = 0;
+HOOK_DEFINE_TRAMPOLINE(SoundDisposeHook) {
+    static void Callback(void* inst, bool disposing) {
+        if (g_player && g_disposeLogged < 60) {
+            g_disposeLogged++;
+            uintptr_t base = Base(), end = base + exl::util::GetMainModuleInfo().m_Total.m_Size;
+            uintptr_t chain[8] = {}; int n = 0;
+            uintptr_t* fp = reinterpret_cast<uintptr_t*>(__builtin_frame_address(0));
+            for (; fp && n < 8; fp = reinterpret_cast<uintptr_t*>(fp[0])) {
+                uintptr_t lr = fp[1];
+                chain[n++] = lr >= base && lr < end ? lr - base : 0;
+                if (fp[0] <= reinterpret_cast<uintptr_t>(fp)) break;
+            }
+            uint64_t tid = 0;
+            svcGetThreadId(&tid, CUR_THREAD_HANDLE);
+            DumpSoundList("at dispose");
+            Logging.Log("[xplay] dispose %#lx disposing=%d pooled=%d at frame %d (window %d pass %d) thread %lu; %lx %lx %lx %lx %lx %lx", (unsigned long)inst, disposing,
+                        *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(inst) + 0x11), g_frame, g_win, g_pass, (unsigned long)tid,
+                        chain[0], chain[1], chain[2], chain[3], chain[4], chain[5]);
+        }
+        Orig(inst, disposing);
+    }
+};
+
+/* Sound off for this test: SoundEffect.Play(volume, pitch, pan) returns false without touching
+ * the audio layer. The native voices behind sound instances aren't in the snapshot, so a restore
+ * leaves the layer's managed bookkeeping (the active list and pool of instances, statics at
+ * +0x4724770/+0x4724788) out of step with them: it loses pooled instances, which are then
+ * finalized, disposed, and handed out again (ObjectDisposedException in Play). Sound isn't game
+ * state; with gameplay sounds off, what's left to check is everything else. */
+HOOK_DEFINE_TRAMPOLINE(SoundPlayHook) {
+    static bool Callback(void* effect, float volume, float pitch, float pan) { (void)effect; (void)volume; (void)pitch; (void)pan; return false; }
 };
 
 } // namespace xplay
@@ -596,6 +774,13 @@ extern "C" void exl_main(void* x0, void* x1) {
     if (*reinterpret_cast<uint32_t*>(xplay::Base() + xplay::off::TFGame_Update) == xplay::off::kTFGameUpdateInsn) {
         xplay::FrameHook::InstallAtOffset(xplay::off::TFGame_Update);
         xplay::GfxRingHook::InstallAtOffset(xplay::off::GfxRingAlloc);
+        xplay::SoundDisposeHook::InstallAtOffset(xplay::off::SoundInstanceDispose);
+        xplay::SoundPlayHook::InstallAtOffset(xplay::off::SoundEffectPlay);
+        xplay::MakeWindows();
+        xplay::g_cxaThrow = reinterpret_cast<xplay::CxaThrowFn>(xplay::FindExport("__cxa_throw"));
+        if (xplay::g_cxaThrow)
+            *reinterpret_cast<volatile uintptr_t*>(xplay::Base() + xplay::off::CxaThrowSlot) = reinterpret_cast<uintptr_t>(&xplay::CxaThrowHook);
+        Logging.Log("[xplay] throw logging %s", xplay::g_cxaThrow ? "on" : "off (__cxa_throw not exported)");
     }
     else
         Logging.Log("[xplay] TFGame.Update isn't as expected: rollback test off");

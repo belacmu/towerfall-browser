@@ -268,16 +268,59 @@ before and after each run.
   assertion. The probe hooks the allocator (+0x204d0) to learn the slots, and keeps their exact
   bytes across a restore. Keeping whole pages instead breaks neighbouring game objects.
 
-**The gap.** With rollbacks on, the game threw an `ObjectDisposedException` about 50 seconds
-later, at frame 3110, inside a virtual update called from the level's update (+0xa7c768 to
-+0x992b40). With rollbacks off, the same build ran past frame 4100. Some other presentation state
-holds native resources that a restore gets out of step with, most likely audio. The audio
-layer's list of active sound instances (+0x4724770) is restored with everything else, while the
-native voices behind it are not. Audio needs the same treatment as graphics: keep it out of the
-restore (rollback netcode generally treats sound as presentation, not game state).
+**The gap: audio** (step 6). With rollbacks on, the game threw an `ObjectDisposedException` about
+50 seconds later. The same build without rollbacks didn't.
+
+## 6. Audio is outside the snapshot's reach; everything else holds (2026-10-14)
+
+**What throws.** `SoundEffect.Play` (+0x46760) takes a fire-and-forget instance from the audio
+layer's pool, and `SoundEffectInstance.Play` (+0x475d0) throws because that instance is disposed
+(its byte at +0x10).
+
+**How a disposed instance gets into the pool.** The audio layer keeps two managed lists of
+instances: the active list (static +0x4724770) and the pool (static +0x4724788). The per-frame
+cleanup (+0x48360) asks each active instance's native voice whether it has stopped, and moves
+finished instances back to the pool. Neither the native voices nor the audio thread's side are in
+the snapshot.
+
+In a replay, the restored lists no longer match the voices still playing from the first pass.
+The probe logged an instance (`be380`) dropping out of both lists in window 2's replay. Once
+nothing references it, a GC finalizes it. The finalizer, `Dispose(false)` (+0x47bac), returns a
+pooled instance to the pool and then marks it disposed. The next sound that draws it throws.
+
+**Isolating it.** The probe makes `SoundEffect.Play` return false at once, so gameplay never
+touches the audio layer. Then, in a hidden run:
+- 43 rollbacks (8 to 30 frames each, to frame 1900) ran with no exception, no finalized sound
+  instances and no lost references.
+- All 594 replayed frames matched their first pass.
+- The trajectory still matched the no-rollback runs on both platforms (700 frames).
+
+So graphics (step 5's kept buffer slots) and audio are the only native state found so far that a
+raw-memory restore gets wrong.
+
+**What it means for the Switch mod.** Sound has to stay out of the rolled-back state, as in any
+rollback game. The game's sound calls go through the one function the probe already hooks,
+`SoundEffect.Play`. The mod would:
+- record each call with its frame;
+- skip calls it has already played when frames are simulated again;
+- play new ones itself, from its own memory, through the native voice API behind
+  `SoundEffectInstance`.
+
+Loaded `SoundEffect` assets don't change after loading, so they are safe to reference. Looping
+and long sounds need the same treatment, and so does music, if a rollback could reach its state.
+
+**Side notes:**
+- **Replays don't allocate exactly as the first pass did.** In one 30-frame window, the replay
+  built a fresh free list in a block the first pass left alone. Boehm's black lists live in
+  scratch memory the snapshot doesn't cover yet. That doesn't change the game's behaviour, but
+  object addresses can differ, and anything that hashes by address (default `GetHashCode`) could
+  then differ too. The fix is to snapshot all of Boehm's scratch chunks, not only the header
+  pages.
+- **Copy cost in the hidden emulator:** 1.4–24 ms per full copy, median 4.8 ms. An incremental
+  copy (step 4) is still the target.
 
 **Next:**
-1. Find what threw, and keep audio state out of restores.
-2. Run longer and with more windows.
-3. Then try the 4-player versus test.
+1. The mod-side sound layer: record, de-duplicate, and play through native voices.
+2. Snapshot all of Boehm's scratch memory.
+3. The 4-player versus test.
 
