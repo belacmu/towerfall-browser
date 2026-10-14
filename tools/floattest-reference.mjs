@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The exact IEEE 754 single-precision answer to web/Determinism.cs's FloatTest: the same inputs and
 // operations, every operation rounded to float with Math.fround. The browser's "floattest" command
-// must print this hash for both passes. (docs/SWITCH-CROSSPLAY.md)
+// must print this hash for both passes. (the Switch online project: Towerfall Switch Mods/switch-online, PLAN.md)
 const f = Math.fround;
 const u32 = new Uint32Array(1);
 const f32 = new Float32Array(u32.buffer);

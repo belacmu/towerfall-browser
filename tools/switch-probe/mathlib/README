@@ -1,3 +1,0 @@
-musl libc math sources (pow, from Emscripten 3.1.56's copy: what the browser's Math.Pow runs),
-MIT licensed (COPYRIGHT.musl; pow by Arm Ltd, 2018). libm.h and features.h are small shims.
-Built with -ffp-contract=off and no FMA path, so it computes exactly as WebAssembly does.

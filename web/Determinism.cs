@@ -2,7 +2,7 @@ using System;
 
 namespace TowerFallBrowser;
 
-// Checks for cross-platform determinism (docs/SWITCH-CROSSPLAY.md): does the browser's .NET compute
+// Checks for cross-platform determinism (Towerfall Switch Mods/switch-online, PLAN.md): does the browser's .NET compute
 // single-precision floats exactly as IEEE 754 says (each operation rounded to float, no wider
 // intermediates, no fused multiply-add)? "floattest" host command; tools/floattest-reference.mjs
 // computes the same with exact rounding, and the hashes must match. Run twice: the first pass is

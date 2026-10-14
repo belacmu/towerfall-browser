@@ -9,8 +9,8 @@ using Microsoft.Xna.Framework;
 
 namespace TowerFallBrowser;
 
-// The browser half of the Switch determinism test (docs/SWITCH-CROSSPLAY.md step 3), the same as the
-// Switch probe (tools/switch-probe) does there:
+// The browser half of the Switch determinism test (the Switch online project, Towerfall Switch
+// Mods/switch-online: PLAN.md step 3), the same as its probe (exlaunch-overlay/) does there:
 //   - The game runs fixed-step, so Engine.Update takes its IsFixedTimeStep branch (TimeMult =
 //     TimeRate), not measured frame time.
 //   - In Player.Update, right after `input = PlayerInputs[i].GetState()`, player 1's InputState comes
