@@ -331,8 +331,13 @@ public static partial class BrowserHost
 
 	// Every archer can be picked from the start. The four secret ones (White, Yellow, Cyan, Purple:
 	// UnlockData.GetArcherUnlocked 4-7) count as found and introduced, as if earned, so no unlock
-	// sequence plays later either. Only their flags change; towers, variants and stats don't. The
-	// save keeps them once the game next writes it.
+	// sequence plays later either. Every versus tower too: Sunken City, Moonstone, TowerForge and
+	// Ascension (UnlockData.GetTowerUnlocked 8-11) are otherwise earned in Quest. Online play needs
+	// them: TF.EX picks a lobby's tower (and a random one) among this player's unlocked towers, so a
+	// player without them would play a different tower than the others and desync. The same flags
+	// also add Bolt, SuperBomb and Feather arrows to TreasureSpawner.GetRandomArrowType (every round)
+	// and GetArrowShufflePickups, so the arrow variants need equal flags too. Only these flags
+	// change; variants and stats don't. The save keeps them once the game next writes it.
 	private static void UnlockArchers()
 	{
 		try
@@ -341,7 +346,8 @@ public static partial class BrowserHost
 			object unlocks = save?.GetType().GetField("Unlocks")?.GetValue(save);
 			if (unlocks == null) return;
 			int changed = 0;
-			foreach (string flag in new[] { "WhiteArcherRevealed", "WhiteArcherIntro", "YellowArcherRevealed", "YellowArcherIntro", "CyanArcherIntro", "PurpleArcherRevealed", "PurpleArcherIntro" })
+			foreach (string flag in new[] { "WhiteArcherRevealed", "WhiteArcherIntro", "YellowArcherRevealed", "YellowArcherIntro", "CyanArcherIntro", "PurpleArcherRevealed", "PurpleArcherIntro",
+				"SunkenCity", "Moonstone", "TowerForge", "Ascension" })
 			{
 				FieldInfo field = unlocks.GetType().GetField(flag);
 				if (field?.GetValue(unlocks) is false)
@@ -350,7 +356,7 @@ public static partial class BrowserHost
 					changed++;
 				}
 			}
-			if (changed > 0) Console.WriteLine("[unlocks] All archers unlocked.");
+			if (changed > 0) Console.WriteLine("[unlocks] All archers and versus towers unlocked.");
 		}
 		catch (Exception e)
 		{
