@@ -16,6 +16,8 @@
 		<RunAOTCompilation Condition="'$(RunAOTCompilation)' == ''">false</RunAOTCompilation>
 		<!-- The patched runtime pack (tools/fetch-runtime.sh); -p:RuntimeDir=... builds against another. -->
 		<RuntimeDir Condition="'$(RuntimeDir)' == ''">$(MSBuildProjectDirectory)\..\vendor\runtime</RuntimeDir>
+		<!-- ggrs_ffi.a (tools/build-netplay.sh); -p:NetplayDir=... links another build (NETPLAY_OUT). -->
+		<NetplayDir Condition="'$(NetplayDir)' == ''">$(MSBuildProjectDirectory)\..\vendor\netplay</NetplayDir>
 
 		<NoWarn>IL2026,IL2046,IL2057,IL2062,IL2065,IL2067,IL2070,IL2072,IL2075,IL2087,IL2090</NoWarn>
 		<NoWarn>$(NoWarn),SYSLIB0011,SYSLIB0050,SYSLIB0051,CS0169,CS0219,CS0414,CS0618,CS0649,CS0162,CS0168,CS8981,CA2022,CA1416,CS0108,CS0114</NoWarn>
@@ -54,8 +56,8 @@
 		<NativeFileReference Include="$(RuntimeDir)\hot_reload_detour.o" Condition="Exists('$(RuntimeDir)\hot_reload_detour.o')" />
 		<!-- Netplay: ggrs_ffi (TF.EX's native library, built by tools/build-netplay.sh) and its
 		     browser WebRTC transport. The archive name is the P/Invoke library name. -->
-		<NativeFileReference Include="..\vendor\netplay\ggrs_ffi.a" Condition="Exists('..\vendor\netplay\ggrs_ffi.a')" />
-		<_WasmExtraJSFile Include="..\netplay\tfnet.js" Kind="js-library" Condition="Exists('..\vendor\netplay\ggrs_ffi.a')" />
+		<NativeFileReference Include="$(NetplayDir)\ggrs_ffi.a" Condition="Exists('$(NetplayDir)\ggrs_ffi.a')" />
+		<_WasmExtraJSFile Include="..\netplay\tfnet.js" Kind="js-library" Condition="Exists('$(NetplayDir)\ggrs_ffi.a')" />
 	</ItemGroup>
 
 	<ItemGroup>

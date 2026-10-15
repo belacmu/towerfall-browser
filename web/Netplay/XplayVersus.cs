@@ -14,7 +14,7 @@ namespace TowerFallBrowser;
 // Mods/switch-online, TEST5-MATCH-SETUP.md): TF.EX's own sync-test session ("test lms 0 0 42 2 #NONE# 2",
 // run at 60 ticks/s, see TfexFps.cs) with both archers driven by scripts, and one log line per tick.
 //
-// "xplay2 <script0> <script1> [seed=42] [maxticks=6000] [rngtrace=N] [impure=1] [replay=off] [cd=N] [cotrace=1] [variants=A_B,C_D]" host command (needs ?fortrise&tfexfps=60 and TF.EX).
+// "xplay2 <script0> <script1> [seed=42] [maxticks=6000] [rngtrace=N] [impure=1] [replay=off] [cd=N] [cotrace=1] [variants=A_B,C_D] [digest=1]" host command (needs ?fortrise&tfexfps=60 and TF.EX).
 // It installs the patches below, then runs TF.EX's `test` command exactly as the dev console would
 // (TF.EX.Core.TFCommands.LaunchTestMode); rngtrace=N also logs who made each of the first N draws of the
 // gameplay RNG (the call stack), to line the Switch's draw order up with it; impure=1 is a negative control that
@@ -112,6 +112,8 @@ public static partial class XplayVersus
 		// variants=NO_AUTOBALANCE,SYMMETRICAL_TREASURE: TF.EX's test-command variant list (titles, '_' for spaces). A browser-hosted lobby
 		// has those two by default (TF.EX's 1v1 tournament rules), so this reproduces a lobby match's rules in the sync test.
 		string variantArg = options.TryGetValue("variants", out string va) && va.Length > 0 ? "#" + va + "#" : "#NONE#";
+		// digest=1: GGRS checksums are the gameplay digest (GameplayDigest.cs); the sync test then compares digests across resimulations.
+		if (options.TryGetValue("digest", out string dg) && dg == "1" && GameplayDigestHook.Enable(towerFall) is string digestError) return "digest: " + digestError;
 		Resolve(towerFall);
 		if (!patched) Patch(towerFall);
 		Reset();

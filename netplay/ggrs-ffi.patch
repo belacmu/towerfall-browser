@@ -17,3 +17,47 @@ index f0b1a61..b00094e 100644
          let runtime = tokio::runtime::Builder::new_multi_thread()
              .worker_threads(4)
              .enable_all()
+diff --git a/core/src/ffi.rs b/core/src/ffi.rs
+--- a/core/src/ffi.rs
++++ b/core/src/ffi.rs
+@@ -170,6 +170,12 @@
+     let safe_game_state = GameState::new(game_state);
+ 
+     np.handle_save_game_state_request(safe_game_state)
++}
++
++// The checksum of the state the next netplay_save_game_state saves (instead of fletcher16 of its bytes).
++#[no_mangle]
++pub unsafe extern "C" fn netplay_set_pending_checksum(checksum: u64) {
++    *crate::neplay::PENDING_CHECKSUM.lock().unwrap() = Some(checksum);
+ }
+ 
+ #[no_mangle]
+diff --git a/core/src/neplay.rs b/core/src/neplay.rs
+--- a/core/src/neplay.rs
++++ b/core/src/neplay.rs
+@@ -34,6 +34,10 @@
+ 
+ const DESYNC_CHECK_INTERVAL: u32 = 120;
+ 
++// The checksum the game computed for the state it saves next (ffi netplay_set_pending_checksum): used once instead
++// of fletcher16 of the serialized state, so a peer that can't serialize TF.EX's state (the Switch) can compare a digest.
++pub static PENDING_CHECKSUM: Mutex<Option<u64>> = Mutex::new(None);
++
+ pub struct Netplay {
+     pub local_player_handle: Option<usize>,
+     pub remote_player_handles: Vec<usize>,
+@@ -784,8 +788,11 @@
+                 GgrsRequest::SaveGameState { cell, frame } => {
+                     assert_eq!(self.game_state.frame(), *frame);
+ 
+-                    let buffer = bincode::serialize(&game_state.data()).unwrap();
+-                    let checksum = fletcher16(&buffer) as u128;
++                    let pending = PENDING_CHECKSUM.lock().unwrap().take();
++                    let checksum = match pending {
++                        Some(digest) => digest as u128,
++                        None => fletcher16(&bincode::serialize(&game_state.data()).unwrap()) as u128,
++                    };
+                     cell.save(*frame, Some(game_state.clone()), Some(checksum as u128));
+ 
+                     self.game_state = game_state.clone();
