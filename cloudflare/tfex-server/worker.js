@@ -2,17 +2,20 @@
 // use WebSocket hibernation so idle connections (players sitting in menus) cost nothing.
 //  - /ws: one Matchmaker object holds every lobby, join code and quick play queue.
 //  - /room/<id>, /ping_measurement/<id>: one SignalRoom object per room.
+//  - /relay/<id>?peer=<uuid>: one RelayRoom object per room, the match relay for peers without
+//    WebRTC (relay.js); only for the players of lobby <id> while its match is on.
 //  - GET /status (Authorization: Bearer <STATUS_KEY>): counts of connections, lobbies and matches,
 //    so a redeploy can wait until nobody is playing (tools/deploy-tfex-server.sh).
 //  - GET /turn?room=<id>&peer=<uuid>: ICE servers (STUN, and Cloudflare TURN credentials when
 //    configured) for browser pages whose peer is in that lobby.
 //  - POST /report, GET /reports: the pages' performance reports (reports.js), kept in one Reports
 //    object.
-// The logic lives in matchmaker.js and signal.js; local.mjs runs the same code under Node.
+// The logic lives in matchmaker.js, signal.js and relay.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
 import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
 import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
+import { RelayRoom } from "./relay.js";
 import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
 import { KEEP, LIST_LIMIT, MAX_REPORT, parseReport, RateLimit, TAG_OLD_ONLINE_REPORTS } from "./reports.js";
@@ -27,7 +30,7 @@ export default {
 			if (url.pathname === "/report") return report(request, env);
 			if (url.pathname === "/reports") return reports(request, env);
 			if (url.pathname === "/") {
-				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
+				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>, /relay/<id>?peer=<uuid>\n");
 			}
 			return new Response("Not found", { status: route ? 426 : 404 });
 		}
@@ -36,14 +39,22 @@ export default {
 		if (!originAllowed(request.headers.get("Origin"), allowedOrigins(env.ALLOWED_ORIGINS))) {
 			return new Response("Forbidden", { status: 403 });
 		}
+		if (route.kind === "relay" && !(await playingIn(env, route.roomId, route.peer))) return new Response("Forbidden", { status: 403 });
 		const name = route.kind === "ws" ? "matchmaker" : `${route.kind}:${route.roomId}`;
 		// The client's address, for per-address limits (the Durable Object only sees the Worker).
 		request = new Request(request);
 		request.headers.set("X-Client-IP", clientIp(request) ?? "");
-		const ns = route.kind === "ws" ? env.MATCHMAKER : env.ROOMS;
+		const ns = route.kind === "ws" ? env.MATCHMAKER : route.kind === "relay" ? env.RELAYS : env.ROOMS;
 		return ns.get(ns.idFromName(name)).fetch(request);
 	},
 };
+
+// The match relay is only for the players of a lobby whose match is on.
+async function playingIn(env, room, peer) {
+	const query = new URL("https://matchmaker/member");
+	query.search = new URLSearchParams({ room, peer, playing: "1" }).toString();
+	return (await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch(query)).ok;
+}
 
 // Only browsers ask (desktop TF.EX has its own ICE servers), and relay credentials only go to a
 // page whose peer is in the lobby it names: anyone else gets STUN.
@@ -126,6 +137,11 @@ class Sockets {
 					ws.send(text);
 				} catch {}
 			},
+			sendBinary: (bytes) => {
+				try {
+					ws.send(bytes);
+				} catch {}
+			},
 			close: (code, reason) => {
 				try {
 					ws.close(code, reason);
@@ -187,7 +203,8 @@ export class MatchmakerObject extends DurableObject {
 		const url = new URL(request.url);
 		if (url.pathname === "/stats") return Response.json(this.core.stats());
 		if (url.pathname === "/member") {
-			const member = this.core.isMember(url.searchParams.get("room"), url.searchParams.get("peer"));
+			const [room, peer] = [url.searchParams.get("room"), url.searchParams.get("peer")];
+			const member = url.searchParams.get("playing") === "1" ? this.core.isPlayingIn(room, peer) : this.core.isMember(room, peer);
 			return new Response(null, { status: member ? 204 : 404 });
 		}
 		const { client, conn } = this.sockets.accept();
@@ -260,6 +277,38 @@ export class SignalRoomObject extends DurableObject {
 			conn.close(1009, "message too big");
 			this.room.close(conn);
 		} else this.room.message(conn, text(message), Date.now());
+	}
+
+	webSocketClose(ws, code, reason) {
+		this.room.close(this.sockets.wrap(ws));
+		try {
+			ws.close(code, reason);
+		} catch {}
+	}
+
+	webSocketError(ws) {
+		this.room.close(this.sockets.wrap(ws));
+	}
+}
+
+// The match relay of one room (relay.js). Binary frames go to the other peer as they are.
+export class RelayRoomObject extends DurableObject {
+	constructor(ctx, env) {
+		super(ctx, env);
+		this.sockets = new Sockets(ctx);
+		this.room = new RelayRoom();
+		this.room.restore(this.sockets.all());
+	}
+
+	async fetch(request) {
+		const { client, conn } = this.sockets.accept();
+		this.room.open(conn, new URL(request.url).searchParams.get("peer"), Date.now(), request.headers.get("X-Client-IP") || null);
+		return new Response(null, { status: 101, webSocket: client });
+	}
+
+	// (The room closes a socket whose messages are over its size or rate caps.)
+	webSocketMessage(ws, message) {
+		this.room.message(this.sockets.wrap(ws), typeof message === "string" ? message : new Uint8Array(message), Date.now());
 	}
 
 	webSocketClose(ws, code, reason) {

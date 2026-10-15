@@ -18,6 +18,10 @@ class_name = "SignalRoomObject"
 name = "REPORTS"
 class_name = "ReportsObject"
 
+[[durable_objects.bindings]]
+name = "RELAYS"
+class_name = "RelayRoomObject"
+
 # SQLite-backed Durable Objects are the ones the Workers free plan includes.
 [[migrations]]
 tag = "v1"
@@ -26,3 +30,7 @@ new_sqlite_classes = ["MatchmakerObject", "SignalRoomObject"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["ReportsObject"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RelayRoomObject"]

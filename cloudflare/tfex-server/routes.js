@@ -19,13 +19,15 @@ const ROOM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // /ws -> matchmaking; /room/<id>?peer=<uuid> -> match signaling; /ping_measurement/<id>?peer=<uuid>
-// -> lobby ping signaling. Anything else: null. A peer id that isn't a UUID: { bad: true }.
+// -> lobby ping signaling; /relay/<id>?peer=<uuid> -> match relay (relay.js; peer required).
+// Anything else: null. A peer id that isn't a UUID (or a relay without one): { bad: true }.
 export function parseRoute(url) {
 	const path = url.pathname.replace(/\/+$/, "");
 	if (path === "/ws") return { kind: "ws" };
-	const m = /^\/(room|ping_measurement)\/([^/]+)$/.exec(path);
+	const m = /^\/(room|ping_measurement|relay)\/([^/]+)$/.exec(path);
 	if (!m || !ROOM_ID.test(m[2])) return null;
 	const peer = url.searchParams.get("peer");
 	if (peer !== null && !UUID.test(peer)) return { bad: true };
+	if (m[1] === "relay") return peer === null ? { bad: true } : { kind: "relay", roomId: m[2], peer: peer.toLowerCase() };
 	return { kind: m[1] === "room" ? "room" : "ping", roomId: m[2], peer };
 }

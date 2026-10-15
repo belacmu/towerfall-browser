@@ -517,6 +517,13 @@ export class Matchmaker {
 		return !!lobby && !!peer && [...lobby.Players, ...lobby.Spectators].some((m) => m.RoomPeerId === peer);
 	}
 
+	// Whether `peer` is a player (not a spectator) of lobby `roomId` and its match is on (for the
+	// match relay, relay.js).
+	isPlayingIn(roomId, peer) {
+		const lobby = this.rooms.get(roomId)?.lobby;
+		return !!lobby && lobby.InGame && !!peer && lobby.Players.some((m) => m.RoomPeerId === peer);
+	}
+
 	tooBig(lobby) {
 		return JSON.stringify(lobby).length > MAX_LOBBY_JSON;
 	}

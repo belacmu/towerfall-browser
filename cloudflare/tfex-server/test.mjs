@@ -722,6 +722,146 @@ test("core: quick play lobbies close when a player leaves before the match", asy
 	assert(!mm.rooms.has(roomId) && !A.state.roomId, "closed");
 });
 
+// ---- Match relay (/relay/<id>, relay.js) ----
+
+// A relay peer: binary messages in and out, as the browser's tfnet.js relay transport and the Switch use it.
+class RelayPeer {
+	static async open(path) {
+		const p = new RelayPeer();
+		p.ws = new WebSocket(base + path);
+		p.ws.binaryType = "arraybuffer";
+		p.got = [];
+		p.texts = 0;
+		p.closed = null;
+		p.ws.addEventListener("message", (e) => (typeof e.data === "string" ? p.texts++ : p.got.push([...new Uint8Array(e.data)])));
+		p.ws.addEventListener("close", (e) => (p.closed = e.code));
+		await new Promise((resolve, reject) => {
+			p.ws.addEventListener("open", resolve);
+			p.ws.addEventListener("error", reject);
+		});
+		return p;
+	}
+
+	send(bytes) {
+		this.ws.send(typeof bytes === "string" ? bytes : new Uint8Array(bytes));
+	}
+
+	async until(cond, what, ms = 2000) {
+		for (let t = 0; t < ms && !cond(); t += 20) await sleep(20);
+		assert(cond(), what);
+	}
+
+	close() {
+		this.ws.close();
+	}
+}
+
+// A two-player lobby (both ready) and its match started.
+async function startedMatch() {
+	const m = await privateLobby();
+	m.A.send({ UpdatePlayer: { player: { ...m.host, Ready: true } } });
+	m.B.send({ UpdatePlayer: { player: { ...m.bob, Ready: true, Platform: "Switch" } } });
+	for (let i = 0; i < 2; i++) await m.A.next("LobbyUpdate");
+	m.A.send({ StartLobbyChoice: {} });
+	await m.B.next("StartLobby");
+	return m;
+}
+
+test("relay: only the players of a lobby whose match is on get in; peer is required", async () => {
+	const m = await privateLobby();
+	const room = m.lobby.RoomId;
+	eq(await handshake(`/relay/${room}`), 400, "no peer");
+	eq(await handshake(`/relay/${room}?peer=not-a-uuid`), 400, "peer not a UUID");
+	eq(await handshake(`/relay/${room}?peer=${m.host.RoomPeerId}`), 403, "a player, before the match");
+	const C = await tfex("CAROL");
+	C.send({ JoinPrivate: { code: m.lobby.JoinCode, name: "CAROL", is_player: false } });
+	const spectator = (await C.next("PrivateJoinResult")).PrivateJoinResult.room_peer_id;
+	m.A.send({ UpdatePlayer: { player: { ...m.host, Ready: true } } });
+	m.B.send({ UpdatePlayer: { player: { ...m.bob, Ready: true } } });
+	for (let i = 0; i < 2; i++) await m.A.next("LobbyUpdate");
+	m.A.send({ StartLobbyChoice: {} });
+	await m.B.next("StartLobby");
+	eq(await handshake(`/relay/${room}?peer=${spectator}`), 403, "a spectator");
+	eq(await handshake(`/relay/${room}?peer=${uuid()}`), 403, "a stranger");
+	eq(await handshake(`/relay/r${Date.now()}?peer=${m.host.RoomPeerId}`), 403, "another room");
+	eq(await handshake(`/relay/${room}?peer=${m.host.RoomPeerId}`), 101, "a player, in the match");
+	eq(await handshake(`/relay/${room}?peer=${m.peerB}`, "http://localhost:18080"), 101, "the other player, from a local page");
+	eq(await handshake(`/relay/${room}?peer=${m.peerB}`, "https://evil.example"), 403, "other pages");
+	for (const c of [m.A, m.B, C]) c.close();
+});
+
+test("relay: binary frames go to the other peer unchanged, text is dropped, reconnects replace", async () => {
+	const m = await startedMatch();
+	const room = `/relay/${m.lobby.RoomId}`;
+	const H = await RelayPeer.open(`${room}?peer=${m.host.RoomPeerId}`);
+	const S = await RelayPeer.open(`${room}?peer=${m.peerB}`);
+	const frame = Array.from({ length: 64 }, (_, i) => (i * 37) & 255);
+	H.send(frame);
+	await S.until(() => S.got.length === 1, "S gets H's frame");
+	eq(S.got[0], frame, "unchanged");
+	S.send([0x48, 0x45, 0x4c, 0x4c, 0x4f]);
+	S.send('{"not":"forwarded"}');
+	for (let i = 0; i < 300; i++) S.send([i & 255, 1, 2, 3]);
+	await H.until(() => H.got.length === 301, "H gets all of S's 301 binary frames, in order");
+	eq(H.got[0], [0x48, 0x45, 0x4c, 0x4c, 0x4f], "first");
+	assert(H.got.slice(1).every((f, i) => f[0] === (i & 255)), "in order");
+	eq([H.texts, S.texts, S.got.length], [0, 0, 1], "no text either way, nothing echoed");
+	// The same peer reconnecting (same address): the new socket replaces the old one.
+	const S2 = await RelayPeer.open(`${room}?peer=${m.peerB}`);
+	await S.until(() => S.closed === 4001, "old socket closed as replaced");
+	H.send([9, 9]);
+	await S2.until(() => S2.got.length === 1, "the new socket gets frames");
+	S2.send([7]);
+	await H.until(() => H.got.length === 302, "and its frames get through");
+	// Size cap.
+	S2.send(new Array(2049).fill(1));
+	await S2.until(() => S2.closed === 4029, "a frame over 2 KB closes the socket");
+	for (const c of [H, m.A, m.B]) c.close();
+});
+
+test("core: relay rooms hold 2 peers, cap rate and size, and keep live peers from being taken over", async () => {
+	const { RelayRoom, MAX_RELAY_FRAME, RELAY_RATE } = await import("./relay.js");
+	assert(RELAY_RATE >= 400 && MAX_RELAY_FRAME <= 2048, "limits");
+	const room = new RelayRoom();
+	const conn = (name) => ({ name, state: {}, got: [], closed: null, sendBinary(b) { this.got.push(b); }, close(code) { this.closed = code; }, save() {} });
+	const [a, b] = [uuid(), uuid()];
+	const A = conn("A");
+	const B = conn("B");
+	assert(room.open(A, a, clock, "1.1.1.1") && room.open(B, b.toUpperCase(), clock, "2.2.2.2"), "two peers");
+	const C = conn("C");
+	assert(!room.open(C, uuid(), clock, "3.3.3.3") && C.closed === 4002, "a third is refused");
+	const X = conn("X");
+	assert(!room.open(X, a, clock + 1000, "6.6.6.6") && X.closed === 4003 && A.closed === null, "a live peer id can't be taken from another address");
+	// 60 Hz GGRS traffic (~125/s) and more: fine for a minute.
+	let t = clock;
+	for (let i = 0; i < 60 * 400; i++) room.message(A, new Uint8Array([1]), (t += 2.5));
+	eq([A.closed, B.got.length], [null, 60 * 400], "400 messages a second for a minute");
+	room.message(B, "text", t);
+	eq(A.got.length, 0, "text dropped");
+	for (let i = 0; i < 5000 && B.closed === null; i++) room.message(B, new Uint8Array([1]), t);
+	eq(B.closed, 4029, "a flood closes it");
+	assert(room.open(conn("B2"), b, t, "9.9.9.9"), "its slot is free again");
+	room.message(A, new Uint8Array(MAX_RELAY_FRAME + 1), t);
+	eq(A.closed, 4029, "too big");
+});
+
+test("core: a stale relay peer can be replaced from another address", async () => {
+	const { RelayRoom } = await import("./relay.js");
+	const room = new RelayRoom();
+	const conn = () => ({ state: {}, got: [], closed: null, sendBinary(b) { this.got.push(b); }, close(code) { this.closed = code; }, save() {} });
+	const a = uuid();
+	const A = conn();
+	room.open(A, a, clock, "1.1.1.1");
+	const A2 = conn();
+	assert(room.open(A2, a, clock + 10_000, "5.5.5.5"), "quiet for 10 s: replaced");
+	eq(A.closed, 4001, "old one closed");
+	room.message(A, new Uint8Array([1]), clock + 10_001);
+	const B = conn();
+	room.open(B, uuid(), clock + 10_001, "2.2.2.2");
+	room.message(A2, new Uint8Array([2]), clock + 10_002);
+	eq(B.got.map((x) => [...x]), [[2]], "only the new socket's frames get through");
+});
+
 // ---- run ----
 
 let failed = 0;
