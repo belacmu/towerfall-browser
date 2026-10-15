@@ -261,7 +261,7 @@ public static partial class XplayVersus
 
 	private static bool NetSessionStartGamePrefix(object __instance)
 	{
-		if (!netMode || netStarted || !active) return true;
+		if (!netMode || netLobby || netStarted || !active) return true;
 		if (netSession == null)
 		{
 			netSession = __instance;
@@ -272,7 +272,7 @@ public static partial class XplayVersus
 
 	private static void NetLevelCtorPostfix(object __instance)
 	{
-		if (!netMode || !active) return;
+		if (!netMode || netLobby || !active) return;
 		Type t = __instance.GetType();
 		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 		PropertyInfo prop = t.GetProperty("ReplayRecorder", any);
@@ -282,7 +282,7 @@ public static partial class XplayVersus
 
 	private static void ExFlagsPushPrefix()
 	{
-		if (!netMode) return;
+		if (!netMode || netLobby) return;
 		Find("TF.EX.Domain.Context.ExFlags").GetField("IsTestMode").SetValue(null, true);
 	}
 

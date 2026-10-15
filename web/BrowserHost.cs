@@ -709,6 +709,12 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] xnet: {XplayVersus.StartNet(towerFall, game, words)}");
 				return;
 			}
+			if (words[0] == "xlobby")
+			{
+				// xnet's log and scripted input for the next match started from a TF.EX lobby (web/Netplay/XplayLobby.cs).
+				Console.WriteLine($"[command] xlobby: {XplayVersus.StartLobby(towerFall, game, words)}");
+				return;
+			}
 			if (words[0] == "bench")
 			{
 				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);

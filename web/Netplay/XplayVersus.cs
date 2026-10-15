@@ -489,7 +489,7 @@ public static partial class XplayVersus
 	// One-time dump of everything the test mode's setup left in MatchSettings / TFGame, for the setup document.
 	private static void SessionStartGamePostfix(object __instance)
 	{
-		if (!active || (netMode && !netStarted)) return; // (xnet: the first, held back call)
+		if (!active || (netMode && !netLobby && !netStarted)) return; // (xnet: the first, held back call)
 		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 		void Line(string k, object v) => Console.WriteLine($"[xplay2setup] {k}={Describe(v)}");
 		try
@@ -507,7 +507,14 @@ public static partial class XplayVersus
 			Line("MatchSettings.Mode(int)", (int)mst.GetField("Mode").GetValue(ms));
 			Line("MatchSettings.IsCustom", mst.GetField("IsCustom", any)?.GetValue(ms));
 			Line("MatchSettings.GoalMultiplier", mst.GetField("GoalMultiplier", any)?.GetValue(null) is float[] gm ? string.Join(",", gm) : "?");
-			Line("MatchSettings.GoalScore(orig)", mst.GetMethod("orig_get_GoalScore", any)?.Invoke(ms, null));
+			try
+			{
+				Line("MatchSettings.GoalScore(orig)", mst.GetMethod("orig_get_GoalScore", any)?.Invoke(ms, null));
+			}
+			catch (Exception e)
+			{
+				Line("MatchSettings.GoalScore(orig)", $"(throws {(e.InnerException ?? e).GetType().Name}: TF.EX's custom mode)");
+			}
 			object teams = mst.GetField("Teams").GetValue(ms);
 			Line("MatchSettings.Teams", string.Join(",", Enumerable.Range(0, 4).Select(i => teams.GetType().GetProperty("Item").GetValue(teams, new object[] { i }))));
 			object variants = mst.GetField("Variants").GetValue(ms);

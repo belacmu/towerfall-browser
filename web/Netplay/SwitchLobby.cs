@@ -192,7 +192,17 @@ public static class SwitchLobby
 		}
 		harmony.Patch(current.GetMethod, postfix: new HarmonyMethod(typeof(SwitchLobby).GetMethod(nameof(PlatformPostfix), BindingFlags.NonPublic | BindingFlags.Static)));
 		Console.WriteLine($"[netplay] DEBUG: this page says it plays on \"{current.GetValue(null)}\" (?tfexplatform)");
+		// The Switch has no instant replay and says so (UseInstantReplay false turns it off for the match): a page that plays the
+		// Switch's part does the same.
+		MethodInfo instantReplay = Find("TF.EX.Domain.NetplayOptions")?.GetProperty("UseInstantReplay", BindingFlags.Public | BindingFlags.Static)?.GetMethod;
+		if (claimed == SwitchPlatform && instantReplay != null)
+		{
+			harmony.Patch(instantReplay, postfix: new HarmonyMethod(typeof(SwitchLobby).GetMethod(nameof(NoInstantReplay), BindingFlags.NonPublic | BindingFlags.Static)));
+			Console.WriteLine("[netplay] DEBUG: and has no instant replay, like the Switch");
+		}
 	}
+
+	private static void NoInstantReplay(ref bool __result) => __result = false;
 
 	private static string claimed;
 
