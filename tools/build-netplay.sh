@@ -15,8 +15,10 @@ GGRS_COMMIT=12a2d476653873042df38496386415124693acb9
 # A nightly on LLVM 19, like Emscripten 3.1.56: newer LLVMs tag objects with WebAssembly features
 # (bulk-memory-opt, call-indirect-overlong) that its wasm-opt doesn't know.
 RUST_TOOLCHAIN=nightly-2025-02-01
-SRC=vendor/netplay-src
-OUT=vendor/netplay
+# NETPLAY_SRC / NETPLAY_OUT build somewhere else (e.g. a scratch copy, linked with build.sh's
+# MSBUILD_ARGS=-p:NetplayDir=<NETPLAY_OUT>), leaving vendor/ as it is.
+SRC=${NETPLAY_SRC:-vendor/netplay-src}
+OUT=${NETPLAY_OUT:-vendor/netplay}
 
 want="$RUST_TOOLCHAIN $GGRS_FFI_COMMIT $GGRS_COMMIT $(cat netplay/*.patch netplay/ggrs-ffi.Cargo.lock netplay/matchbox-browser/Cargo.toml netplay/matchbox-browser/src/*.rs tools/build-netplay.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
 [ -f $OUT/ggrs_ffi.a ] && [ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
@@ -30,6 +32,7 @@ fetch() { # repo dir commit patch
 	patch -d "$SRC/$2" -p1 --forward < "$4"
 }
 mkdir -p $SRC $OUT
+SRC_ABS=$(cd "$SRC" && pwd)
 fetch Fcornaire/ggrs ggrs $GGRS_COMMIT netplay/ggrs.patch
 fetch Fcornaire/ggrs-ffi ggrs-ffi $GGRS_FFI_COMMIT netplay/ggrs-ffi.patch
 
@@ -45,7 +48,7 @@ export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+mutable-globals -C pa
 	cd $SRC/ggrs-ffi/core
 	rustup toolchain list | grep -q "^$RUST_TOOLCHAIN" || rustup toolchain install $RUST_TOOLCHAIN --profile minimal --component rust-src
 	patches=(--config "patch.crates-io.matchbox_socket.path=\"$ROOT/netplay/matchbox-browser\""
-		--config "patch.'https://github.com/Fcornaire/ggrs'.ggrs.path=\"$ROOT/$SRC/ggrs\"")
+		--config "patch.'https://github.com/Fcornaire/ggrs'.ggrs.path=\"$SRC_ABS/ggrs\"")
 	# Exactly the crate versions in netplay/ggrs-ffi.Cargo.lock (built and tested with), not whatever
 	# is newest on crates.io at build time. To update it: rm Cargo.lock; cargo +$RUST_TOOLCHAIN
 	# generate-lockfile with the patches below; cargo update -p uuid --precise 1.18.1 (a version this

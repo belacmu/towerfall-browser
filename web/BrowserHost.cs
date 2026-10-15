@@ -709,6 +709,12 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] xnet: {XplayVersus.StartNet(towerFall, game, words)}");
 				return;
 			}
+			if (words[0] == "digesttest")
+			{
+				// The gameplay digest's 40 reference cases (must equal switch-online hw-probe/tests/digest-ref.txt).
+				GameplayDigest.Run();
+				return;
+			}
 			if (words[0] == "xlobby")
 			{
 				// xnet's log and scripted input for the next match started from a TF.EX lobby (web/Netplay/XplayLobby.cs).
