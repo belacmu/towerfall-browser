@@ -696,6 +696,25 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] save: {(save != null ? "saved" : "no save data")}");
 				return;
 			}
+			if (words[0] == "xplay2")
+			{
+				// Two-player scripted TF.EX sync-test match with a per-tick log (web/Netplay/XplayVersus.cs).
+				Console.WriteLine($"[command] xplay2: {XplayVersus.Start(towerFall, game, words)}");
+				return;
+			}
+			if (words[0] == "xnet")
+			{
+				// Two-player scripted TF.EX peer-to-peer match against another browser or the Switch, over a WebSocket relay or matchbox
+				// (web/Netplay/XplayNet.cs; docs: switch-online/BROWSER-RELAY.md).
+				Console.WriteLine($"[command] xnet: {XplayVersus.StartNet(towerFall, game, words)}");
+				return;
+			}
+			if (words[0] == "xlobby")
+			{
+				// xnet's log and scripted input for the next match started from a TF.EX lobby (web/Netplay/XplayLobby.cs).
+				Console.WriteLine($"[command] xlobby: {XplayVersus.StartLobby(towerFall, game, words)}");
+				return;
+			}
 			if (words[0] == "bench")
 			{
 				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);

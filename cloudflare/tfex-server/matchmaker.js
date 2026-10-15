@@ -517,6 +517,13 @@ export class Matchmaker {
 		return !!lobby && !!peer && [...lobby.Players, ...lobby.Spectators].some((m) => m.RoomPeerId === peer);
 	}
 
+	// Whether `peer` is a player (not a spectator) of lobby `roomId` and its match is on (for the
+	// match relay, relay.js).
+	isPlayingIn(roomId, peer) {
+		const lobby = this.rooms.get(roomId)?.lobby;
+		return !!lobby && lobby.InGame && !!peer && lobby.Players.some((m) => m.RoomPeerId === peer);
+	}
+
 	tooBig(lobby) {
 		return JSON.stringify(lobby).length > MAX_LOBBY_JSON;
 	}
@@ -617,7 +624,8 @@ const handlers = {
 		if (!sent || typeof sent !== "object") return fail("NO LOBBY");
 		// TF.EX picks the room id (a GUID) and uses it for its own room URL straight away.
 		const roomId = String(sent.RoomId ?? "");
-		if (!/^[A-Za-z0-9_-]{1,64}$/.test(roomId)) return fail("BAD ROOM ID");
+		// (xnet-* names are the lobby-free relay rooms', routes.js.)
+		if (!/^[A-Za-z0-9_-]{1,64}$/.test(roomId) || /^xnet-/i.test(roomId)) return fail("BAD ROOM ID");
 		if (this.rooms.has(roomId)) return fail("ROOM ID IN USE");
 		this.leave(conn, now);
 		const kind = sent.Kind === "Private" ? "Private" : "Standard";

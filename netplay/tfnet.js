@@ -13,6 +13,12 @@
 //  - ICE servers come from the signaling server's /turn (our server: STUN plus TURN relay
 //    credentials, so players behind strict NATs can still connect); any other server: STUN only.
 //
+// A second transport, selected by the room URL, needs no WebRTC and no matchbox signaling: a room URL
+// whose path ends in /relay/<room> (wss://host/relay/<room>?peer=<our uuid>&remote=<their uuid>) is a
+// plain WebSocket relay (switch-online/tools/relay-server.mjs, relay-worker/worker.js) that hands every
+// binary message a peer sends to the room's other peer, unchanged. See TFNet.openRelay and
+// switch-online/BROWSER-RELAY.md. Everything else here (the signal counters, the calls) is shared.
+//
 // RTCPeerConnection only exists on the page's main thread, so every function here is proxied there
 // (__proxy: "sync") from whichever worker thread the game calls it on. Each call waits for the main
 // thread, so callers first check a socket's signal: two counters in wasm memory (their own, passed
@@ -22,7 +28,7 @@
 var LibraryTFNet = {
 	// (Emscripten copies these objects into the build as source text, which turns a Map into {};
 	// the postsets create them at startup instead.)
-	$TFNet__postset: "TFNet.sockets = new Map(); if (!ENVIRONMENT_IS_PTHREAD) globalThis.tfnetStats = TFNet.stats;",
+	$TFNet__postset: "TFNet.sockets = new Map(); if (!ENVIRONMENT_IS_PTHREAD) { globalThis.tfnetStats = TFNet.stats; globalThis.tfnetRelayStats = TFNet.relayStats; }",
 	$TFNet: {
 		sockets: null,
 		next: 1,
@@ -154,6 +160,7 @@ var LibraryTFNet = {
 		},
 
 		open(url, counters) {
+			if (TFNet.isRelayUrl(url)) return TFNet.openRelay(url, counters);
 			const s = {
 				signal: counters, // address of the socket's two signal counters; 0 once closed
 				ws: null,
@@ -365,11 +372,139 @@ var LibraryTFNet = {
 			return s;
 		},
 
+		// ---- relay transport (no WebRTC, no matchbox signaling) ----
+		//
+		// Room URL: <ws|wss>://host[:port]/relay/<room>?peer=<our uuid>&remote=<the other peer's uuid>[&hello=1]
+		//  - peer: our PeerId (what the relay logs, and what tfnet_id reports); must be a UUID.
+		//  - remote: the PeerId ggrs-ffi has for the one other peer (TF.EX's lobby list of seats). The relay
+		//    does not say who sent a frame, so every frame is attributed to this id.
+		//  - Every binary message is one bincode'd ggrs::Message, exactly what ggrs-ffi gives matchbox's channel
+		//    (no extra framing), and one WebSocket binary message is one packet. Text messages are ignored.
+		//  - The other peer counts as connected as soon as the WebSocket is open (a PeerState::Connected event
+		//    at once, also when it hasn't joined the room yet: frames sent before then are lost, and ggrs's
+		//    synchronization handshake retries every 200 ms). It is reported disconnected when the WebSocket
+		//    closes; ggrs's own timeout (15 s without packets) ends a session whose peer just went quiet.
+		//  - A 5-byte binary message "HELLO" is never given to ggrs (a ggrs::Message is never that: bincode would
+		//    fail on it, and ggrs-ffi would panic). &hello=1 makes us send one every 500 ms until the first real
+		//    frame from the other side arrives, so a peer that wants to wait for us can; off by default.
+		// Same signal counters as the WebRTC path: 0 bumps when packets arrive, 1 for peer events and state.
+		isRelayUrl(url) {
+			try {
+				return /\/relay\/[^/]+$/.test(new URL(url).pathname);
+			} catch {
+				return false;
+			}
+		},
+		// (A string: Emscripten copies this object as JSON-ish text, which would turn a RegExp into {}.)
+		UUID_PATTERN: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+		relayStats: { rx: 0, tx: 0, rxBytes: 0, txBytes: 0, dropped: 0, hello: 0, junk: 0 },
+		openRelay(url, counters) {
+			const s = { signal: counters, ws: null, id: null, peers: new Map(), events: [], inbox: [], state: 0, error: "", keepAlive: null, hello: null, relay: true };
+			let remote, local, wantHello = false;
+			try {
+				const u = new URL(url);
+				local = (u.searchParams.get("peer") ?? "").toLowerCase();
+				remote = (u.searchParams.get("remote") ?? "").toLowerCase();
+				wantHello = u.searchParams.get("hello") === "1";
+			} catch {}
+			const uuid = new RegExp(TFNet.UUID_PATTERN, "i");
+			if (!uuid.test(local) || !uuid.test(remote)) {
+				s.state = 2;
+				s.error = `relay room URL needs ?peer=<uuid>&remote=<uuid> (got peer=${local || "-"} remote=${remote || "-"})`;
+				return s;
+			}
+			s.id = local;
+			const stats = TFNet.relayStats;
+			let heard = false;
+			let opened = false;
+			const peer = {
+				connected: false,
+				// ggrs-ffi's tfnet_send goes through peers.get(id).dc.send, as with a data channel.
+				dc: {
+					send: (bytes) => {
+						if (s.ws.readyState !== 1) return void stats.dropped++;
+						s.ws.send(bytes);
+						stats.tx++;
+						stats.txBytes += bytes.length;
+					},
+				},
+			};
+			s.peers.set(remote, peer);
+			const isHello = (b) => b.length === 5 && b[0] === 0x48 && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x4c && b[4] === 0x4f;
+			const connected = (up) => {
+				if (peer.connected === up) return;
+				peer.connected = up;
+				s.events.push([remote, up ? 1 : 2]);
+				TFNet.bump(s, 1);
+			};
+			try {
+				s.ws = new WebSocket(url);
+			} catch (e) {
+				s.state = 2;
+				s.error = String(e);
+				return s;
+			}
+			s.ws.binaryType = "arraybuffer";
+			s.ws.onopen = () => {
+				opened = true;
+				TFNet.stats.path = "through a WebSocket relay";
+				console.log(`[tfnet] relay: joined ${url.replace(/\?.*/, "")} as ${local}; other peer ${remote}${wantHello ? " (hello on)" : ""}`);
+				connected(true);
+				if (wantHello) {
+					const hello = new Uint8Array([0x48, 0x45, 0x4c, 0x4c, 0x4f]);
+					s.hello = setInterval(() => {
+						if (heard || s.ws.readyState !== 1) return clearInterval(s.hello);
+						s.ws.send(hello);
+						stats.hello++;
+					}, 500);
+				}
+			};
+			s.ws.onmessage = (e) => {
+				if (!(e.data instanceof ArrayBuffer)) return; // text: not ours
+				const bytes = new Uint8Array(e.data);
+				if (isHello(bytes)) {
+					stats.hello++;
+					return;
+				}
+				if (!bytes.length) return void stats.junk++;
+				heard = true;
+				stats.rx++;
+				stats.rxBytes += bytes.length;
+				TFNet.stats.packets++;
+				const deliver = () => {
+					if (s.state !== 0) return;
+					s.inbox.push([remote, bytes, performance.now()]);
+					TFNet.bump(s, 0);
+				};
+				const held = TFNet.delay();
+				if (held) setTimeout(deliver, held);
+				else deliver();
+			};
+			s.ws.onerror = () => {
+				if (s.state === 0 && !opened) {
+					s.state = 2;
+					s.error = `couldn't connect to ${url.replace(/\?.*/, "")}`;
+					TFNet.bump(s, 1);
+					TFNet.shutdown(s);
+				}
+			};
+			s.ws.onclose = (e) => {
+				connected(false);
+				if (s.state !== 0) return;
+				s.state = opened ? 3 : 2;
+				s.error = `relay connection closed (${e.code}${e.reason ? " " + e.reason : ""})`;
+				TFNet.bump(s, 1);
+				TFNet.shutdown(s);
+			};
+			return s;
+		},
+
 		shutdown(s) {
 			clearInterval(s.keepAlive);
+			clearInterval(s.hello);
 			for (const peer of s.peers.values()) {
 				try {
-					peer.pc.close();
+					peer.pc?.close();
 				} catch {}
 			}
 			s.peers.clear();

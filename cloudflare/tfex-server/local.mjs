@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs the TF.EX-compatible server (matchmaker.js, signal.js) locally, with no dependencies beyond Node 18+:
+// Runs the TF.EX-compatible server (matchmaker.js, signal.js, relay.js) locally, with no dependencies beyond Node 18+:
 //   node cloudflare/tfex-server/local.mjs [--port 3000] [--host 127.0.0.1] [--origins a,b|*]
 // TF.EX's LOCAL server setting is ws://127.0.0.1:3000, the default here. Open the site with
 // ?tfexserver=local to use it. The Cloudflare deployment (worker.js) runs the same core.
@@ -10,10 +10,11 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { Matchmaker } from "./matchmaker.js";
-import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
+import { allowedOrigins, lobbyFreeRelay, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
-import { MAX_REPORT, MemoryReports, parseReport, RateLimit } from "./reports.js";
+import { maxReport, MemoryReports, parseReport, RateLimit, reportSource, SWITCH_PER_ADDRESS_PER_HOUR } from "./reports.js";
 import { SignalRoom } from "./signal.js";
+import { RelayRoom } from "./relay.js";
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -29,10 +30,13 @@ const MAX_MESSAGE = 1 << 20;
 let nextConn = 1;
 
 const matchmaker = new Matchmaker({ log: verbose ? console.log : () => {} });
-const rooms = new Map(); // "room:<id>" | "ping:<id>" -> SignalRoom
+const rooms = new Map(); // "room:<id>" | "ping:<id>" -> SignalRoom, "relay:<id>" -> RelayRoom
 
 class Connection {
-	constructor(socket, onMessage, onClose) {
+	// onMessage(conn, text), or with `binary` set onMessage(conn, data): a string for a text message,
+	// the bytes (a Buffer) for a binary one.
+	constructor(socket, onMessage, onClose, { binary = false } = {}) {
+		this.binary = binary;
 		this.id = `c${nextConn++}`;
 		this.socket = socket;
 		this.state = {};
@@ -50,6 +54,11 @@ class Connection {
 	send(text) {
 		if (this.closed) return;
 		this.write(1, Buffer.from(text, "utf8"));
+	}
+
+	sendBinary(bytes) {
+		if (this.closed) return;
+		this.write(2, Buffer.from(bytes));
 	}
 
 	save() {} // state lives in memory here (the Durable Object serializes it)
@@ -115,15 +124,18 @@ class Connection {
 		if (opcode === 8) return this.close(1000);
 		if (opcode === 9) return this.write(10, payload);
 		if (opcode === 10) return;
-		if (opcode === 1 || opcode === 2) this.fragments = [payload];
+		if (opcode === 1 || opcode === 2) {
+			this.fragments = [payload];
+			this.fragmentsBinary = opcode === 2;
+		}
 		else if (opcode === 0 && this.fragments) this.fragments.push(payload);
 		else return this.close(1002, "bad frame");
 		if (this.fragments.reduce((n, f) => n + f.length, 0) > MAX_MESSAGE) return this.close(1009, "too big");
 		if (!fin) return;
-		const text = Buffer.concat(this.fragments).toString("utf8");
+		const whole = Buffer.concat(this.fragments);
 		this.fragments = null;
 		try {
-			this.onMessage(this, text);
+			this.onMessage(this, this.binary && this.fragmentsBinary ? whole : whole.toString("utf8"));
 		} catch (e) {
 			console.error("[tfex-server] message handler failed:", e);
 		}
@@ -144,22 +156,25 @@ class Connection {
 // Performance reports (reports.js), in memory; GET /reports needs no key here (localhost).
 const reportStore = new MemoryReports();
 const reportLimit = new RateLimit();
+const switchReportLimit = new RateLimit(SWITCH_PER_ADDRESS_PER_HOUR);
 
 const server = createServer(async (req, res) => {
 	const url = new URL(req.url, "http://localhost");
 	if (url.pathname === "/report") {
+		// From a page (allowed origins), or the Switch's (no Origin; reports.js).
 		const origin = req.headers.origin;
-		if (!origin || !originAllowed(origin, origins)) return res.writeHead(403).end();
-		const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
+		const source = reportSource(origin);
+		if (origin && !originAllowed(origin, origins)) return res.writeHead(403).end();
+		const headers = { "Cache-Control": "no-store", Vary: "Origin", ...(origin ? { "Access-Control-Allow-Origin": origin } : {}) };
 		if (req.method === "OPTIONS") return res.writeHead(204, { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" }).end();
 		if (req.method !== "POST") return res.writeHead(405, headers).end();
 		let body = "";
 		for await (const chunk of req) {
 			body += chunk;
-			if (body.length > MAX_REPORT) return res.writeHead(413, headers).end();
+			if (body.length > maxReport(source)) return res.writeHead(413, headers).end();
 		}
-		if (!reportLimit.allow(req.socket.remoteAddress ?? "")) return res.writeHead(429, headers).end();
-		const report = parseReport(body);
+		if (!(source === "switch" ? switchReportLimit : reportLimit).allow(req.socket.remoteAddress ?? "")) return res.writeHead(429, headers).end();
+		const report = parseReport(body, source);
 		if (!report) return res.writeHead(400, headers).end();
 		reportStore.add(report);
 		if (verbose) console.log(`[tfex-server] report: ${report.slice(0, 200)}`);
@@ -183,7 +198,7 @@ const server = createServer(async (req, res) => {
 		return res.end(JSON.stringify({ iceServers: member ? await iceServers(process.env) : STUN_ONLY }));
 	}
 	res.writeHead(200, { "Content-Type": "text/plain" });
-	res.end("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>\n");
+	res.end("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>, /relay/<id>?peer=<uuid>\n");
 });
 
 server.on("upgrade", (req, socket) => {
@@ -197,6 +212,15 @@ server.on("upgrade", (req, socket) => {
 	if (!originAllowed(req.headers.origin, origins)) {
 		if (verbose) console.log(`[tfex-server] refused origin ${req.headers.origin}`);
 		return reject(403, "Forbidden");
+	}
+	// The match relay is only for the players of a lobby whose match is on (relay.js), except xnet-* rooms.
+	if (route.kind === "relay" && !lobbyFreeRelay(route.roomId) && !matchmaker.isPlayingIn(route.roomId, route.peer)) {
+		if (verbose) console.log(`[tfex-server] refused relay ${route.roomId} for ${route.peer}`);
+		return reject(403, "Forbidden");
+	}
+	if (route.kind === "relay") {
+		const refused = rooms.get(`relay:${route.roomId}`)?.refusal(route.peer, Date.now(), req.socket.remoteAddress ?? null);
+		if (refused) return reject(409, "Conflict");
 	}
 	const key = req.headers["sec-websocket-key"];
 	if (!key || (req.headers.upgrade ?? "").toLowerCase() !== "websocket") return reject(400, "Bad Request");
@@ -220,17 +244,20 @@ server.on("upgrade", (req, socket) => {
 		return;
 	}
 	const roomKey = `${route.kind}:${route.roomId}`;
+	const relay = route.kind === "relay";
 	let room = rooms.get(roomKey);
-	if (!room) rooms.set(roomKey, (room = new SignalRoom({ log: verbose ? console.log : () => {} })));
+	if (!room) rooms.set(roomKey, (room = new (relay ? RelayRoom : SignalRoom)({ log: verbose ? console.log : () => {} })));
 	const conn = new Connection(
 		socket,
-		(c, text) => room.message(c, text, Date.now()),
+		(c, data) => room.message(c, data, Date.now()),
 		(c) => {
 			room.close(c);
-			if (room.isEmpty()) rooms.delete(roomKey);
+			if (room.isEmpty() && rooms.get(roomKey) === room) rooms.delete(roomKey);
 		},
+		{ binary: relay },
 	);
 	room.open(conn, route.peer, Date.now(), req.socket.remoteAddress ?? null);
+	if (room.isEmpty() && rooms.get(roomKey) === room) rooms.delete(roomKey);
 });
 
 // One timer for the matchmaker's keep-alives and lobby deadlines.

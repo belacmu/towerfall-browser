@@ -44,6 +44,8 @@ public static class TfexPatches
 				postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(ClipboardSet), all)));
 		}
 		StateSpeedups.Patch(harmony);
+		TfexFps.Patch(harmony); // TF.EX's session rate: ?tfexfps=N (experiment), or per session (SwitchLobby)
+		SwitchLobby.Patch(harmony); // lobby matches against the Switch: relay, 60 Hz
 		PatchServer(harmony);
 		PatchCoOpButtons(harmony);
 		Console.WriteLine("[netplay] TF.EX patched for the browser (update check via the GitHub API, no self-update).");

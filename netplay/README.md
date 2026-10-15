@@ -13,6 +13,12 @@ into the app:
 - `tfnet.js`: an Emscripten JS library on the page's main thread. It does matchbox's signaling
   (WebSocket, JSON) and WebRTC (one negotiated, unordered, no-retransmit data channel), matching
   matchbox so browser and desktop peers can share rooms.
+- A second transport in `tfnet.js`, chosen by the room URL: a path ending in `/relay/<room>`
+  (`ws://host:port/relay/<room>?peer=<our uuid>&remote=<other uuid>`) is a plain WebSocket relay with no
+  WebRTC and no signaling: every binary message is one bincode'd GGRS message, the other peer counts as
+  connected once the socket is open. It exists so a peer that can't do WebRTC (the Switch build) can play
+  against this build; see `switch-online/BROWSER-RELAY.md` in the Switch repo and `web/Netplay/XplayNet.cs`
+  (the `xnet` command) for a lobby-free harness that uses it.
 - `web/Netplay/GgrsFfiImports.cs` mirrors TF.EX's P/Invoke declarations, so the build generates
   the call glue for them.
 
