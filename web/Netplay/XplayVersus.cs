@@ -14,7 +14,7 @@ namespace TowerFallBrowser;
 // Mods/switch-online, TEST5-MATCH-SETUP.md): TF.EX's own sync-test session ("test lms 0 0 42 2 #NONE# 2",
 // run at 60 ticks/s, see TfexFps.cs) with both archers driven by scripts, and one log line per tick.
 //
-// "xplay2 <script0> <script1> [seed=42] [maxticks=6000] [rngtrace=N] [impure=1] [replay=off] [cd=N] [cotrace=1]" host command (needs ?fortrise&tfexfps=60 and TF.EX).
+// "xplay2 <script0> <script1> [seed=42] [maxticks=6000] [rngtrace=N] [impure=1] [replay=off] [cd=N] [cotrace=1] [variants=A_B,C_D]" host command (needs ?fortrise&tfexfps=60 and TF.EX).
 // It installs the patches below, then runs TF.EX's `test` command exactly as the dev console would
 // (TF.EX.Core.TFCommands.LaunchTestMode); rngtrace=N also logs who made each of the first N draws of the
 // gameplay RNG (the call stack), to line the Switch's draw order up with it; impure=1 is a negative control that
@@ -109,6 +109,9 @@ public static partial class XplayVersus
 		bool replayOff = options.TryGetValue("replay", out string rp) && rp == "off";
 		// cd=N: GGRS SyncTest check distance (LaunchTestMode's 5th argument; TF.EX clamps it to <= 7). Default 2.
 		int checkDistance = options.TryGetValue("cd", out string cdText) ? int.Parse(cdText, CultureInfo.InvariantCulture) : 2;
+		// variants=NO_AUTOBALANCE,SYMMETRICAL_TREASURE: TF.EX's test-command variant list (titles, '_' for spaces). A browser-hosted lobby
+		// has those two by default (TF.EX's 1v1 tournament rules), so this reproduces a lobby match's rules in the sync test.
+		string variantArg = options.TryGetValue("variants", out string va) && va.Length > 0 ? "#" + va + "#" : "#NONE#";
 		Resolve(towerFall);
 		if (!patched) Patch(towerFall);
 		Reset();
@@ -121,11 +124,11 @@ public static partial class XplayVersus
 			FieldInfo mode = opts.GetType().GetField("ReplayMode");
 			mode.SetValue(opts, Enum.Parse(mode.FieldType, "Off"));
 		}
-		Console.WriteLine($"[xplay2] cfg scripts={scripts[0].Count}/{scripts[1].Count} steps seed={seed} maxticks={maxTicks} fps=60 replay={(replayOff ? "off" : "as saved")} cd={checkDistance} impure={impure} rngtrace={rngTrace}");
+		Console.WriteLine($"[xplay2] cfg scripts={scripts[0].Count}/{scripts[1].Count} steps seed={seed} maxticks={maxTicks} fps=60 replay={(replayOff ? "off" : "as saved")} cd={checkDistance} impure={impure} rngtrace={rngTrace} variants={variantArg}");
 		// TF.EX's own `test lms 0 0 42 2 #NONE# 2`: mode, start level, map (the arguments' order differs from
 		// the spec text: LaunchTestMode reads them as mode, startLevel, map, seed, checkDistance, variants, players).
 		MethodInfo launch = commands.GetMethod("LaunchTestMode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-		launch.Invoke(null, new object[] { new[] { "lms", "0", "0", seed.ToString(CultureInfo.InvariantCulture), checkDistance.ToString(CultureInfo.InvariantCulture), "#NONE#", "2" } });
+		launch.Invoke(null, new object[] { new[] { "lms", "0", "0", seed.ToString(CultureInfo.InvariantCulture), checkDistance.ToString(CultureInfo.InvariantCulture), variantArg, "2" } });
 		return $"TF.EX test session started (lms, level 0, map 0, 2 players, check distance {checkDistance})";
 	}
 
@@ -499,6 +502,19 @@ public static partial class XplayVersus
 			object ms = sessionType.GetField("MatchSettings").GetValue(__instance);
 			Type mst = ms.GetType();
 			Line("Session.StartGame.rng", RngFold().ToString("x16"));
+			try
+			{
+				object variants = mst.GetField("Variants").GetValue(ms);
+				var on = new List<string>();
+				foreach (object v in (Array)variants.GetType().GetField("Variants").GetValue(variants))
+					if ((bool)v.GetType().GetProperty("Value").GetValue(v)) on.Add((string)v.GetType().GetField("Title").GetValue(v));
+				Line("MatchSettings.Variants.on", on.Count == 0 ? "(none)" : string.Join("|", on));
+				Line("MatchSettings.Variants.count", ((Array)variants.GetType().GetField("Variants").GetValue(variants)).Length);
+			}
+			catch (Exception e)
+			{
+				Line("MatchSettings.Variants.on", $"(throws {(e.InnerException ?? e).GetType().Name})");
+			}
 			Line("seed", Find("TF.State.Domain.Ports.IRngService").GetMethod("GetSeed").Invoke(resolveRngService.Invoke(null, null), null));
 			foreach (string f in new[] { "Mode", "MatchLength", "RandomVersusTower", "RandomLevelSeed", "QuestHardcoreMode", "DarkWorldDifficulty" }) Line("MatchSettings." + f, mst.GetField(f).GetValue(ms));
 			foreach (string pr in new[] { "TeamMode", "SoloMode", "GoalScore", "PlayerLimit", "AutobalanceLosingAmount" }) Line("MatchSettings." + pr, mst.GetProperty(pr).GetValue(ms));
@@ -517,12 +533,6 @@ public static partial class XplayVersus
 			}
 			object teams = mst.GetField("Teams").GetValue(ms);
 			Line("MatchSettings.Teams", string.Join(",", Enumerable.Range(0, 4).Select(i => teams.GetType().GetProperty("Item").GetValue(teams, new object[] { i }))));
-			object variants = mst.GetField("Variants").GetValue(ms);
-			var on = new List<string>();
-			foreach (object v in (Array)variants.GetType().GetField("Variants").GetValue(variants))
-				if ((bool)v.GetType().GetProperty("Value").GetValue(v)) on.Add((string)v.GetType().GetField("Title").GetValue(v));
-			Line("MatchSettings.Variants.on", on.Count == 0 ? "(none)" : string.Join("|", on));
-			Line("MatchSettings.Variants.count", ((Array)variants.GetType().GetField("Variants").GetValue(variants)).Length);
 			object ls = mst.GetField("LevelSystem").GetValue(ms);
 			Line("LevelSystem.type", ls.GetType().Name);
 			Line("LevelSystem.ID", ls.GetType().GetProperty("ID").GetValue(ls));

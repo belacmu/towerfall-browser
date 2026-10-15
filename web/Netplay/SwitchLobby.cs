@@ -26,6 +26,7 @@ public static class SwitchLobby
 {
 	public const string SwitchPlatform = "Switch";
 	public const string RelayModName = "TowerFallBrowser.Relay";
+	private const string WiderSetModName = "Teuria.WiderSet"; // TF.EX's WiderSetModApiData.Name
 	public const int SessionFps = 60;
 
 	private static bool active; // this session runs over the relay
@@ -151,10 +152,19 @@ public static class SwitchLobby
 		try
 		{
 			var mods = (IList)lobbyMods.GetValue(lobby);
-			object mod = Activator.CreateInstance(customMod);
-			customMod.GetProperty("Name").SetValue(mod, RelayModName);
-			customMod.GetProperty("Data").SetValue(mod, new Dictionary<string, string> { { "Version", "1" }, { "Fps", SessionFps.ToString() } });
-			mods.Add(mod);
+			object NewMod(string name, Dictionary<string, string> data)
+			{
+				object m = Activator.CreateInstance(customMod);
+				customMod.GetProperty("Name").SetValue(m, name);
+				customMod.GetProperty("Data").SetValue(m, data);
+				return m;
+			}
+			// A joiner checks WiderSet only in a lobby with no mods at all ("WIDERSET MOD ON OFF REQUIRED" for a wide one); with
+			// our entry the list isn't empty, so say "not wide" explicitly: CanUseWiderSet then refuses a wide joiner the same way
+			// ("NOT WIDE REQUIRED") and lets everyone else in. No Version key, so no version-mismatch notice.
+			if (!mods.Cast<object>().Any(m => (string)customMod.GetProperty("Name").GetValue(m) == WiderSetModName))
+				mods.Add(NewMod(WiderSetModName, new Dictionary<string, string> { { "IsWide", "False" } }));
+			mods.Add(NewMod(RelayModName, new Dictionary<string, string> { { "Version", "1" }, { "Fps", SessionFps.ToString() } }));
 		}
 		catch (Exception e)
 		{

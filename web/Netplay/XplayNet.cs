@@ -16,7 +16,7 @@ namespace TowerFallBrowser;
 // sync-test version, and Towerfall Switch Mods/switch-online/BROWSER-RELAY.md for the full description).
 //
 //   xnet <roomUrl> <seat 0|1> <localPeerUuid> <remotePeerUuid> [script=<path or inline>] [seed=42] [maxticks=N] [fps=60]
-//        [delay=D] [origin=266] [host=1] [hello=1] [synctimeout=120] [margin=24] [replay=off]
+//        [delay=D] [origin=266] [host=1] [hello=1] [synctimeout=120] [margin=24] [replay=off] [variants=NO_AUTOBALANCE,SYMMETRICAL_TREASURE]
 //
 // roomUrl is a room URL in the sense of ggrs-ffi: a relay one (ws://localhost:PORT/relay/<room>, see netplay/tfnet.js; ?peer=<local>&remote=<remote>
 // [&hello=1] is appended here) or a matchbox one (then it is a normal WebRTC match; the peers must be in one matchbox room).
@@ -177,7 +177,9 @@ public static partial class XplayVersus
 		MethodInfo start = commands.GetMethod("StartGame", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
 		Type modes = towerFall.GetType("TowerFall.Modes", true);
 		object lms = Enum.Parse(modes, "LastManStanding");
-		start.Invoke(null, new object[] { lms, manager, 0, 0, new List<string>(), 2, null });
+		// variants=NO_AUTOBALANCE,SYMMETRICAL_TREASURE (as xplay2): a browser-hosted lobby's default rules; none by default.
+		var variants = options.TryGetValue("variants", out string va) ? va.Split(',').Select(v => v.Trim().Replace('_', ' ').ToUpperInvariant()).Where(v => v.Length > 0).ToList() : new List<string>();
+		start.Invoke(null, new object[] { lms, manager, 0, 0, variants, 2, null });
 		if (netSession == null) return "Session.StartGame wasn't reached";
 		// Init asked for the first-round spawn to be done by NetplayManager.EstablishSessionIfSynchronized (the lobby flow); here the round logic spawns the
 		// archers itself when the game starts, so that deferred spawn would duplicate them.
