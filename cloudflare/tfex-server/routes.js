@@ -18,6 +18,11 @@ export function allowedOrigins(extra) {
 const ROOM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Relay rooms named xnet-<anything> are for lobby-free tests (the browser's `xnet` harness meeting
+// the Switch): anyone may join them, still 2 peers at most. Every other relay room is a lobby's
+// match, for its players only. (No lobby can have such a RoomId: matchmaker.js refuses it.)
+export const lobbyFreeRelay = (roomId) => /^xnet-/i.test(roomId);
+
 // /ws -> matchmaking; /room/<id>?peer=<uuid> -> match signaling; /ping_measurement/<id>?peer=<uuid>
 // -> lobby ping signaling; /relay/<id>?peer=<uuid> -> match relay (relay.js; peer required).
 // Anything else: null. A peer id that isn't a UUID (or a relay without one): { bad: true }.

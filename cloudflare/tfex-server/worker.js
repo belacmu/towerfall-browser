@@ -3,7 +3,8 @@
 //  - /ws: one Matchmaker object holds every lobby, join code and quick play queue.
 //  - /room/<id>, /ping_measurement/<id>: one SignalRoom object per room.
 //  - /relay/<id>?peer=<uuid>: one RelayRoom object per room, the match relay for peers without
-//    WebRTC (relay.js); only for the players of lobby <id> while its match is on.
+//    WebRTC (relay.js); only for the players of lobby <id> while its match is on (xnet-* rooms: anyone,
+//    for lobby-free tests).
 //  - GET /status (Authorization: Bearer <STATUS_KEY>): counts of connections, lobbies and matches,
 //    so a redeploy can wait until nobody is playing (tools/deploy-tfex-server.sh).
 //  - GET /turn?room=<id>&peer=<uuid>: ICE servers (STUN, and Cloudflare TURN credentials when
@@ -16,9 +17,9 @@ import { DurableObject } from "cloudflare:workers";
 import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
 import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
 import { RelayRoom } from "./relay.js";
-import { allowedOrigins, originAllowed, parseRoute } from "./routes.js";
+import { allowedOrigins, lobbyFreeRelay, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
-import { KEEP, LIST_LIMIT, MAX_REPORT, parseReport, RateLimit, TAG_OLD_ONLINE_REPORTS } from "./reports.js";
+import { KEEP, LIST_LIMIT, maxReport, parseReport, RateLimit, reportSource, SWITCH_PER_ADDRESS_PER_HOUR, TAG_OLD_ONLINE_REPORTS } from "./reports.js";
 
 export default {
 	async fetch(request, env) {
@@ -39,7 +40,7 @@ export default {
 		if (!originAllowed(request.headers.get("Origin"), allowedOrigins(env.ALLOWED_ORIGINS))) {
 			return new Response("Forbidden", { status: 403 });
 		}
-		if (route.kind === "relay" && !(await playingIn(env, route.roomId, route.peer))) return new Response("Forbidden", { status: 403 });
+		if (route.kind === "relay" && !lobbyFreeRelay(route.roomId) && !(await playingIn(env, route.roomId, route.peer))) return new Response("Forbidden", { status: 403 });
 		const name = route.kind === "ws" ? "matchmaker" : `${route.kind}:${route.roomId}`;
 		// The client's address, for per-address limits (the Durable Object only sees the Worker).
 		request = new Request(request);
@@ -90,17 +91,20 @@ async function status(request, env) {
 	return new Response(stats.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
-// A page's performance report (reports.js), from the site's own origins.
+// A page's performance report (reports.js), from the site's own origins, or the Switch's (no Origin).
 async function report(request, env) {
 	const origin = request.headers.get("Origin");
-	if (!origin || !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
-	const headers = { "Cache-Control": "no-store", Vary: "Origin", "Access-Control-Allow-Origin": origin };
+	const source = reportSource(origin);
+	if (origin && !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin", ...(origin ? { "Access-Control-Allow-Origin": origin } : {}) };
 	if (request.method === "OPTIONS") {
 		return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" } });
 	}
 	if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers });
-	if (Number(request.headers.get("Content-Length") ?? 0) > MAX_REPORT) return new Response("Too large", { status: 413, headers });
-	const forward = new Request("https://reports/add", { method: "POST", body: await request.text(), headers: { "X-Client-IP": clientIp(request) ?? "" } });
+	if (Number(request.headers.get("Content-Length") ?? 0) > maxReport(source)) return new Response("Too large", { status: 413, headers });
+	const body = await request.text();
+	if (body.length > maxReport(source)) return new Response("Too large", { status: 413, headers });
+	const forward = new Request("https://reports/add", { method: "POST", body, headers: { "X-Client-IP": clientIp(request) ?? "", "X-Report-Source": source } });
 	const r = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(forward);
 	return new Response(null, { status: r.status, headers });
 }
@@ -301,8 +305,12 @@ export class RelayRoomObject extends DurableObject {
 	}
 
 	async fetch(request) {
+		const peer = new URL(request.url).searchParams.get("peer");
+		const ip = request.headers.get("X-Client-IP") || null;
+		const refused = this.room.refusal(peer, Date.now(), ip);
+		if (refused) return new Response(refused.reason, { status: 409 });
 		const { client, conn } = this.sockets.accept();
-		this.room.open(conn, new URL(request.url).searchParams.get("peer"), Date.now(), request.headers.get("X-Client-IP") || null);
+		this.room.open(conn, peer, Date.now(), ip);
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
@@ -328,6 +336,7 @@ export class ReportsObject extends DurableObject {
 	constructor(ctx, env) {
 		super(ctx, env);
 		this.limit = new RateLimit();
+		this.switchLimit = new RateLimit(SWITCH_PER_ADDRESS_PER_HOUR);
 		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, report TEXT NOT NULL)");
 		ctx.storage.sql.exec(TAG_OLD_ONLINE_REPORTS);
 	}
@@ -336,8 +345,9 @@ export class ReportsObject extends DurableObject {
 		const url = new URL(request.url);
 		const sql = this.ctx.storage.sql;
 		if (url.pathname === "/add") {
-			if (!this.limit.allow(request.headers.get("X-Client-IP") ?? "")) return new Response(null, { status: 429 });
-			const report = parseReport(await request.text());
+			const source = request.headers.get("X-Report-Source") === "switch" ? "switch" : "page";
+			if (!(source === "switch" ? this.switchLimit : this.limit).allow(request.headers.get("X-Client-IP") ?? "")) return new Response(null, { status: 429 });
+			const report = parseReport(await request.text(), source);
 			if (!report) return new Response(null, { status: 400 });
 			sql.exec("INSERT INTO reports (at, report) VALUES (?, ?)", Date.now(), report);
 			sql.exec("DELETE FROM reports WHERE id <= (SELECT MAX(id) FROM reports) - ?", KEEP);

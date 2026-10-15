@@ -5,7 +5,8 @@
 // the other is from the lobby). Text messages are dropped. Nothing is sent by the server itself.
 //
 // Who may connect is checked before the socket gets here (worker.js, local.mjs): a player (not a
-// spectator) of lobby <roomId>, while that lobby is InGame. That matters: whatever reaches a peer is
+// spectator) of lobby <roomId>, while that lobby is InGame; anyone for rooms named xnet-* (lobby-free
+// tests, routes.js), still 2 peers. That matters: whatever reaches a peer is
 // fed to its GGRS as the other player's packets, and a malformed one aborts the browser's ggrs-ffi.
 //
 // The same peer connecting again (a client reconnecting, or the next match of a rematch before the
@@ -47,30 +48,36 @@ export class RelayRoom {
 		return this.peers.size === 0;
 	}
 
-	// `peer` was checked to be a player of the lobby; `ip` is the client's address, if known.
-	// Returns whether the connection was taken.
-	open(conn, requested, now = Date.now(), ip = null) {
+	// Why `requested` can't join now ({ code, reason }), or null. The platforms ask before accepting the
+	// WebSocket and refuse with HTTP 409 (a socket closed while it is being accepted may never finish
+	// closing on the client); open() refuses with the code.
+	refusal(requested, now = Date.now(), ip = null) {
 		const peer = String(requested ?? "").toLowerCase();
-		if (!isUuid(peer)) {
-			conn.close(4000, "peer must be a UUID");
-			return false;
-		}
+		if (!isUuid(peer)) return { code: 4000, reason: "peer must be a UUID" };
 		const previous = this.peers.get(peer);
 		if (previous) {
 			const quiet = now - (this.seen.get(previous)?.at ?? 0) >= STALE_MS;
-			if (!quiet && (!ip || previous.state.ip !== ip)) {
-				conn.close(4003, "peer already connected");
-				return false;
-			}
+			return !quiet && (!ip || previous.state.ip !== ip) ? { code: 4003, reason: "peer already connected" } : null;
+		}
+		return this.peers.size >= MAX_RELAY_PEERS ? { code: 4002, reason: "room is full" } : null;
+	}
+
+	// `peer` was checked to be a player of the lobby; `ip` is the client's address, if known.
+	// Returns whether the connection was taken.
+	open(conn, requested, now = Date.now(), ip = null) {
+		const refused = this.refusal(requested, now, ip);
+		if (refused) {
+			conn.close(refused.code, refused.reason);
+			return false;
+		}
+		const peer = String(requested).toLowerCase();
+		const previous = this.peers.get(peer);
+		if (previous) {
 			this.peers.delete(peer);
 			this.seen.delete(previous);
 			previous.state.peer = null;
 			previous.save?.();
 			previous.close(4001, "replaced by a new connection");
-		}
-		if (this.peers.size >= MAX_RELAY_PEERS) {
-			conn.close(4002, "room is full");
-			return false;
 		}
 		conn.state.peer = peer;
 		conn.state.ip = ip;

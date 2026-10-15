@@ -169,6 +169,34 @@ test("reports: the site's pages can send one; other pages, non-reports and huge 
 	}
 });
 
+test("reports: the Switch's (kind switch, no Origin) are taken, bigger and more often; only that kind without an Origin", async () => {
+	const http = base.replace(/^ws/, "http");
+	const send = (body, origin) => fetch(http + "/report", { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body });
+	const marker = `switch-${Math.random()}`;
+	eq((await send(JSON.stringify({ kind: "switch", marker, pad: "x".repeat(40000) }))).status, 204, "a 40 KB Switch report");
+	eq((await send(JSON.stringify({ kind: "online", marker }))).status, 400, "a page's kind without an Origin");
+	eq((await send(JSON.stringify({ kind: "switch" }), "https://belacmu.github.io")).status, 400, "the Switch's kind from a page");
+	eq((await send(JSON.stringify({ kind: "switch" }), "https://example.com")).status, 403, "another page");
+	eq((await send(JSON.stringify({ kind: "switch", pad: "x".repeat(70000) }))).status, 413, "over 64 KB");
+	if (child) {
+		const { reports } = await (await fetch(http + "/reports")).json();
+		eq(reports.some((r) => r.report.marker === marker && r.report.kind === "switch"), true, "listed with the others");
+	}
+});
+
+test("core: Switch reports have their own limits", async () => {
+	const { parseReport, RateLimit, MAX_SWITCH_REPORT, SWITCH_PER_ADDRESS_PER_HOUR, PER_ADDRESS_PER_HOUR } = await import("./reports.js");
+	assert(MAX_SWITCH_REPORT >= 64 * 1024 && SWITCH_PER_ADDRESS_PER_HOUR >= 600, "limits");
+	assert(parseReport(JSON.stringify({ kind: "switch", pad: "x".repeat(50000) }), "switch"), "50 KB from the Switch");
+	assert(!parseReport(JSON.stringify({ kind: "solo", pad: "x".repeat(50000) }), "page"), "not from a page");
+	assert(!parseReport(JSON.stringify({ kind: "solo" }), "switch") && parseReport(JSON.stringify({ kind: "solo" })), "kinds by source");
+	const limit = new RateLimit(SWITCH_PER_ADDRESS_PER_HOUR);
+	let n = 0;
+	while (limit.allow("1.2.3.4", clock) && n < 10000) n++;
+	eq(n, SWITCH_PER_ADDRESS_PER_HOUR, "per hour");
+	assert(PER_ADDRESS_PER_HOUR === 60, "pages unchanged");
+});
+
 // ---- Signaling (matchbox) ----
 
 test("signaling: ids from ?peer=, NewPeer to those already in, signals relayed, PeerLeft", async () => {
@@ -756,12 +784,14 @@ class RelayPeer {
 	}
 }
 
+const allReady = (t) => t.startsWith('{"LobbyUpdate"') && JSON.parse(t).LobbyUpdate.lobby.Players.every((p) => p.Ready);
+
 // A two-player lobby (both ready) and its match started.
 async function startedMatch() {
 	const m = await privateLobby();
 	m.A.send({ UpdatePlayer: { player: { ...m.host, Ready: true } } });
 	m.B.send({ UpdatePlayer: { player: { ...m.bob, Ready: true, Platform: "Switch" } } });
-	for (let i = 0; i < 2; i++) await m.A.next("LobbyUpdate");
+	await m.A.next(allReady);
 	m.A.send({ StartLobbyChoice: {} });
 	await m.B.next("StartLobby");
 	return m;
@@ -778,7 +808,7 @@ test("relay: only the players of a lobby whose match is on get in; peer is requi
 	const spectator = (await C.next("PrivateJoinResult")).PrivateJoinResult.room_peer_id;
 	m.A.send({ UpdatePlayer: { player: { ...m.host, Ready: true } } });
 	m.B.send({ UpdatePlayer: { player: { ...m.bob, Ready: true } } });
-	for (let i = 0; i < 2; i++) await m.A.next("LobbyUpdate");
+	await m.A.next(allReady);
 	m.A.send({ StartLobbyChoice: {} });
 	await m.B.next("StartLobby");
 	eq(await handshake(`/relay/${room}?peer=${spectator}`), 403, "a spectator");
@@ -817,6 +847,23 @@ test("relay: binary frames go to the other peer unchanged, text is dropped, reco
 	S2.send(new Array(2049).fill(1));
 	await S2.until(() => S2.closed === 4029, "a frame over 2 KB closes the socket");
 	for (const c of [H, m.A, m.B]) c.close();
+});
+
+test("relay: xnet-* rooms need no lobby (lobby-free tests), still 2 peers; no lobby can take such a name", async () => {
+	const room = `/relay/xnet-${Date.now()}`;
+	const [a, b] = [uuid(), uuid()];
+	const A = await RelayPeer.open(`${room}?peer=${a}`);
+	const B = await RelayPeer.open(`${room}?peer=${b}`);
+	A.send([1, 2, 3]);
+	await B.until(() => B.got.length === 1, "B gets A's frame");
+	eq(await handshake(`${room}?peer=${uuid()}`), 409, "a third peer is refused");
+	eq(await handshake(`${room}?peer=${a}`, "http://localhost:1"), 101, "the same peer, same address: replaces");
+	const H = await tfex("HOST");
+	const lobby = builtLobby("HOST");
+	lobby.RoomId = `xnet-${Date.now()}`;
+	H.send({ CreateLobby: { lobby } });
+	eq((await H.next("CreateLobbyResponse")).CreateLobbyResponse.message, "BAD ROOM ID", "no lobby named xnet-*");
+	for (const c of [A, B, H]) c.close();
 });
 
 test("core: relay rooms hold 2 peers, cap rate and size, and keep live peers from being taken over", async () => {

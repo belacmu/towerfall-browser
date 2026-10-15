@@ -624,7 +624,8 @@ const handlers = {
 		if (!sent || typeof sent !== "object") return fail("NO LOBBY");
 		// TF.EX picks the room id (a GUID) and uses it for its own room URL straight away.
 		const roomId = String(sent.RoomId ?? "");
-		if (!/^[A-Za-z0-9_-]{1,64}$/.test(roomId)) return fail("BAD ROOM ID");
+		// (xnet-* names are the lobby-free relay rooms', routes.js.)
+		if (!/^[A-Za-z0-9_-]{1,64}$/.test(roomId) || /^xnet-/i.test(roomId)) return fail("BAD ROOM ID");
 		if (this.rooms.has(roomId)) return fail("ROOM ID IN USE");
 		this.leave(conn, now);
 		const kind = sent.Kind === "Private" ? "Private" : "Standard";
