@@ -721,6 +721,15 @@ public static partial class BrowserHost
 				GameplayDigest.Run();
 				return;
 			}
+			if (words[0] == "digest")
+			{
+				// GGRS checksums are the gameplay digest from now on (GameplayDigest.cs), for a hand-played match against the
+				// Switch with its npdigest on (?digest=1 runs "digest url").
+				string source = words.Length > 1 && words[1] == "url" ? "URL" : "command";
+				string error = GameplayDigestHook.Enable(towerFall);
+				Console.WriteLine(error == null ? $"[digest] on ({source})" : $"[digest] error: {error}");
+				return;
+			}
 			if (words[0] == "xlobby")
 			{
 				// xnet's log and scripted input for the next match started from a TF.EX lobby (web/Netplay/XplayLobby.cs).

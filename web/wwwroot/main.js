@@ -960,6 +960,8 @@ async function main() {
 	self.towerfallSlowCpu = (factor) => exports.BrowserHost.SetSlowCpu(factor);
 	const slowCpu = Number(new URLSearchParams(location.search).get("slowcpu"));
 	if (slowCpu > 1) await exports.BrowserHost.SetSlowCpu(slowCpu);
+	// ?digest=1: GGRS checksums are the gameplay digest, for a hand-played match against the Switch (its hw.txt npdigest 1).
+	if (new URLSearchParams(location.search).get("digest") === "1") await exports.BrowserHost.RunCommand("digest url");
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}
