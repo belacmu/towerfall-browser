@@ -15,7 +15,7 @@ namespace TowerFallBrowser;
 // the same digest of the state instead: the gameplay RNG, each seat's player (alive, position, speed) and the arrows' positions.
 // ggrs-ffi takes it through netplay_set_pending_checksum (netplay/ggrs-ffi.patch), called right before TF.EX's
 // NetplayManager.SaveGameState, i.e. for GGRS frame f the state at its start (after f-1's Level.Update and entity flush).
-// Both sides must have it on, or every checksum report is a desync: it's switched on per test (xnet / xlobby digest=1).
+// Both sides must have it on, or every checksum report is a desync: it's switched on per test (xnet / xlobby digest=1) or per page (?digest=1).
 // On a DesyncDetected event the frame's digest input is logged ([digest] lines), to diff against the Switch's log.
 public static class GameplayDigestHook
 {
