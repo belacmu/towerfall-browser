@@ -630,7 +630,8 @@ export class Matchmaker {
 		const queue = this.queued();
 		const standard = queue.filter((c) => !c.state.quickPlay.wide).length;
 		const wide = queue.length - standard;
-		for (const conn of queue) this.send(conn, "QuickPlayStatus", { queued: true, searching_standard: standard, searching_wide: wide, message: "" });
+		// local_players: the players searching on that device, which also tells TF.EX this server seats several per device.
+		for (const conn of queue) this.send(conn, "QuickPlayStatus", { queued: true, searching_standard: standard, searching_wide: wide, message: "", local_players: conn.state.quickPlay.seats ?? 1 });
 	}
 
 	// Two devices searching with the same screen width (WiderSet) make a match, if their players (local_players) fit.

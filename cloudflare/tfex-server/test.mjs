@@ -715,6 +715,7 @@ test("core: quick play with local players: devices match if their players fit, a
 	const B = new FakeConn(mm, "BOB");
 	const C = new FakeConn(mm, "CAROL");
 	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false, local_players: 3 } });
+	eq(A.last("QuickPlayStatus").local_players, 3, "the status echoes the device's players");
 	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false, local_players: 2 } });
 	eq(B.last("QuickPlayMatchFound"), undefined, "3 + 2 players don't fit in 4");
 	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false, local_players: 3 } });
@@ -738,7 +739,7 @@ test("core: quick play matches two searchers and starts once both are ready", as
 	const W = new FakeConn(mm, "WIDE");
 	const B = new FakeConn(mm, "BOB");
 	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false } });
-	eq(A.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 0, message: "" }, "queued");
+	eq(A.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 0, message: "", local_players: 1 }, "queued");
 	W.do({ EnterQuickPlay: { name: "WIDE", is_wide: true } });
 	eq(W.last("QuickPlayStatus").searching_wide, 1, "wide counted apart");
 	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });
