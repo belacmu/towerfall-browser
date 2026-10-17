@@ -324,7 +324,8 @@ export class Matchmaker {
 
 	// TF.EX's AreAllPlayersReady: two or more, all ready, and in team deathmatch two real teams.
 	allReady(lobby) {
-		if (lobby.Players.length < 2 || !lobby.Players.every((p) => p.Ready)) return false;
+		// Two devices at least: players on one device (AddLocalPlayer) share its peer id.
+		if (new Set(lobby.Players.map((p) => p.RoomPeerId)).size < 2 || !lobby.Players.every((p) => p.Ready)) return false;
 		if (lobby.GameData.Mode !== TEAM_DEATHMATCH) return true;
 		const blue = lobby.Players.filter((p) => p.Team === 0).length;
 		const red = lobby.Players.filter((p) => p.Team === 1).length;
@@ -914,11 +915,12 @@ const handlers = {
 	},
 
 	EnterQuickPlay(conn, body, now) {
+		const since = conn.state.quickPlay?.since ?? now;
 		this.leave(conn, now);
 		const wide = body.is_wide === true;
 		// TF.EX local players: how many search on this device (sent again when one more joins; the place in the queue is kept).
 		const seats = Math.min(Math.max(int(body.local_players, 1), 1), (wide ? MAX_WIDE_PLAYERS : MAX_PLAYERS) - 1);
-		conn.state.quickPlay = { wide, seats, name: clean(body.name, MAX_NAME) || conn.state.name || "PLAYER", since: conn.state.quickPlay?.since ?? now };
+		conn.state.quickPlay = { wide, seats, name: clean(body.name, MAX_NAME) || conn.state.name || "PLAYER", since };
 		conn.save?.();
 		this.matchQuickPlay(now);
 		this.quickPlayStatus();

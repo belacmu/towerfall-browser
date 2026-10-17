@@ -646,6 +646,10 @@ test("core: local players (AddLocalPlayer): a seat after the device's first, Upd
 	eq(A.last("LobbyUpdate").lobby.Players.length, 3, "BOB 2 back");
 	B.do({ LeaveLobby: {} });
 	eq(A.last("LobbyUpdate").lobby.Players.map((p) => p.Name), ["ALICE"], "BOB leaving takes BOB 2 along");
+	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2" } } });
+	for (const p of A.last("LobbyUpdate").lobby.Players) A.do({ UpdatePlayer: { player: { ...p, Ready: true } } });
+	A.do({ StartLobbyChoice: {} });
+	eq(A.take("StartLobby").length, 0, "one device alone (with its local player) can't start");
 });
 
 test("core: a best-of-3 series (result, loser picks, auto start, finish)", async () => {
