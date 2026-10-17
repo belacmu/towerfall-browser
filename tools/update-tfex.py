@@ -66,6 +66,13 @@ def output(**values):
 
 def main():
     check_only = "--check" in sys.argv
+    # A TF.EX built from source (a fork or branch of ours, TFEX_SOURCE in fetch-tfex.sh) isn't replaced by a release:
+    # moving off it is a person's decision (docs/TFEX-UPDATE.md).
+    source = re.search(r"^TFEX_SOURCE=\$\{TFEX_SOURCE-([^}]*)\}", open(FETCH_TFEX).read(), re.M)
+    if source and source.group(1):
+        print(f"TF.EX is built from source ({source.group(1)}); not checking releases")
+        output(changed="false", blocked="")
+        return
     current = pinned(FETCH_TFEX, "TFEX_VERSION")
     ggrs_commit = pinned(BUILD_NETPLAY, "GGRS_FFI_COMMIT")
     fortrise = pinned(FETCH_FORTRISE, "FORTRISE_VERSION")

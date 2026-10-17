@@ -25,6 +25,10 @@ namespace TowerFallBrowser;
 public static class SwitchLobby
 {
 	public const string SwitchPlatform = "Switch";
+	// What this page says it plays on. TF.EX's Platform.Current knows Windows, Linux and macOS (OperatingSystem.Is*) and says
+	// "Unknown" for anything else, which other players see as "... IS PLAYING ON UNKNOWN". The runtime here answers
+	// OperatingSystem.IsBrowser(), so the page says so, the way TF.EX names the others.
+	public const string BrowserPlatform = "Browser";
 	public const string RelayModName = "TowerFallBrowser.Relay";
 	private const string WiderSetModName = "Teuria.WiderSet"; // TF.EX's WiderSetModApiData.Name
 	public const int SessionFps = 60;
@@ -92,7 +96,8 @@ public static class SwitchLobby
 		harmony.Patch(addSpectators, prefix: noSpectators);
 		harmony.Patch(widerSetMod, postfix: new HarmonyMethod(typeof(SwitchLobby).GetMethod(nameof(LobbyModsPostfix), all)));
 		harmony.Patch(sceneTransition, postfix: new HarmonyMethod(typeof(SwitchLobby).GetMethod(nameof(SceneTransitionPostfix), all)));
-		ClaimPlatform(harmony, Environment.GetEnvironmentVariable("TOWERFALL_TFEX_PLATFORM"));
+		string asked = Environment.GetEnvironmentVariable("TOWERFALL_TFEX_PLATFORM");
+		ClaimPlatform(harmony, string.IsNullOrEmpty(asked) && OperatingSystem.IsBrowser() ? BrowserPlatform : asked, debug: !string.IsNullOrEmpty(asked));
 	}
 
 	private static MethodInfo resolveMatchmaking;
@@ -183,8 +188,9 @@ public static class SwitchLobby
 		if (active && scene != null && mainMenu.IsInstanceOfType(scene)) Stop();
 	}
 
-	// ?tfexplatform=<name>: what this page's UpdatePlayer and CreateLobby say its platform is (TF.EX: Platform.Current).
-	private static void ClaimPlatform(Harmony harmony, string platform)
+	// What this page's UpdatePlayer and CreateLobby say its platform is (TF.EX: Platform.Current): "Browser", or
+	// ?tfexplatform=<name> (debug).
+	private static void ClaimPlatform(Harmony harmony, string platform, bool debug)
 	{
 		if (string.IsNullOrEmpty(platform)) return;
 		claimed = platform.Length > 32 ? platform[..32] : platform;
@@ -192,7 +198,7 @@ public static class SwitchLobby
 		PropertyInfo current = type?.GetProperty("Current", BindingFlags.Public | BindingFlags.Static);
 		if (current == null)
 		{
-			Console.WriteLine("[netplay] ?tfexplatform: TF.EX's Platform.Current not found");
+			Console.WriteLine("[netplay] TF.EX's Platform.Current not found: the page's platform stays TF.EX's");
 			return;
 		}
 		// A get-only auto property: its backing field (the getter may be inlined into its callers), and the getter too.
@@ -202,10 +208,10 @@ public static class SwitchLobby
 		}
 		catch (Exception e)
 		{
-			Console.WriteLine($"[netplay] ?tfexplatform: couldn't set Platform.Current's field ({e.Message})");
+			Console.WriteLine($"[netplay] couldn't set TF.EX's Platform.Current field ({e.Message})");
 		}
 		harmony.Patch(current.GetMethod, postfix: new HarmonyMethod(typeof(SwitchLobby).GetMethod(nameof(PlatformPostfix), BindingFlags.NonPublic | BindingFlags.Static)));
-		Console.WriteLine($"[netplay] DEBUG: this page says it plays on \"{current.GetValue(null)}\" (?tfexplatform)");
+		Console.WriteLine(debug ? $"[netplay] DEBUG: this page says it plays on \"{current.GetValue(null)}\" (?tfexplatform)" : $"[netplay] TF.EX platform: {current.GetValue(null)}");
 		// The Switch has no instant replay and says so (UseInstantReplay false turns it off for the match): a page that plays the
 		// Switch's part does the same.
 		MethodInfo instantReplay = Find("TF.EX.Domain.NetplayOptions")?.GetProperty("UseInstantReplay", BindingFlags.Public | BindingFlags.Static)?.GetMethod;

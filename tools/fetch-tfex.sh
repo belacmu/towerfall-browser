@@ -5,20 +5,33 @@
 # the GPL allows it. The zips are repacked without Unmanaged/ (Windows/Linux builds of ggrs_ffi,
 # which the browser replaces with its own build, see netplay/README.md). Also writes
 # vendor/tfex/hosted.json, which the page lists alongside the GameBanana catalog.
+# Or, with TFEX_SOURCE=<owner/repo>@<commit> (below, or from the environment), TF.EX built from source at that commit
+# (tools/build-tfex.sh): a fork or branch with a change of ours. The commit pins it (a build isn't byte-for-byte
+# reproducible, so there's no zip checksum); TFEX_VERSION then only names the zip. tools/update-tfex.py leaves a source
+# pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TFEX_VERSION=v0.21.1
+TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
 DShad.TF.EX:9928a0e4fb0f275a866142f3cc6b1236251bbffcf3f7e9d0797276c81e9188f7
 "
 OUT=vendor/tfex
-want="$TFEX_VERSION $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
+want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
 [ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
 
 rm -rf $OUT && mkdir -p $OUT
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+if [ -n "$TFEX_SOURCE" ]; then
+	[[ "$TFEX_SOURCE" =~ ^[^@]+@[0-9a-f]{40}$ ]] || { echo "TFEX_SOURCE must be <owner/repo>@<full commit sha>: $TFEX_SOURCE" >&2; exit 1; }
+	label="$TFEX_VERSION-${TFEX_SOURCE%%/*}-$(echo "${TFEX_SOURCE#*@}" | cut -c1-7)"
+	tools/build-tfex.sh "${TFEX_SOURCE%@*}" "${TFEX_SOURCE#*@}" "$OUT/DShad.TF.EX-$label.zip"
+	PAGE="https://github.com/${TFEX_SOURCE%@*}/tree/${TFEX_SOURCE#*@}"
+	TFEX_VERSION=$label ZIPS=
+fi
+PAGE=${PAGE:-https://github.com/Fcornaire/TF.EX/releases/tag/$TFEX_VERSION}
 for pair in $ZIPS; do
 	name=${pair%%:*}
 	sha=${pair#*:}
@@ -30,9 +43,9 @@ for pair in $ZIPS; do
 	(cd "$tmp/$name" && zip -q -r -X "$OLDPWD/$OUT/$name-$TFEX_VERSION.zip" .)
 done
 
-python3 - "$OUT" "$TFEX_VERSION" <<'PY'
+python3 - "$OUT" "$TFEX_VERSION" "$PAGE" <<'PY'
 import hashlib, json, os, sys, zipfile
-out, version = sys.argv[1], sys.argv[2]
+out, version, page = sys.argv[1], sys.argv[2], sys.argv[3]
 entries = []
 for f in sorted(os.listdir(out)):
     if not f.endswith(".zip"):
@@ -56,7 +69,7 @@ for f in sorted(os.listdir(out)):
         })
     entries.append({
         "hosted": True, "title": "TF.EX", "author": "DShad", "category": "Online",
-        "page": f"https://github.com/Fcornaire/TF.EX/releases/tag/{version}",
+        "page": page,
         "file": {"name": f, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "mirror": f"hosted-mods/{f}"},
         "mods": mods,
     })

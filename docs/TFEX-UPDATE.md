@@ -52,6 +52,31 @@ Before merging it:
 
 Then pin the release: `TFEX_VERSION` and the zip's sha256 in `tools/fetch-tfex.sh`.
 
+## TF.EX from a fork or branch (our own change)
+
+The site can host a TF.EX built from source instead of a release, for example a fork with a change of ours that is also
+offered upstream as a pull request.
+1. In `tools/fetch-tfex.sh`, set `TFEX_SOURCE=${TFEX_SOURCE-<owner/repo>@<full commit sha>}`. For a one-off build, set
+   `TFEX_SOURCE=…` in the environment instead.
+2. `tools/fetch-tfex.sh` then runs `tools/build-tfex.sh`, which repeats the steps of TF.EX's own `release.yml`:
+   - it builds TF.State, TF.Replay, TF.InputDisplayer and TF.EX (`dotnet build -c Release -p:ModLoaderPath=<repo>/libs`);
+   - it puts each one in its `DShad.*` folder;
+   - it zips them without the native libs, under `DShad.TF.EX-<TFEX_VERSION>-<owner>-<sha7>.zip`. The page's "page" link
+     points at the commit.
+3. What the build needs:
+   - git, zip, and the .NET 10 SDK (`env.sh`'s, installed by `tools/install-sdk.sh`; CI has it for the site build);
+   - nuget.org: `FortRise.Configuration` 1.5.6, MessagePack, and the Microsoft.Extensions packages.
+   - It does not need FortRise or the game files: TF.EX keeps stripped compile references for FortRise 5.5.0-beta.2
+     (TowerFall.Patch.dll, FNA, Harmony, MonoMod.Utils) in its own `libs/`.
+   - The "Could not locate Mono.Cecil" warnings show up in TF.EX's CI too.
+4. While a source pin is set, the hourly `tools/update-tfex.py` checks no releases. Moving back to a release (when the
+   change is merged upstream and released) means clearing `TFEX_SOURCE`.
+5. The fork must keep `meta.json`'s version. It is what TF.EX sends as `/ws?version=` and shows in its menus.
+6. Everything in "What to check every time" applies as for a release.
+
+Checked on 2026-10-17: `Fcornaire/TF.EX@bcebd12` (v0.21.1) built this way has the same files as the release zip.
+That build hasn't been booted in the page.
+
 ## What to check every time
 
 - `tools/check-tfex-patches.sh` passes.
