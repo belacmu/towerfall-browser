@@ -21,7 +21,7 @@ SRC=${NETPLAY_SRC:-vendor/netplay-src}
 OUT=${NETPLAY_OUT:-vendor/netplay}
 
 want="$RUST_TOOLCHAIN $GGRS_FFI_COMMIT $GGRS_COMMIT $(cat netplay/*.patch netplay/ggrs-ffi.Cargo.lock netplay/matchbox-browser/Cargo.toml netplay/matchbox-browser/src/*.rs tools/build-netplay.sh tools/emenv.sh | shasum -a 256 | cut -c1-16)"
-[ -f $OUT/ggrs_ffi.a ] && [ "$(cat $OUT/.stamp 2>/dev/null)" = "$want" ] && exit 0
+[ -f "$OUT/ggrs_ffi.a" ] && [ "$(cat "$OUT/.stamp" 2>/dev/null)" = "$want" ] && exit 0
 
 fetch() { # repo dir commit patch
 	rm -rf "$SRC/$2"
@@ -31,7 +31,7 @@ fetch() { # repo dir commit patch
 	git -C "$SRC/$2" checkout -q FETCH_HEAD
 	patch -d "$SRC/$2" -p1 --forward < "$4"
 }
-mkdir -p $SRC $OUT
+mkdir -p "$SRC" "$OUT"
 SRC_ABS=$(cd "$SRC" && pwd)
 fetch Fcornaire/ggrs ggrs $GGRS_COMMIT netplay/ggrs.patch
 fetch Fcornaire/ggrs-ffi ggrs-ffi $GGRS_FFI_COMMIT netplay/ggrs-ffi.patch
@@ -45,7 +45,7 @@ if [ "$(uname)" = Darwin ] && [ -d /Library/Developer/CommandLineTools ] && ! cc
 fi
 export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+mutable-globals -C panic=abort"
 (
-	cd $SRC/ggrs-ffi/core
+	cd "$SRC/ggrs-ffi/core"
 	rustup toolchain list | grep -q "^$RUST_TOOLCHAIN" || rustup toolchain install $RUST_TOOLCHAIN --profile minimal --component rust-src
 	patches=(--config "patch.crates-io.matchbox_socket.path=\"$ROOT/netplay/matchbox-browser\""
 		--config "patch.'https://github.com/Fcornaire/ggrs'.ggrs.path=\"$SRC_ABS/ggrs\"")
@@ -58,6 +58,6 @@ export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+mutable-globals -C pa
 		-Zbuild-std=std,panic_abort --crate-type staticlib "${patches[@]}"
 )
 # The archive's name is the P/Invoke library name TF.EX uses ("ggrs_ffi").
-cp $SRC/ggrs-ffi/core/target/wasm32-unknown-emscripten/release/libggrs_ffi.a $OUT/ggrs_ffi.a
-echo "$want" > $OUT/.stamp
+cp "$SRC/ggrs-ffi/core/target/wasm32-unknown-emscripten/release/libggrs_ffi.a" "$OUT/ggrs_ffi.a"
+echo "$want" > "$OUT/.stamp"
 echo "Built $OUT/ggrs_ffi.a"
