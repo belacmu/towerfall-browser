@@ -51,6 +51,7 @@ public static class FortRiseLauncher
 		}
 		Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath));
 		KeepSavesInFortRiseFolder(game, fortriseDir, log);
+		NoLevelWatcher(game, log);
 
 		// The patched TFGame.Main, up to `new TFGame(noIntro).Run()`.
 		CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
@@ -98,6 +99,24 @@ public static class FortRiseLauncher
 		__result = savesRoot;
 		return false;
 	}
+
+	// FortRise's Level.InitializeModdedLevel ends by watching a mod level's folder for edits (hot reload while making
+	// towers), and FileSystemWatcher throws PlatformNotSupportedException in the browser: every level of a mod tower
+	// (WiderSet's wide towers, any tower pack) stopped the game. Nothing in that method runs after the watcher, and
+	// Level.End only disposes it when it's there, so the exception is dropped: mod towers play, without hot reload.
+	private static void NoLevelWatcher(Assembly game, ILogger log)
+	{
+		MethodInfo modded = game.GetType("TowerFall.Level")?.GetMethod("InitializeModdedLevel", BindingFlags.NonPublic | BindingFlags.Instance);
+		if (modded == null)
+		{
+			log.LogWarning("FortRise's Level.InitializeModdedLevel not found; mod towers may not load.");
+			return;
+		}
+		new HarmonyLib.Harmony("TowerFallBrowser.NoLevelWatcher").Patch(modded,
+			finalizer: new HarmonyLib.HarmonyMethod(typeof(FortRiseLauncher).GetMethod(nameof(DropWatcherException), BindingFlags.NonPublic | BindingFlags.Static)));
+	}
+
+	private static Exception DropWatcherException(Exception __exception) => __exception is PlatformNotSupportedException ? null : __exception;
 
 	private static void Call(Type type, string method, params object[] args)
 	{
