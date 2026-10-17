@@ -90,4 +90,7 @@ The Switch's client ignores unknown fields and messages (LOBBY-PROTOCOL.md).
     and the lobby kept TF.EX's 240 Hz values (5/80). 0 desyncs.
   - The CHECKING CONNECTIONS wait itself is covered by `test.mjs` only: real clients had measured each other before the host
     pressed start.
+- **Deployed server** (wss://tfex-server.tf-bd1030ec.workers.dev, version 1d2c5063, 2026-10-17):
+  - `test.mjs --url` passes all 35 tests;
+  - two pages in a private lobby (random tower, digest on): about 5.5 rollbacks/s, 0 desyncs.
 - **Not tested here**: against the Switch, which is switch-online's job.
