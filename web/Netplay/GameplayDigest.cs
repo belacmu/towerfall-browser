@@ -15,11 +15,15 @@ namespace TowerFallBrowser;
 // the same digest of the state instead: the gameplay RNG, each seat's player (alive, position, speed) and the arrows' positions.
 // ggrs-ffi takes it through netplay_set_pending_checksum (netplay/ggrs-ffi.patch), called right before TF.EX's
 // NetplayManager.SaveGameState, i.e. for GGRS frame f the state at its start (after f-1's Level.Update and entity flush).
-// Both sides must have it on, or every checksum report is a desync: it's switched on per test (xnet / xlobby digest=1) or per page (?digest=1).
+// Both sides must have it on, or every checksum report is a desync. TF.EX itself (desktop, and the browser against desktop)
+// keeps fletcher16, so the digest is used only in a session with a Switch player in it (SwitchLobby.Active: every peer of that
+// lobby sees the same players, so they all agree), never against desktop TF.EX. Tests and debugging force it for every
+// session (xnet / xlobby digest=1, ?digest=1).
 // On a DesyncDetected event the frame's digest input is logged ([digest] lines), to diff against the Switch's log.
 public static class GameplayDigestHook
 {
-	public static bool Enabled { get; private set; }
+	public static bool Enabled { get; private set; } // forced: every session uses it
+	private static bool installed;
 
 	// The last saves' digest inputs by value, for the DesyncDetected log (its "local checksum" is one of them; the frame a
 	// save is for isn't known here during a rollback). Reports arrive well within this many saves.
@@ -40,6 +44,17 @@ public static class GameplayDigestHook
 	public static string Enable(Assembly towerFall)
 	{
 		if (Enabled) return null;
+		string error = Install(towerFall);
+		if (error != null) return error;
+		Enabled = true;
+		Console.WriteLine($"[digest] on: GGRS checksums are the gameplay digest (version {GameplayDigest.Version}), not fletcher16 of TF.EX's state");
+		return null;
+	}
+
+	// The hooks, used by sessions against the Switch (or every session once Enable has run). Returns null or an error.
+	public static string Install(Assembly towerFall)
+	{
+		if (installed) return null;
 		const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 		Type manager = Find("TF.EX.Domain.Services.NetplayManager");
 		if (manager == null) return "TF.EX isn't loaded";
@@ -66,10 +81,12 @@ public static class GameplayDigestHook
 		var harmony = new Harmony("TowerFallBrowser.GameplayDigest");
 		harmony.Patch(manager.GetMethod("SaveGameState", any), prefix: new HarmonyMethod(typeof(GameplayDigestHook), nameof(SavePrefix)));
 		harmony.Patch(manager.GetMethod("GetEventAndUpdate", any), postfix: new HarmonyMethod(typeof(GameplayDigestHook), nameof(EventsPostfix)));
-		Enabled = true;
-		Console.WriteLine($"[digest] on: GGRS checksums are the gameplay digest (version {GameplayDigest.Version}), not fletcher16 of TF.EX's state");
+		installed = true;
 		return null;
 	}
+
+	// This session's checksums are the digest: forced, or a lobby match with a Switch player.
+	private static bool InUse() => Enabled || SwitchLobby.Active;
 
 	private static Type Find(string name) =>
 		AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(name, false)).FirstOrDefault(t => t != null);
@@ -77,7 +94,7 @@ public static class GameplayDigestHook
 	// Before TF.EX hands GGRS the state of the frame being saved.
 	private static void SavePrefix(object __instance)
 	{
-		if (!(bool)isInit.Invoke(__instance, null)) return; // (TF.EX's save returns early then)
+		if (!InUse() || !(bool)isInit.Invoke(__instance, null)) return; // (TF.EX's save returns early then)
 		try
 		{
 			DigestInput d = Capture();
@@ -125,7 +142,7 @@ public static class GameplayDigestHook
 	// TF.EX only logs DesyncDetected; add what was hashed for that frame.
 	private static void EventsPostfix(object __instance)
 	{
-		if (eventsField.GetValue(__instance) is not IEnumerable events) return;
+		if (!InUse() || eventsField.GetValue(__instance) is not IEnumerable events) return;
 		foreach (object e in events)
 		{
 			Match m = desyncLocal.Match(e?.ToString() ?? "");
