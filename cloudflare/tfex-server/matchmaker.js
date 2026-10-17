@@ -825,6 +825,7 @@ const handlers = {
 		const first = this.playerOf(room, conn);
 		const index = lobby.Players.findIndex((p) => p !== first && p.RoomPeerId === conn.state.peer && p.Seat === body.seat);
 		if (index < 0 || lobby.InGame) return this.send(conn, "LobbyUpdate", { lobby });
+		this.log(`[lobby] ${lobby.Players[index].Name} left ${lobby.RoomId} (local player)`);
 		lobby.Players.splice(index, 1);
 		this.changed(room);
 	},
