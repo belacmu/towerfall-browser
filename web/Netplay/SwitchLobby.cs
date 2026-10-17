@@ -31,7 +31,7 @@ public static class SwitchLobby
 
 	private static bool active; // this session runs over the relay
 	private static object manager; // TF.EX's NetplayManager
-	private static PropertyInfo ggrsConfig, netplayConfig, serverConf, roomUrl, localPeerId, spectators;
+	private static PropertyInfo ggrsConfig, netplayConfig, serverConf, roomUrl, relayUrl, localPeerId, spectators;
 	private static MethodInfo ownLobby;
 	private static PropertyInfo lobbyPlayers, lobbyRoomId, lobbyMods, playerPlatform, playerPeerId, playerSeat;
 	private static FieldInfo preferencesServer;
@@ -67,8 +67,10 @@ public static class SwitchLobby
 		localPeerId = netplay?.GetProperty("LocalPeerId");
 		spectators = netplay?.GetProperty("Spectators");
 		roomUrl = server?.GetProperty("RoomUrl");
+		relayUrl = server?.GetProperty("RelayUrl");
 		ownLobby = matchmaking?.GetMethod("GetOwnLobby");
-		lobbyPlayers = lobby?.GetProperty("Players");
+		// TF.EX 0.21: the match's players (Lobby.MatchPlayers when the server sends them, else Players), what its UpdatePlayers seats.
+		lobbyPlayers = lobby?.GetProperty("SessionPlayers") ?? lobby?.GetProperty("Players");
 		lobbyRoomId = lobby?.GetProperty("RoomId");
 		lobbyMods = lobby?.GetProperty("Mods");
 		playerPlatform = player?.GetProperty("Platform");
@@ -99,7 +101,7 @@ public static class SwitchLobby
 		AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(name)).FirstOrDefault(t => t != null);
 
 	// MapScene.StartSession (TF.EX's prefix) has just listed the lobby's players for the session (GGRSConfig.Netplay), before
-	// the level loads and NetplayManager.Init opens the room (and computes the input delay with ToFrames, so at the new rate).
+	// the level loads and NetplayManager.Init opens the room (TfexFps converts its input delay to the new rate).
 	private static void UpdatePlayersPostfix(object __instance)
 	{
 		try
@@ -120,6 +122,8 @@ public static class SwitchLobby
 			}
 			string relay = $"{((string)preferencesServer.GetValue(null)).TrimEnd('/')}/relay/{lobbyRoomId.GetValue(lobby)}?peer={local}&remote={playerPeerId.GetValue(other)}";
 			roomUrl.SetValue(server, relay);
+			// TF.EX 0.21's own relay (UDP, set again by NetplayManager.ApplyRelay; the browser's ggrs_ffi ignores it anyway): not this match's.
+			relayUrl?.SetValue(server, null);
 			spectators.SetValue(netplay, new List<string>());
 			active = true;
 			TfexFps.SetSessionRate(SessionFps);

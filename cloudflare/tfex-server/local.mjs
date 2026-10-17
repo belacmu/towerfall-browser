@@ -239,7 +239,7 @@ server.on("upgrade", (req, socket) => {
 				schedule();
 			},
 		);
-		matchmaker.open(conn, Date.now(), req.socket.remoteAddress ?? null);
+		matchmaker.open(conn, Date.now(), req.socket.remoteAddress ?? null, url.searchParams.get("version"));
 		schedule();
 		return;
 	}

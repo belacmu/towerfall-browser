@@ -1,8 +1,53 @@
+diff --git a/core/Cargo.toml b/core/Cargo.toml
+index 44a88c8..042fae1 100644
+--- a/core/Cargo.toml
++++ b/core/Cargo.toml
+@@ -18,7 +18,6 @@ serde_json = "1.0.93"
+ uuid =  { version = "1.18.1",features = ["v4","fast-rng","macro-diagnostics",] }
+ macros = { version = "0.1.0", path = "../macros" }
+ matchbox_socket = "0.12.0"
+-async-tungstenite = { version = "0.29", default-features = false, features = ["async-std-runtime", "async-tls"] }
+ futures = "0.3.28"
+ futures-timer = "3.0.2"
+ tokio = { version = "1.28.1", features = ["rt"] }
+@@ -26,3 +25,6 @@ once_cell = "1.18.0"
+ tracing = "0.1"
+ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+ 
++# TF.EX's relay (relay.rs): not in the browser build (relay_browser.rs).
++[target.'cfg(not(target_os = "emscripten"))'.dependencies]
++async-tungstenite = { version = "0.29", default-features = false, features = ["async-std-runtime", "async-tls"] }
+diff --git a/core/src/ffi.rs b/core/src/ffi.rs
+index e97ceba..e88faa4 100644
+--- a/core/src/ffi.rs
++++ b/core/src/ffi.rs
+@@ -172,6 +172,12 @@ pub unsafe extern "C" fn netplay_save_game_state(game_state: SafeBytes) -> Statu
+     np.handle_save_game_state_request(safe_game_state)
+ }
+ 
++// The checksum of the state the next netplay_save_game_state saves (instead of fletcher16 of its bytes).
++#[no_mangle]
++pub unsafe extern "C" fn netplay_set_pending_checksum(checksum: u64) {
++    *crate::neplay::PENDING_CHECKSUM.lock().unwrap() = Some(checksum);
++}
++
+ #[no_mangle]
+ pub unsafe extern "C" fn netplay_advance_game_state() -> Inputs {
+     let mut np = guard_netplay_instance();
 diff --git a/core/src/lib.rs b/core/src/lib.rs
-index f0b1a61..b00094e 100644
+index a32af58..093be4b 100644
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -54,6 +54,14 @@ pub fn get_runtime() -> &'static tokio::runtime::Runtime {
+@@ -20,6 +20,8 @@ pub mod ffi;
+ pub mod model;
+ pub mod neplay;
+ pub mod ping_measurement;
++// Browser: no UDP, see relay_browser.rs.
++#[cfg_attr(target_os = "emscripten", path = "relay_browser.rs")]
+ pub mod relay;
+ pub mod session;
+ pub mod transport;
+@@ -56,6 +58,14 @@ pub fn get_runtime() -> &'static tokio::runtime::Runtime {
      static RUNTIME: OnceCell<tokio::runtime::Runtime> = OnceCell::new();
  
      RUNTIME.get_or_init(|| {
@@ -17,26 +62,11 @@ index f0b1a61..b00094e 100644
          let runtime = tokio::runtime::Builder::new_multi_thread()
              .worker_threads(4)
              .enable_all()
-diff --git a/core/src/ffi.rs b/core/src/ffi.rs
---- a/core/src/ffi.rs
-+++ b/core/src/ffi.rs
-@@ -170,6 +170,12 @@
-     let safe_game_state = GameState::new(game_state);
- 
-     np.handle_save_game_state_request(safe_game_state)
-+}
-+
-+// The checksum of the state the next netplay_save_game_state saves (instead of fletcher16 of its bytes).
-+#[no_mangle]
-+pub unsafe extern "C" fn netplay_set_pending_checksum(checksum: u64) {
-+    *crate::neplay::PENDING_CHECKSUM.lock().unwrap() = Some(checksum);
- }
- 
- #[no_mangle]
 diff --git a/core/src/neplay.rs b/core/src/neplay.rs
+index 8acf2ff..014e241 100644
 --- a/core/src/neplay.rs
 +++ b/core/src/neplay.rs
-@@ -34,6 +34,10 @@
+@@ -34,6 +34,10 @@ use crate::{
  
  const DESYNC_CHECK_INTERVAL: u32 = 120;
  
@@ -47,7 +77,7 @@ diff --git a/core/src/neplay.rs b/core/src/neplay.rs
  pub struct Netplay {
      pub local_player_handle: Option<usize>,
      pub remote_player_handles: Vec<usize>,
-@@ -784,8 +788,11 @@
+@@ -814,8 +818,11 @@ impl Netplay {
                  GgrsRequest::SaveGameState { cell, frame } => {
                      assert_eq!(self.game_state.frame(), *frame);
  
@@ -61,3 +91,74 @@ diff --git a/core/src/neplay.rs b/core/src/neplay.rs
                      cell.save(*frame, Some(game_state.clone()), Some(checksum as u128));
  
                      self.game_state = game_state.clone();
+diff --git a/core/src/relay_browser.rs b/core/src/relay_browser.rs
+new file mode 100644
+index 0000000..1b5f0b7
+--- /dev/null
++++ b/core/src/relay_browser.rs
+@@ -0,0 +1,65 @@
++// Browser (Emscripten) stand-in for relay.rs. TF.EX's relay carries game packets over UDP, which a page can't
++// open, and TF.EX v0.21 hands every session a relay URL (NetplayManager.ApplyRelay), so the routed transport
++// opens one. This relay never connects and never reaches a peer, so every peer stays on the direct path
++// (WebRTC, or the site's own WebSocket relay, see netplay/tfnet.js), and it never ends the session.
++use futures::FutureExt;
++use ggrs::{Message, NonBlockingSocket, PlayerType};
++use matchbox_socket::PeerId;
++use tracing::info;
++
++use crate::{config::ggrs_config::Address, transport::Connection};
++
++pub struct RelaySocket;
++
++#[derive(Clone)]
++pub struct RelayStatus;
++
++impl RelayStatus {
++    pub fn is_refused(&self) -> bool {
++        false
++    }
++}
++
++pub struct RelayChannel;
++
++pub fn connect(connection_url: String) -> Result<(RelaySocket, RelayChannel, Connection), String> {
++    info!("Relay not available in the browser, ignoring {connection_url}");
++
++    Ok((RelaySocket, RelayChannel, futures::future::pending().boxed()))
++}
++
++impl RelaySocket {
++    pub fn update_peers(&mut self) {}
++
++    pub fn connected_peers(&self) -> Vec<PeerId> {
++        vec![]
++    }
++
++    pub fn players(&self) -> Vec<PlayerType<PeerId>> {
++        vec![PlayerType::Local]
++    }
++
++    pub fn status(&self) -> RelayStatus {
++        RelayStatus
++    }
++
++    pub fn release(&mut self) {}
++}
++
++impl RelayChannel {
++    pub fn send_packet(&mut self, _packet: &[u8], _peer: PeerId) -> bool {
++        false
++    }
++
++    pub fn receive_packets(&mut self) -> Vec<(PeerId, Box<[u8]>)> {
++        vec![]
++    }
++}
++
++impl NonBlockingSocket<Address> for RelayChannel {
++    fn send_to(&mut self, _msg: &Message, _addr: &Address) {}
++
++    fn receive_all_messages(&mut self) -> Vec<(Address, Message)> {
++        vec![]
++    }
++}

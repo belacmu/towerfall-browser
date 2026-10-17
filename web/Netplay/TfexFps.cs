@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
 using HarmonyLib;
 
 namespace TowerFallBrowser;
@@ -20,8 +18,11 @@ namespace TowerFallBrowser;
 // `fps` argument ever sets it (the ScenarioSweeper uses 60), so here:
 //  - GGRSConfig.Fps's getter returns the forced rate, whichever factory built the config (test,
 //    local, server, the constructor's default, spectate/replay), so GetSessionFps and the FFI config agree;
-//  - NetplayPreferences.ToFrames (input delay ms -> ticks) uses the forced rate;
-//  - InputDelayAdvisor's ms-per-tick constant (4.1667, inlined by the compiler) is read from FrameMs().
+//  - the input delay GGRS gets (GGRSConfig.InputDelay / MaxInputDelay of a non-test config) is converted from TF.EX's 240 Hz
+//    ticks to the session's: ceil(ticks * rate / 240). Everything before that stays in TF.EX's units, as on a PC: the
+//    preference (ToFrames), InputDelayAdvisor's proposal, the delay this page publishes in the lobby (Player.InputDelay) and a
+//    series host's (SeriesInputDelay). Rescaling ToFrames instead (until TF.EX 0.21.1 here) left an advisor- or series-chosen
+//    delay 4x too long at 60 Hz and published 60 Hz ticks where every other client reads 240 Hz ones.
 // Not changed (spectator UI thresholds, InstantReplayFootage's 240-based footage constants): see the report.
 public static class TfexFps
 {
@@ -32,8 +33,8 @@ public static class TfexFps
 	// The rate TF.EX's sessions run at now, 0: its own (240).
 	public static int Fps => sessionFps != 0 ? sessionFps : pageFps;
 
-	// This session's rate (0: back to the page's / TF.EX's own). Takes effect for what TF.EX computes from
-	// then on: GGRSConfig.Fps (the session's tick length, GGRS's windows) and ToFrames (input delay).
+	// This session's rate (0: back to the page's / TF.EX's own). Takes effect for what TF.EX reads from then on:
+	// GGRSConfig.Fps (the session's tick length, GGRS's windows) and its input delays (converted to this rate).
 	public static void SetSessionRate(int fps)
 	{
 		if (fps != 0 && (fps < 30 || fps > 240)) throw new ArgumentOutOfRangeException(nameof(fps));
@@ -63,78 +64,39 @@ public static class TfexFps
 		int patched = 0;
 		Type config = Find("TF.EX.Domain.Models.GGRSConfig");
 		MethodInfo getFps = config?.GetProperty("Fps")?.GetMethod;
+		nameProperty = config?.GetProperty("Name");
 		if (getFps != null)
 		{
 			harmony.Patch(getFps, postfix: new HarmonyMethod(typeof(TfexFps).GetMethod(nameof(FpsGetter), all)));
 			patched++;
 		}
-		MethodInfo toFrames = Find("TF.EX.Domain.Models.NetplayPreferences")?.GetMethod("ToFrames", all);
-		if (toFrames != null)
+		var delayPostfix = new HarmonyMethod(typeof(TfexFps).GetMethod(nameof(DelayGetter), all));
+		foreach (string name in new[] { "InputDelay", "MaxInputDelay" })
 		{
-			harmony.Patch(toFrames, postfix: new HarmonyMethod(typeof(TfexFps).GetMethod(nameof(ToFramesPostfix), all)));
+			MethodInfo getDelay = config?.GetProperty(name)?.GetMethod;
+			if (getDelay == null) continue;
+			harmony.Patch(getDelay, postfix: delayPostfix);
 			patched++;
 		}
-		Type advisor = Find("TF.EX.Patchs.InputDelayAdvisor");
-		if (advisor != null)
-		{
-			var transpiler = new HarmonyMethod(typeof(TfexFps).GetMethod(nameof(FrameMsTranspiler), all));
-			foreach (MethodBase m in Methods(advisor).Where(HasFrameMs))
-			{
-				harmony.Patch(m, transpiler: transpiler);
-				patched++;
-			}
-		}
-		Console.WriteLine($"[netplay] TF.EX session rate patches: {patched} (GGRSConfig.Fps getter {(getFps != null ? "ok" : "MISSING")})");
+		Console.WriteLine($"[netplay] TF.EX session rate patches: {patched} of 3 (GGRSConfig.Fps getter {(getFps != null ? "ok" : "MISSING")})");
 	}
 
 	private static Type Find(string name) =>
 		AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(name)).FirstOrDefault(t => t != null);
-
-	private static IEnumerable<MethodBase> Methods(Type type)
-	{
-		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
-		foreach (MethodBase m in type.GetMethods(all)) yield return m;
-		foreach (Type nested in type.GetNestedTypes(all))
-			foreach (MethodBase m in Methods(nested)) yield return m;
-	}
-
-	private const double FrameMs240 = 1000.0 / 240;
-
-	// ldc.r8 4.1666...: opcode 0x23 then the 8 bytes of the double.
-	private static bool HasFrameMs(MethodBase m)
-	{
-		byte[] il = m.GetMethodBody()?.GetILAsByteArray();
-		if (il == null) return false;
-		byte[] want = BitConverter.GetBytes(FrameMs240);
-		for (int i = 0; i + 9 <= il.Length; i++)
-			if (il[i] == 0x23 && il.AsSpan(i + 1, 8).SequenceEqual(want)) return true;
-		return false;
-	}
 
 	private static void FpsGetter(ref int __result)
 	{
 		if (Fps != 0) __result = Fps;
 	}
 
-	private static void ToFramesPostfix(int ms, ref int __result)
+	// TF.EX's input delays are 240 Hz ticks (Constants.NETPLAY_FPS); a test config's are already at its own rate.
+	private static void DelayGetter(object __instance, ref int __result)
 	{
-		if (Fps != 0) __result = (ms * Fps + 999) / 1000;
+		if ((string)nameProperty.GetValue(__instance) != "TEST") __result = SessionTicks(__result);
 	}
 
-	public static double FrameMs() => Fps != 0 ? 1000.0 / Fps : FrameMs240;
+	// TF.EX's 240 Hz ticks (rounded up) at this session's rate.
+	public static int SessionTicks(int ticks240) => Fps == 0 || Fps == 240 || ticks240 <= 0 ? ticks240 : (ticks240 * Fps + 239) / 240;
 
-	// ldc.r8 4.1666... -> call FrameMs() (same stack effect).
-	private static IEnumerable<CodeInstruction> FrameMsTranspiler(IEnumerable<CodeInstruction> code)
-	{
-		MethodInfo frameMs = typeof(TfexFps).GetMethod(nameof(FrameMs));
-		foreach (CodeInstruction ins in code)
-		{
-			if (ins.opcode == OpCodes.Ldc_R8 && ins.operand is double d && Math.Abs(d - FrameMs240) < 1e-9)
-			{
-				ins.opcode = OpCodes.Call;
-				ins.operand = frameMs;
-			}
-			yield return ins;
-		}
-	}
+	private static PropertyInfo nameProperty;
 }

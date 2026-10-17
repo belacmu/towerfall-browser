@@ -212,7 +212,7 @@ export class MatchmakerObject extends DurableObject {
 			return new Response(null, { status: member ? 204 : 404 });
 		}
 		const { client, conn } = this.sockets.accept();
-		this.core.open(conn, Date.now(), request.headers.get("X-Client-IP") || null);
+		this.core.open(conn, Date.now(), request.headers.get("X-Client-IP") || null, url.searchParams.get("version"));
 		this.schedule();
 		return new Response(null, { status: 101, webSocket: client });
 	}
