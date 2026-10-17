@@ -33,6 +33,7 @@ const CODE_LENGTH = 5;
 const RELAY_AVAILABLE = false;
 const MAX_NAME = 10; // NetplayPreferences.MaxNameLength
 const MAX_PLAYERS = 4;
+const MAX_WIDE_PLAYERS = 8; // WiderSet
 const TOWERS = 16; // TF.EX's netplay towers (Constants.cs): map ids 0..15, -1 random
 const TEAM_DEATHMATCH = 5; // TowerFall.Modes
 const MAX_SKIN_CHUNK = 320 * 1024; // 192 KiB per chunk, as base64
@@ -631,17 +632,32 @@ export class Matchmaker {
 		for (const conn of queue) this.send(conn, "QuickPlayStatus", { queued: true, searching_standard: standard, searching_wide: wide, message: "" });
 	}
 
-	// Two players searching with the same screen width (WiderSet) make a match.
+	// Two devices searching with the same screen width (WiderSet) make a match, if their players (local_players) fit.
 	matchQuickPlay(now) {
 		for (const wide of [false, true]) {
 			const queue = this.queued().filter((c) => c.state.quickPlay.wide === wide);
-			while (queue.length >= 2) {
-				const conns = queue.splice(0, 2);
+			const max = wide ? MAX_WIDE_PLAYERS : MAX_PLAYERS;
+			const seatsOf = (c) => c.state.quickPlay.seats ?? 1;
+			for (;;) {
+				const first = queue.findIndex((a, i) => queue.some((b, j) => j > i && seatsOf(a) + seatsOf(b) <= max));
+				if (first < 0) break;
+				const second = queue.findIndex((b, j) => j > first && seatsOf(queue[first]) + seatsOf(b) <= max);
+				const conns = [queue[first], queue[second]];
+				queue.splice(second, 1);
+				queue.splice(first, 1);
+				const players = [];
+				const peers = [];
+				for (const c of conns) {
+					const main = this.newMember(c.state.quickPlay.name, players.length === 0, players.length);
+					players.push(main);
+					peers.push(main.RoomPeerId);
+					for (let n = 2; n <= seatsOf(c); n++) players.push(this.player({}, { Name: clean(`${main.Name} ${n}`, MAX_NAME), RoomPeerId: main.RoomPeerId, IsHost: false, Seat: players.length, Team: -1 }));
+				}
 				const lobby = {
 					Name: clean(conns[0].state.quickPlay.name, MAX_NAME) || "QUICK PLAY",
 					RoomId: crypto.randomUUID(),
-					MaxPlayers: conns.length,
-					Players: conns.map((c, seat) => this.newMember(c.state.quickPlay.name, seat === 0, seat)),
+					MaxPlayers: players.length,
+					Players: players,
 					Spectators: [],
 					GameData: { MapId: -1, Mode: 3, MatchLength: 2, Variants: [], Seed: this.newSeed(), BestOf: 0 },
 					EndGameChoice: [],
@@ -659,10 +675,10 @@ export class Matchmaker {
 				const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null, checkConnections: null }, measured: new Set() };
 				this.rooms.set(lobby.RoomId, room);
 				this.persist?.save(room);
-				for (const [seat, conn] of conns.entries()) {
+				for (const [i, conn] of conns.entries()) {
 					conn.state.quickPlay = null;
-					this.attach(conn, room, lobby.Players[seat].RoomPeerId);
-					this.send(conn, "QuickPlayMatchFound", { lobby, room_peer_id: lobby.Players[seat].RoomPeerId });
+					this.attach(conn, room, peers[i]);
+					this.send(conn, "QuickPlayMatchFound", { lobby, room_peer_id: peers[i] });
 				}
 				this.log(`[quickplay] matched ${lobby.Players.map((p) => p.Name).join(" vs ")}`);
 			}
@@ -784,16 +800,15 @@ const handlers = {
 		this.changed(room);
 	},
 
-	// Another player on the connection's device (TF.EX local players): a Player with the connection's peer id, at the first
-	// free seat after its first one (so a device's first seat stays its lowest, which TF.EX and GGRS take as its main player).
-	// One device leaving removes all its players (removeMember filters by peer).
+	// Another player on the connection's device (TF.EX local players): a Player with the connection's peer id, at any free
+	// seat. The device's first Player in the list stays its main one. One device leaving removes all its players
+	// (removeMember filters by peer).
 	AddLocalPlayer(conn, body) {
 		const room = this.roomOf(conn);
 		if (!room) return;
 		const lobby = room.lobby;
 		const first = this.playerOf(room, conn);
-		let seat = -1;
-		for (let s = (first?.Seat ?? lobby.MaxPlayers) + 1; s < lobby.MaxPlayers && seat < 0; s++) if (!lobby.Players.some((p) => p.Seat === s)) seat = s;
+		const seat = this.freeSeat(lobby);
 		if (!first || seat < 0 || lobby.InGame || lobby.Kind === "QuickPlay" || this.seriesInProgress(lobby)) return this.send(conn, "LobbyUpdate", { lobby });
 		const name = clean(body.player?.Name, MAX_NAME) || first.Name;
 		lobby.Players.push(this.player(body.player, { Name: name, RoomPeerId: first.RoomPeerId, IsHost: false, Seat: seat, Team: -1 }));
@@ -900,7 +915,10 @@ const handlers = {
 
 	EnterQuickPlay(conn, body, now) {
 		this.leave(conn, now);
-		conn.state.quickPlay = { wide: body.is_wide === true, name: clean(body.name, MAX_NAME) || conn.state.name || "PLAYER", since: now };
+		const wide = body.is_wide === true;
+		// TF.EX local players: how many search on this device (sent again when one more joins; the place in the queue is kept).
+		const seats = Math.min(Math.max(int(body.local_players, 1), 1), (wide ? MAX_WIDE_PLAYERS : MAX_PLAYERS) - 1);
+		conn.state.quickPlay = { wide, seats, name: clean(body.name, MAX_NAME) || conn.state.name || "PLAYER", since: conn.state.quickPlay?.since ?? now };
 		conn.save?.();
 		this.matchQuickPlay(now);
 		this.quickPlayStatus();
