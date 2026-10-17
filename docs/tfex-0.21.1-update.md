@@ -77,6 +77,24 @@ The Switch's client ignores unknown fields and messages (LOBBY-PROTOCOL.md).
   - re-checking the patches.
 - New: `tools/check-tfex-patches.sh`, a headless boot that fails when a browser patch lost its TF.EX target.
 
+- New: building TF.EX from source at a commit of any repository (`TFEX_SOURCE` in `tools/fetch-tfex.sh`,
+  `tools/build-tfex.sh`), for a fork with our own change (local multiplayer on one device, offered upstream).
+  - It needs the .NET 10 SDK and nuget.org. TF.EX's repo holds its FortRise compile references (`libs/`), so neither a
+    FortRise SDK nor the game files are needed.
+  - v0.21.1 built this way has the same files as the release. Details: docs/TFEX-UPDATE.md.
+
+## 6b. Platform
+- TF.EX's `Platform.Current` is `Windows`, `Linux` or `macOS` (`OperatingSystem.Is*`), else `Unknown`. It is a get-only
+  static, so TF.EX has no API to set it.
+- In WebAssembly the runtime answers `OperatingSystem.IsBrowser()`, which TF.EX doesn't name. So the page published
+  "Unknown", and other players saw "… IS PLAYING ON UNKNOWN".
+- The page now says **`Browser`**. SwitchLobby sets it through the same backing-field path that `?tfexplatform` uses.
+- TF.EX warns whenever a peer's platform differs from its own. A browser vs anyone else still shows "IS PLAYING ON BROWSER",
+  but with a real name.
+- **For the Switch:** publish `Switch`. TF.EX has no name for it, and SwitchLobby keys on exactly `Switch` to pick the 60 Hz
+  relay session, so it must stay that. Windows, Linux and macOS are TF.EX's only names; `Browser` is ours, like `Switch`.
+- Upstream candidate (not drafted): `OperatingSystem.IsBrowser() ? "Browser"` in TF.EX's `Platform`.
+
 ## 7. Results (2026-10-17)
 - **Native lib** (ggrs-ffi 2fe64d9 + GGRS c510c22 + the relay stub): builds. A relay URL is logged as ignored, and every
   peer stays on WebRTC or our relay.

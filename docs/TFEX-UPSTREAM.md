@@ -65,6 +65,8 @@ noted; desktop .NET is faster, but the costs grow the same way.
   VersusMatchSettings.ClearNetplayMode()`) on the co-op submenu's button (`CoOpModeButton`, which acts
   in `BorderButton.OnConfirm`) and `TrialsButton.MenuAction`.
 - **Ours:** `TfexPatches.PatchCoOpButtons` (`web/Netplay/TfexPatches.cs`).
+- **Upstream:** TF.EX v0.21.1 fixes it ("Co-op and other local modes no longer try to play online after visiting the online
+  menus"). Our patch still runs alongside it; it can go once that's checked in the browser.
 
 ## 6. Both players spend much of a match in slow motion (TF.EX's tick loop)
 
@@ -74,3 +76,10 @@ noted; desktop .NET is faster, but the costs grow the same way.
   the match at 1 tick, 2% at 2, 1% at 3; rollbacks per second and their depth about the same.
 - **Fix:** slow down from 2 ticks ahead.
 - **Ours:** `web/Netplay/AheadThreshold.cs`; reports carry `slowDownFromTicksAhead`.
+
+## 7. A browser player shows as "PLAYING ON UNKNOWN" (TF.EX's Platform)
+
+- **What happens:** `TF.EX.Domain.Utils.Platform.Current` names Windows, Linux and macOS (`OperatingSystem.Is*`), and
+  everything else "Unknown". So every other player sees "<name> IS PLAYING ON UNKNOWN - NETPLAY MAY DESYNC".
+- **Fix:** `OperatingSystem.IsBrowser() ? "Browser"` before the "Unknown" fallback.
+- **Ours:** `SwitchLobby.ClaimPlatform` (`web/Netplay/SwitchLobby.cs`) says "Browser" (from TF.EX v0.21.1 here).
