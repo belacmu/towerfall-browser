@@ -364,7 +364,8 @@ export class Matchmaker {
 
 	// The player pairs without a measurement in both directions.
 	unmeasuredPairs(room) {
-		const ids = room.lobby.Players.map((p) => p.RoomPeerId);
+		// Per device: players on one device (AddLocalPlayer) share its peer id.
+		const ids = [...new Set(room.lobby.Players.map((p) => p.RoomPeerId))];
 		const pairs = [];
 		for (let i = 0; i < ids.length; i++)
 			for (let j = i + 1; j < ids.length; j++)
@@ -384,7 +385,7 @@ export class Matchmaker {
 	startAfterConnectionCheck(room, now) {
 		const lobby = room.lobby;
 		const players = this.members(room).filter((c) => this.playerOf(room, c));
-		if (players.length < lobby.Players.length || !players.every((c) => this.measures(c)) || this.unmeasuredPairs(room).length === 0) {
+		if (players.length < new Set(lobby.Players.map((p) => p.RoomPeerId)).size || !players.every((c) => this.measures(c)) || this.unmeasuredPairs(room).length === 0) {
 			lobby.RelayedPairs = [];
 			return this.start(room, now);
 		}
@@ -767,7 +768,10 @@ const handlers = {
 		const room = this.roomOf(conn);
 		if (!room) return;
 		const lobby = room.lobby;
-		const index = lobby.Players.findIndex((p) => p.RoomPeerId === conn.state.peer);
+		// The Player at the sent seat if it's one of this connection's (AddLocalPlayer), else its first one.
+		const own = (p) => p.RoomPeerId === conn.state.peer;
+		let index = lobby.Players.findIndex((p) => own(p) && p.Seat === body.player?.Seat);
+		if (index < 0) index = lobby.Players.findIndex(own);
 		if (index < 0) return this.send(conn, "LobbyUpdate", { lobby });
 		const before = lobby.Players[index];
 		lobby.Players[index] = this.player(body.player, before);
@@ -777,6 +781,35 @@ const handlers = {
 		}
 		if (lobby.Kind === "QuickPlay" && !lobby.InGame) room.timers.quickStart = this.allReady(lobby) ? now + QUICK_START_MS : null;
 		if (this.maybeStartSeries(room, now)) return;
+		this.changed(room);
+	},
+
+	// Another player on the connection's device (TF.EX local players): a Player with the connection's peer id, at the first
+	// free seat after its first one (so a device's first seat stays its lowest, which TF.EX and GGRS take as its main player).
+	// One device leaving removes all its players (removeMember filters by peer).
+	AddLocalPlayer(conn, body) {
+		const room = this.roomOf(conn);
+		if (!room) return;
+		const lobby = room.lobby;
+		const first = this.playerOf(room, conn);
+		let seat = -1;
+		for (let s = (first?.Seat ?? lobby.MaxPlayers) + 1; s < lobby.MaxPlayers && seat < 0; s++) if (!lobby.Players.some((p) => p.Seat === s)) seat = s;
+		if (!first || seat < 0 || lobby.InGame || lobby.Kind === "QuickPlay" || this.seriesInProgress(lobby)) return this.send(conn, "LobbyUpdate", { lobby });
+		const name = clean(body.player?.Name, MAX_NAME) || first.Name;
+		lobby.Players.push(this.player(body.player, { Name: name, RoomPeerId: first.RoomPeerId, IsHost: false, Seat: seat, Team: -1 }));
+		this.log(`[lobby] ${name} joined ${lobby.RoomId} on ${first.Name}'s device`);
+		this.changed(room);
+	},
+
+	// Removes one of the connection's other players (never its first: LeaveLobby does that).
+	RemoveLocalPlayer(conn, body) {
+		const room = this.roomOf(conn);
+		if (!room) return;
+		const lobby = room.lobby;
+		const first = this.playerOf(room, conn);
+		const index = lobby.Players.findIndex((p) => p !== first && p.RoomPeerId === conn.state.peer && p.Seat === body.seat);
+		if (index < 0 || lobby.InGame) return this.send(conn, "LobbyUpdate", { lobby });
+		lobby.Players.splice(index, 1);
 		this.changed(room);
 	},
 
