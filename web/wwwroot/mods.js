@@ -41,15 +41,33 @@ export function offered(catalog) {
 
 // --- What's enabled -----------------------------------------------------------------------
 
-// { enabled: [mod name], custom: [{ name, sha256, size, file }], off }, per browser. Without a
-// saved choice, online play (TF.EX) is on. `off` turns every mod off and keeps the choice for later.
-export const DEFAULT_ENABLED = ["TF.EX"];
+// { enabled: [mod name], custom: [{ name, sha256, size, file }], off, defaults }, per browser. Without a
+// saved choice, online play (TF.EX) and WiderSet (TF.EX's wide lobbies and wide quick play, as on desktop;
+// narrow play is unchanged until the player picks WIDER) are on. `off` turns every mod off and keeps the
+// choice for later.
+export const DEFAULT_ENABLED = ["TF.EX", "Teuria.WiderSet"];
+// Defaults added after a choice may have been saved, by `defaults` version: each is turned on once for
+// saved choices from before it (a player who turns it off afterwards keeps it off).
+const ADDED_DEFAULTS = [[2, "Teuria.WiderSet"]];
+const DEFAULTS_VERSION = 2;
+// Defaults the game plays fine without: if GameBanana can't hand one over, the game starts without it
+// (and says so) instead of waiting for the player to add the zip. Not when another enabled mod needs it.
+export const SOFT_DEFAULTS = new Set(["Teuria.WiderSet"]);
+export function softMods(mods) {
+	const needed = new Set(mods.flatMap((m) => m.dependencies.map((d) => d.name)));
+	return new Set(mods.filter((m) => SOFT_DEFAULTS.has(m.name) && !needed.has(m.name)).map((m) => m.name));
+}
 export function loadState() {
 	try {
 		const s = JSON.parse(localStorage.getItem(STATE_KEY));
-		if (s && Array.isArray(s.enabled)) return { enabled: s.enabled, custom: s.custom ?? [], off: s.off === true };
+		if (s && Array.isArray(s.enabled)) {
+			const seen = s.defaults ?? 1;
+			const enabled = [...s.enabled];
+			for (const [version, name] of ADDED_DEFAULTS) if (version > seen && !enabled.includes(name)) enabled.push(name);
+			return { enabled, custom: s.custom ?? [], off: s.off === true, defaults: DEFAULTS_VERSION };
+		}
 	} catch {}
-	return { enabled: [...DEFAULT_ENABLED], custom: [], off: false };
+	return { enabled: [...DEFAULT_ENABLED], custom: [], off: false, defaults: DEFAULTS_VERSION };
 }
 
 export function saveState(state) {
@@ -142,28 +160,39 @@ export class ModDownloadError extends Error {
 	}
 }
 
-// Downloads (or reuses) each catalog mod's zip and verifies it against the catalog checksum.
-export async function ensureFiles(mods, onProgress) {
+// Downloads (or reuses) each catalog mod's zip and verifies it against the catalog checksum. A mod
+// in `soft` (see softMods) that can't be downloaded is left out: onSkip(error) is told.
+export async function ensureFiles(mods, onProgress, soft = new Set(), onSkip = () => {}) {
 	const zips = await (await fortriseDir()).getDirectoryHandle("ModZips", { create: true });
 	const files = new Map(); // one per GameBanana file
 	for (const m of mods) files.set(m.entry.file.sha256, m);
 	let done = 0;
+	const kept = [];
 	for (const [sha, mod] of files) {
 		if (!(await haveZip(zips, sha))) {
 			let buffer;
 			try {
-				const res = await fetch(mod.entry.file.mirror);
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
-				buffer = await res.arrayBuffer();
+				try {
+					const res = await fetch(mod.entry.file.mirror);
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					buffer = await res.arrayBuffer();
+				} catch (e) {
+					throw new ModDownloadError(mod, e.message || "network error");
+				}
+				if ((await sha256(buffer)) !== sha) throw new ModDownloadError(mod, "the file didn't match the catalog");
 			} catch (e) {
-				throw new ModDownloadError(mod, e.message || "network error");
+				// (A file holding several mods is only skipped when all of them are soft.)
+				if (!mods.filter((m) => m.entry.file.sha256 === sha).every((m) => soft.has(m.name))) throw e;
+				onSkip(e);
+				onProgress?.(++done, files.size);
+				continue;
 			}
-			if ((await sha256(buffer)) !== sha) throw new ModDownloadError(mod, "the file didn't match the catalog");
 			await storeZip(zips, sha, buffer);
 		}
+		kept.push(sha);
 		onProgress?.(++done, files.size);
 	}
-	return [...files.keys()];
+	return kept;
 }
 
 // A zip the player supplies: either a catalog file the download failed for (matched by checksum)

@@ -446,7 +446,11 @@ $("modFile").addEventListener("change", async () => {
 async function prepareMods() {
 	status("Getting mods…");
 	$("bar").hidden = false;
-	const shas = await Mods.ensureFiles(enabledCatalogMods(), (done, total) => progress(done / total));
+	const mods = enabledCatalogMods();
+	const shas = await Mods.ensureFiles(mods, (done, total) => progress(done / total), Mods.softMods(mods), (e) => {
+		console.warn(e);
+		$("error").textContent = `${e.message} Playing without it this time.`;
+	});
 	shas.push(...enabledCustomMods().map((c) => c.sha256));
 	await Mods.writeEnabled(shas);
 }
