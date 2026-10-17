@@ -1,5 +1,5 @@
-// Matchmaking at /ws, compatible with TF.EX's client (v0.19.1, checked against v0.19.2: src/network/TF.EX.Domain/Services/
-// MatchmakingService.cs and the menus that call it). The protocol is read from that client; the
+// Matchmaking at /ws, compatible with TF.EX's client (v0.19.1, checked against v0.21.1: src/network/TF.EX.Domain/Services/
+// MatchmakingService.cs and the menus that call it; TFEX_PROTOCOL names the version last checked). The protocol is read from that client; the
 // official server isn't open source, so where the client leaves room the choices here are ours
 // (docs/MULTIPLAYER.md lists them).
 //
@@ -21,9 +21,16 @@ const VOTE_MS = 33_000;
 const SERIES_PICK_MS = 62_000;
 // Quick play starts this long after everyone has picked an archer ("MATCH STARTING...").
 const QUICK_START_MS = 1_500;
+// TF.EX 0.20.0: once everyone is ready, the server waits for each pair's PeerMeasured (both ways) before StartLobby, at most this
+// long; pairs still unmeasured then go through the relay (RelayedPairs). Only in lobbies where every player measures (measures()).
+const CHECK_CONNECTIONS_MS = 8_000;
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // JoinCodeEntry: A-Z without I and O, 2-9
 const CODE_LENGTH = 5;
+// TF.EX's relay (ggrs_ffi relay.rs) is a WebSocket control channel (Welcome {token, udp_port}, UdpConfirmed, PeerConnected {peer,
+// id}, PeerDisconnected, SpectatorsFull) plus a UDP socket on the server carrying the game packets (HELLO 1 / GAME 2, an 8-byte
+// token, pieces of at most 1200 bytes). Cloudflare Workers can't take UDP, so it needs another host; until then: false.
+const RELAY_AVAILABLE = false;
 const MAX_NAME = 10; // NetplayPreferences.MaxNameLength
 const MAX_PLAYERS = 4;
 const TOWERS = 16; // TF.EX's netplay towers (Constants.cs): map ids 0..15, -1 random
@@ -62,7 +69,13 @@ export class Matchmaker {
 	// Members whose connection is gone are removed (everyone, after a redeploy).
 	restore(rooms, conns) {
 		for (const conn of conns) if (!conn.state.refused) this.conns.set(conn.id, conn);
-		for (const room of rooms) this.rooms.set(room.lobby.RoomId, room);
+		for (const room of rooms) {
+			// (rooms stored before TF.EX 0.21 support)
+			room.measured = room.measured instanceof Set ? room.measured : new Set();
+			room.timers.checkConnections ??= null;
+			for (const [k, v] of Object.entries({ RelayedPairs: [], IsCheckingConnections: false, IsReportEnabled: false, MatchPlayers: [] })) room.lobby[k] ??= v;
+			this.rooms.set(room.lobby.RoomId, room);
+		}
 		for (const room of [...this.rooms.values()]) {
 			const live = new Set(this.members(room).map((c) => c.state.peer));
 			for (const m of [...room.lobby.Players, ...room.lobby.Spectators]) if (!live.has(m.RoomPeerId)) this.removeMember(room, m.RoomPeerId, Date.now());
@@ -70,9 +83,11 @@ export class Matchmaker {
 	}
 
 	// `ip` is the client's address (for per-address limits), if known.
-	open(conn, now = Date.now(), ip = null) {
+	// `version` is the client's TF.EX version from /ws?version= (v0.21.1+; older clients and the Switch send none). Not enforced:
+	// no UpdateRequired is sent, so a cached older page or the Switch build keeps playing.
+	open(conn, now = Date.now(), ip = null, version = null) {
 		const refused = !!ip && [...this.conns.values()].filter((c) => c.state.ip === ip).length >= MAX_CONNS_PER_IP;
-		conn.state = { seen: now, ip, tokens: BURST, refused };
+		conn.state = { seen: now, ip, tokens: BURST, refused, version: version ? clean(version, 32) : null };
 		conn.save?.();
 		if (refused) return conn.close(4029, "too many connections");
 		this.conns.set(conn.id, conn);
@@ -129,6 +144,7 @@ export class Matchmaker {
 				if (this.allReady(room.lobby)) this.start(room, now);
 			}
 			if (t.seriesPick && now >= t.seriesPick) this.forceSeriesStart(room, now);
+			if (t.checkConnections && now >= t.checkConnections) this.finishConnectionCheck(room, now);
 		}
 	}
 
@@ -344,10 +360,57 @@ export class Matchmaker {
 
 	// ---- matches ----
 
+	// The player pairs without a measurement in both directions.
+	unmeasuredPairs(room) {
+		const ids = room.lobby.Players.map((p) => p.RoomPeerId);
+		const pairs = [];
+		for (let i = 0; i < ids.length; i++)
+			for (let j = i + 1; j < ids.length; j++)
+				if (!room.measured.has(`${ids[i]}|${ids[j]}`) || !room.measured.has(`${ids[j]}|${ids[i]}`)) pairs.push([ids[i], ids[j]]);
+		return pairs;
+	}
+
+	// Whether a connection's client measures pings and reports them (PeerMeasured): TF.EX 0.20.0+ (by its /ws?version=), or one
+	// that has sent a PeerMeasured. TF.EX 0.19 and the Switch build without ?version= don't: a lobby with one of them starts at once.
+	measures(conn) {
+		if (conn.state.measures) return true;
+		const [major, minor] = String(conn.state.version ?? "").replace(/^v/, "").split(".").map(Number);
+		return major > 0 || (major === 0 && minor >= 20);
+	}
+
+	// IsCheckingConnections while pairs are unmeasured (TF.EX shows "CHECKING CONNECTIONS..."), then the start.
+	startAfterConnectionCheck(room, now) {
+		const lobby = room.lobby;
+		const players = this.members(room).filter((c) => this.playerOf(room, c));
+		if (players.length < lobby.Players.length || !players.every((c) => this.measures(c)) || this.unmeasuredPairs(room).length === 0) {
+			lobby.RelayedPairs = [];
+			return this.start(room, now);
+		}
+		if (lobby.IsCheckingConnections) return;
+		lobby.IsCheckingConnections = true;
+		room.timers.checkConnections = now + CHECK_CONNECTIONS_MS;
+		this.log(`[lobby] ${lobby.RoomId} checking connections (${this.unmeasuredPairs(room).length} pairs unmeasured)`);
+		this.changed(room);
+	}
+
+	finishConnectionCheck(room, now) {
+		room.timers.checkConnections = null;
+		// The pairs nobody could measure go through the relay. RELAY: /relay/room/<room>?peer= must exist (see the patch header):
+		// without it, leave RelayedPairs empty and let those pairs try directly.
+		room.lobby.RelayedPairs = RELAY_AVAILABLE ? this.unmeasuredPairs(room) : [];
+		room.lobby.IsCheckingConnections = false;
+		if (this.allReady(room.lobby)) this.start(room, now);
+		else this.changed(room);
+	}
+
 	// Everyone goes into the match: the lobby (InGame, new seed) first, then StartLobby.
 	start(room, now) {
 		const lobby = room.lobby;
 		lobby.InGame = true;
+		lobby.IsCheckingConnections = false;
+		room.timers.checkConnections = null;
+		// TF.EX 0.21.0 Lobby.SessionPlayers: the match's players, fixed for the match (a joiner or a leaver doesn't move seats)
+		lobby.MatchPlayers = structuredClone(lobby.Players);
 		lobby.EndGameChoice = [];
 		lobby.GameData.Seed = this.newSeed();
 		room.timers.vote = null;
@@ -389,6 +452,7 @@ export class Matchmaker {
 		room.reported = false;
 		if (lobby.Series) {
 			lobby.InGame = false;
+			lobby.MatchPlayers = [];
 			for (const p of lobby.Players) p.Ready = false;
 			if (this.seriesInProgress(lobby)) room.timers.seriesPick = now + SERIES_PICK_MS;
 			this.sendAll(room, "SeriesLobby", {});
@@ -399,6 +463,7 @@ export class Matchmaker {
 			this.sendAll(room, "RematchLobby", {});
 		} else {
 			lobby.InGame = false;
+			lobby.MatchPlayers = [];
 			for (const p of lobby.Players) p.Ready = false;
 			this.sendAll(room, "ArcherSelectLobby", {});
 			this.changed(room);
@@ -582,9 +647,13 @@ export class Matchmaker {
 					Kind: "QuickPlay",
 					JoinCode: "",
 					Series: null,
+					RelayedPairs: [],
+					IsCheckingConnections: false,
+					IsReportEnabled: false,
+					MatchPlayers: [],
 					MissingVariants: [],
 				};
-				const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null } };
+				const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null, checkConnections: null }, measured: new Set() };
 				this.rooms.set(lobby.RoomId, room);
 				this.persist?.save(room);
 				for (const [seat, conn] of conns.entries()) {
@@ -648,10 +717,14 @@ const handlers = {
 			Kind: kind,
 			JoinCode: kind === "Private" ? this.newCode() : "",
 			Series: null,
+			RelayedPairs: [],
+			IsCheckingConnections: false,
+			IsReportEnabled: false,
+			MatchPlayers: [],
 			MissingVariants: [],
 		};
 		if (this.tooBig(lobby)) return fail("LOBBY TOO BIG");
-		const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null } };
+		const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null, checkConnections: null }, measured: new Set() };
 		this.rooms.set(roomId, room);
 		this.attach(conn, room, host.RoomPeerId);
 		this.persist?.save(room);
@@ -733,7 +806,18 @@ const handlers = {
 			if (lobby.Players.length !== lobby.MaxPlayers) return;
 			this.newSeries(room);
 		}
-		this.start(room, now);
+		this.startAfterConnectionCheck(room, now);
+	},
+
+	// TF.EX 0.20.0 PeerMeasured {room_peer_id}: the sender measured an RTT to that peer (ping measurement, /ping_measurement/<room>).
+	PeerMeasured(conn, body, now) {
+		const room = this.roomOf(conn);
+		const peer = String(body.room_peer_id ?? "");
+		if (!room || !this.playerOf(room, conn) || !room.lobby.Players.some((p) => p.RoomPeerId === peer)) return;
+		conn.state.measures = true;
+		if (!room.measured.has(`${conn.state.peer}|${peer}`)) this.log(`[lobby] ${room.lobby.RoomId}: ${conn.state.peer} measured ${peer}`);
+		room.measured.add(`${conn.state.peer}|${peer}`);
+		if (room.lobby.IsCheckingConnections && this.unmeasuredPairs(room).length === 0) this.finishConnectionCheck(room, now);
 	},
 
 	MatchEnded(conn, body, now) {

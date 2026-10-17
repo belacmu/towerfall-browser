@@ -75,7 +75,7 @@ internal static class GgrsFfiImports
 	[DllImport("ggrs_ffi")] internal static extern int netplay_remote_player_handle_at(int index);
 	[DllImport("ggrs_ffi")] internal static extern Status netplay_add_spectator([MarshalAs(UnmanagedType.LPUTF8Str)] string peerId);
 	[DllImport("ggrs_ffi")] internal static extern int netplay_frames_behind();
-	[DllImport("ggrs_ffi")] internal static extern Status ping_measurement_start([MarshalAs(UnmanagedType.LPUTF8Str)] string roomUrl);
-	[DllImport("ggrs_ffi")] internal static extern void ping_measurement_stop();
-	[DllImport("ggrs_ffi")] internal static extern void ping_measurement_stats([MarshalAs(UnmanagedType.LPUTF8Str)] string peerId, out PingStats stats);
+	[DllImport("ggrs_ffi")] internal static extern Status ping_measurement_start([MarshalAs(UnmanagedType.LPUTF8Str)] string roomUrl, [MarshalAs(UnmanagedType.U1)] bool isRelay);
+	[DllImport("ggrs_ffi")] internal static extern void ping_measurement_stop([MarshalAs(UnmanagedType.U1)] bool isRelay);
+	[DllImport("ggrs_ffi")] internal static extern void ping_measurement_stats([MarshalAs(UnmanagedType.LPUTF8Str)] string peerId, [MarshalAs(UnmanagedType.U1)] bool isRelay, out PingStats stats);
 }

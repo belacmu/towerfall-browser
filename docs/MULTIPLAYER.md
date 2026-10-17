@@ -44,8 +44,18 @@ pinned release (`tools/fetch-tfex.sh`, see `docs/MODS.md`); the page lists it as
 Deployed at **`wss://tfex-server.tf-bd1030ec.workers.dev`** (2026-10-10), the site's default. A
 server implementing what TF.EX's client uses, written from TF.EX's GPL client source at
 v0.19.1 (`src/network/TF.EX.Domain/Services/MatchmakingService.cs`, the message models in
-`Models/WebSocket/`, and the menus that drive them), and checked against v0.19.2 (no message
-changes: its `MatchmakingService.cs` change only shows desync warnings at match start). The official server isn't open source, so
+`Models/WebSocket/`, and the menus that drive them), and checked against v0.21.1 (2026-10-17, see
+docs/tfex-0.21.1-update.md):
+- the v0.20/v0.21 lobby fields `RelayedPairs` (always empty), `IsCheckingConnections`, `IsReportEnabled` (false) and
+  `MatchPlayers` (the match's players, set at the start and cleared at archer select or a series);
+- `PeerMeasured` with the connection check before `StartLobby` (CHECKING CONNECTIONS, at most 8 s). It only runs when
+  every player measures pings (`/ws?version=` 0.20+, or has sent a PeerMeasured), so TF.EX 0.19 and the Switch build
+  start at once;
+- `/ws?version=` is recorded, not enforced: no `UpdateRequired`, no `Notice`, no `KickedFromLobby`;
+- TF.EX's own relay (`/relay/room/`, `/relay/ping_measurement/`) needs UDP, which Workers can't take: those paths are 404,
+  and TF.EX then stays direct.
+
+The official server isn't open source, so
 where the client leaves room the choices below are ours. Desktop TF.EX can use it too: set TF.EX's
 SERVER option (Mod options) to its `wss://` address.
 
@@ -91,7 +101,7 @@ SERVER option (Mod options) to its `wss://` address.
   - Signaling: messages up to 64 KB, 200 at once then 20 a second per connection.
   - `GetLobbies` leaves out peer ids (TF.EX's lobby list doesn't use them).
 - `local.mjs`: the same code under Node (18+, no dependencies), for development or self-hosting.
-- `test.mjs`: protocol tests (22) that talk to a server the way TF.EX and matchbox do, plus
+- `test.mjs`: protocol tests (35) that talk to a server the way TF.EX and matchbox do, plus
   in-process tests of the timed flows with a simulated clock. `node test.mjs` starts `local.mjs`;
   `node test.mjs --url ws://127.0.0.1:8787` tests another (e.g. `wrangler dev`, or a deployment).
 - `TFEX_PROTOCOL`: the TF.EX version the server was checked against. The hourly TF.EX updater

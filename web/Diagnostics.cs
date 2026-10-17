@@ -79,7 +79,7 @@ public static class Diagnostics
 			sb.Append($",\"droppedMs\":{TickCatchUp.DroppedTotalMs - lastDroppedMs:0}");
 			try
 			{
-				if (inputDelay?.Invoke(netplay, null) is int delay) sb.Append($",\"inputDelay\":{delay}");
+				if (inputDelay?.Invoke(netplay, null) is int delay) sb.Append($",\"inputDelay\":{TfexFps.SessionTicks(delay)}"); // (GGRS's ticks)
 				object stats = networkStats?.GetValue(netplay);
 				if (stats != null && ping != null)
 				{
