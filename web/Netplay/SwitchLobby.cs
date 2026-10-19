@@ -19,7 +19,8 @@ namespace TowerFallBrowser;
 //  - GGRS's desync checksums are the gameplay digest (GameplayDigest.cs): the Switch can't produce TF.EX's
 //    checksum (fletcher16 of TF.State's serialized state); every peer sees the same lobby, so all agree;
 //  - no spectators: the Switch doesn't serve them.
-// Every other lobby (desktop TF.EX, other browsers) is left exactly as TF.EX makes it.
+// A lobby of only browsers runs at 60 Hz with no spectators too (a browser-only rule, docs/BROWSER-60HZ.md); every
+// lobby with a desktop TF.EX player in it is left exactly as TF.EX makes it.
 // ?tfexplatform=Switch (TOWERFALL_TFEX_PLATFORM) makes this page claim that platform itself, so two
 // browsers can rehearse a Switch lobby.
 public static class SwitchLobby
@@ -31,7 +32,8 @@ public static class SwitchLobby
 	public const string BrowserPlatform = "Browser";
 	public const int SessionFps = 60;
 
-	private static bool active; // this session plays a Switch
+	private static bool active; // this session plays a Switch (the gameplay digest)
+	private static bool lowRate; // this session runs at SessionFps (a Switch lobby, or browsers only)
 	private static object manager; // TF.EX's NetplayManager
 	private static PropertyInfo ggrsConfig, netplayConfig, serverConf, localPeerId, spectators;
 	private static MethodInfo ownLobby;
@@ -108,16 +110,22 @@ public static class SwitchLobby
 			string local = (string)localPeerId.GetValue(netplay) ?? "";
 			object server = serverConf.GetValue(netplay);
 			bool switchLobby = players.Any(p => (string)playerPlatform.GetValue(p) == SwitchPlatform);
-			if (!switchLobby || server == null || players.All(p => (string)playerPeerId.GetValue(p) != local))
+			// BROWSER-ONLY RULE (docs/BROWSER-60HZ.md): a lobby of only browsers (and Switches) plays at 60 Hz too, where
+			// TF.EX runs 240: a quarter of the ticks to simulate and resimulate, which phones keep up with. Every player
+			// sees the same platforms, so all agree; a desktop TF.EX player (Windows / Linux / macOS, or none given) keeps
+			// the lobby on TF.EX's own 240 Hz, so desktop TF.EX is never affected.
+			bool browserLobby = players.All(p => (string)playerPlatform.GetValue(p) is BrowserPlatform or SwitchPlatform);
+			if (!(switchLobby || browserLobby) || server == null || players.All(p => (string)playerPeerId.GetValue(p) != local))
 			{
 				Stop();
 				return;
 			}
 			spectators.SetValue(netplay, new List<string>());
-			active = true;
+			lowRate = true;
+			active = switchLobby;
 			TfexFps.SetSessionRate(SessionFps);
-			Console.WriteLine($"[netplay] Switch lobby: this match ({players.Count} players) runs at {SessionFps} Hz over TF.EX's room, no spectators");
-			if (!GameplayDigestHook.Enabled) Console.WriteLine($"[digest] on for this match (a Switch player): GGRS checksums are the gameplay digest (version {GameplayDigest.Version})");
+			Console.WriteLine($"[netplay] {(switchLobby ? "Switch" : "Browser")} lobby: this match ({players.Count} players) runs at {SessionFps} Hz over TF.EX's room, no spectators");
+			if (switchLobby && !GameplayDigestHook.Enabled) Console.WriteLine($"[digest] on for this match (a Switch player): GGRS checksums are the gameplay digest (version {GameplayDigest.Version})");
 		}
 		catch (Exception e)
 		{
@@ -127,15 +135,15 @@ public static class SwitchLobby
 
 	private static void Stop()
 	{
-		if (!active) return;
-		active = false;
+		if (!lowRate) return;
+		lowRate = active = false;
 		TfexFps.SetSessionRate(0);
 	}
 
-	// The Switch serves no spectators.
+	// The Switch serves no spectators, and a spectator joining a 60 Hz browser lobby may be desktop TF.EX at 240.
 	private static bool SpectatorsPrefix(MethodBase __originalMethod)
 	{
-		if (!active) return true;
+		if (!lowRate) return true;
 		Console.WriteLine($"[netplay] Switch lobby: spectator not added ({__originalMethod.Name})");
 		return false;
 	}
@@ -144,7 +152,7 @@ public static class SwitchLobby
 	private static void SceneTransitionPostfix(object __instance)
 	{
 		object scene = engineScene.GetValue(__instance);
-		if (active && scene != null && mainMenu.IsInstanceOfType(scene)) Stop();
+		if (lowRate && scene != null && mainMenu.IsInstanceOfType(scene)) Stop();
 	}
 
 	// What this page's UpdatePlayer and CreateLobby say its platform is (TF.EX: Platform.Current): "Browser", or
