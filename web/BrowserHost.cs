@@ -742,9 +742,15 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] xlobby: {XplayVersus.StartLobby(towerFall, game, words)}");
 				return;
 			}
+			if (words[0] == "statehash")
+			{
+				Console.WriteLine($"[command] statehash: {StateHash.Start()}");
+				return;
+			}
 			if (words[0] == "bench")
 			{
 				if (words.Length > 1 && words[1] == "dyndata") Bench.RunDynamicData(towerFall);
+				else if (words.Length > 1 && words[1] == "dynfor") Bench.RunDynamicDataFor();
 				else Bench.Run();
 				return;
 			}

@@ -20,6 +20,12 @@ namespace TowerFallBrowser;
 //   has), filter every layer and its pending adds the same way. They now first ask AnyEntity<T>, which
 //   remembers per list whether it holds a T until the list changes, and return straight away if
 //   nothing matches (when something does, their own code runs as before).
+// - GetEntityByDepth(depth), which a rollback load calls for every arrow, corpse, bat and prism, copied the
+//   gameplay layer's entity list and read each entity's actualDepth through DynamicData (a boxed double
+//   each). It now first asks EntityByDepth below: the same first match, from the list itself, with the
+//   field read directly. CompareDepth, the comparison a load sorts the gameplay and HUD layers with (two
+//   boxed reads per comparison), reads the fields directly the same way. ?env=TOWERFALL_ENTITYBYDEPTH=0
+//   keeps the originals of both.
 // Same entities, same order, so the state is byte-for-byte what TF.State would produce (other players
 // and replays rely on that).
 public static class StateSpeedups
@@ -30,7 +36,7 @@ public static class StateSpeedups
 	// The main site and every preview share the page's storage (OPFS), so the TF.State a device has
 	// installed may have been adapted by another build. Each adaptation is stamped with this; bump it
 	// whenever what Install does changes. A copy adapted by anything else is extracted again first.
-	private const string AdaptationVersion = "state-load-1";
+	private const string AdaptationVersion = "state-load-3";
 	private const string StampResource = "TowerFallBrowser.Adaptation";
 
 	// --- Install time ----------------------------------------------------------------------
@@ -123,6 +129,61 @@ public static class StateSpeedups
 			il.InsertBefore(first, il.Create(OpCodes.Ret));
 			changed = true;
 		}
+		// GetEntityByDepth(level, depth): if (EntityByDepthOn()) return (Entity)EntityByDepth(GetGameplayLayer(level), depth);
+		MethodDefinition byDepth = extensions.Methods.FirstOrDefault(m => m.Name == "GetEntityByDepth" && m.Parameters.Count == 2 && !m.HasGenericParameters);
+		MethodDefinition gameplayLayer = extensions.Methods.FirstOrDefault(m => m.Name == "GetGameplayLayer" && m.Parameters.Count == 1 && !m.HasGenericParameters);
+		if (byDepth != null && gameplayLayer != null && !CallsUs(byDepth))
+		{
+			string fingerprint = Fingerprint(byDepth);
+			if (!KnownByDepth.Contains(fingerprint))
+			{
+				log.LogWarning($"TF.State's GetEntityByDepth changed ({fingerprint}); it stays as it is.");
+			}
+			else
+			{
+				var on = new MethodReference(nameof(EntityByDepthOn), module.TypeSystem.Boolean, speedups);
+				var find = new MethodReference(nameof(EntityByDepth), module.TypeSystem.Object, speedups);
+				find.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+				find.Parameters.Add(new ParameterDefinition(module.TypeSystem.Double));
+				ILProcessor il = byDepth.Body.GetILProcessor();
+				Instruction first = byDepth.Body.Instructions[0];
+				il.InsertBefore(first, il.Create(OpCodes.Call, on));
+				il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
+				il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+				il.InsertBefore(first, il.Create(OpCodes.Call, gameplayLayer));
+				il.InsertBefore(first, il.Create(OpCodes.Ldarg_1));
+				il.InsertBefore(first, il.Create(OpCodes.Call, find));
+				il.InsertBefore(first, il.Create(OpCodes.Castclass, byDepth.ReturnType));
+				il.InsertBefore(first, il.Create(OpCodes.Ret));
+				changed = true;
+			}
+		}
+		// CompareDepth(a, b): if (EntityByDepthOn()) return CompareDepth(a, b);
+		MethodDefinition compare = extensions.Methods.FirstOrDefault(m => m.Name == "CompareDepth" && m.Parameters.Count == 2 && m.ReturnType.FullName == "System.Int32");
+		if (compare != null && !CallsUs(compare))
+		{
+			string fingerprint = Fingerprint(compare);
+			if (!KnownCompareDepth.Contains(fingerprint))
+			{
+				log.LogWarning($"TF.State's CompareDepth changed ({fingerprint}); it stays as it is.");
+			}
+			else
+			{
+				var on = new MethodReference(nameof(EntityByDepthOn), module.TypeSystem.Boolean, speedups);
+				var ours = new MethodReference(nameof(CompareDepth), module.TypeSystem.Int32, speedups);
+				ours.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+				ours.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+				ILProcessor il = compare.Body.GetILProcessor();
+				Instruction first = compare.Body.Instructions[0];
+				il.InsertBefore(first, il.Create(OpCodes.Call, on));
+				il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
+				il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+				il.InsertBefore(first, il.Create(OpCodes.Ldarg_1));
+				il.InsertBefore(first, il.Create(OpCodes.Call, ours));
+				il.InsertBefore(first, il.Create(OpCodes.Ret));
+				changed = true;
+			}
+		}
 		try
 		{
 			changed |= DirectFields.Rewrite(module, log) > 0;
@@ -141,6 +202,12 @@ public static class StateSpeedups
 
 	// TF.State's DeleteAll<T> and Delete<T> as of TF.EX 0.19.1.
 	private static readonly HashSet<string> KnownDeletes = new() { "481292EF73EBD794", "01F1BC1FAAE9929D" };
+
+	// TF.State's GetEntityByDepth as of TF.EX 0.21.1.
+	private static readonly HashSet<string> KnownByDepth = new() { "B251F3A725774B59" };
+
+	// TF.State's CompareDepth as of TF.EX 0.21.1.
+	private static readonly HashSet<string> KnownCompareDepth = new() { "1DC08C56936598E0" };
 
 	private static string Fingerprint(MethodDefinition m)
 	{
@@ -196,7 +263,9 @@ public static class StateSpeedups
 		{
 			AssemblyName extensionsName = api.Assembly.GetReferencedAssemblies().FirstOrDefault(n => n.Name == Path.GetFileNameWithoutExtension(ExtensionsDll));
 			var extensionsContext = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(api.Assembly);
-			DirectFields.Validate(extensionsName == null ? null : extensionsContext.LoadFromAssemblyName(extensionsName));
+			Assembly extensionsAssembly = extensionsName == null ? null : extensionsContext.LoadFromAssemblyName(extensionsName);
+			DirectFields.Validate(extensionsAssembly);
+			SetUpEntityByDepth(extensionsAssembly?.GetType(LevelExtensions));
 		}
 		catch (Exception e)
 		{
@@ -299,6 +368,68 @@ public static class StateSpeedups
 			state.Lowest = cutoff; // the caller removes them all
 		}
 		return stale;
+	}
+
+	private static bool entityByDepthOn;
+	private static FieldInfo actualDepthField;
+	private static Func<object, double> actualDepthGetter;
+	private static readonly Dictionary<Type, bool> depthIsField = new();
+
+	public static bool EntityByDepthOn() => entityByDepthOn;
+
+	// LevelExtensions.GetEntityByDepth: the first entity of the gameplay layer, in list order, whose
+	// actualDepth equals `actualDepth`, or null. (The original searched a copy of the list; nothing changes
+	// the list during the search.)
+	public static object EntityByDepth(object gameplayLayer, double actualDepth)
+	{
+		var entities = (IList)LayerLists.For(gameplayLayer).Entities(gameplayLayer);
+		for (int i = 0, n = entities.Count; i < n; i++)
+		{
+			object entity = entities[i];
+			if (ActualDepth(entity) == actualDepth) return entity;
+		}
+		return null;
+	}
+
+	// LevelExtensions.CompareDepth: Math.Sign(b's actualDepth - a's).
+	public static int CompareDepth(object a, object b) => Math.Sign(ActualDepth(b) - ActualDepth(a));
+
+	// DynamicData.For(entity).Get<double>("actualDepth"), reading Monocle.Entity's field directly when that's
+	// the member DynamicData finds for the entity's type.
+	private static double ActualDepth(object entity)
+	{
+		Type type = entity.GetType();
+		if (!depthIsField.TryGetValue(type, out bool direct)) depthIsField[type] = direct = ResolvesTo(type, "actualDepth", actualDepthField);
+		return direct ? actualDepthGetter(entity) : MonoMod.Utils.DynamicData.For(entity).Get<double>("actualDepth");
+	}
+
+	// Whether DynamicData, walking up from `type`, finds `name` as `field` (no class in between declares a field
+	// or property of that name).
+	private static bool ResolvesTo(Type type, string name, FieldInfo field)
+	{
+		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+		for (Type t = type; t != null; t = t.BaseType)
+		{
+			if (t == field.DeclaringType) return true;
+			if (t.GetField(name, all) != null || t.GetProperty(name, all) != null) return false;
+		}
+		return false;
+	}
+
+	private static void SetUpEntityByDepth(Type extensions)
+	{
+		if (Environment.GetEnvironmentVariable("TOWERFALL_ENTITYBYDEPTH") == "0") return;
+		Type entity = extensions?.GetMethod("GetEntityByDepth", BindingFlags.Public | BindingFlags.Static)?.ReturnType;
+		actualDepthField = entity?.GetField("actualDepth", BindingFlags.NonPublic | BindingFlags.Instance);
+		if (actualDepthField?.FieldType != typeof(double)) return;
+		var dm = new System.Reflection.Emit.DynamicMethod("ActualDepth", typeof(double), new[] { typeof(object) }, typeof(StateSpeedups).Module, skipVisibility: true);
+		var il = dm.GetILGenerator();
+		il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+		il.Emit(System.Reflection.Emit.OpCodes.Castclass, entity);
+		il.Emit(System.Reflection.Emit.OpCodes.Ldfld, actualDepthField);
+		il.Emit(System.Reflection.Emit.OpCodes.Ret);
+		actualDepthGetter = (Func<object, double>)dm.CreateDelegate(typeof(Func<object, double>));
+		entityByDepthOn = true;
 	}
 
 	private static void BeginCapture()

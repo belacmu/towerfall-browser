@@ -42,6 +42,28 @@ public static class Bench
 		Console.WriteLine($"[bench] done ({sink > 0})");
 	}
 
+	// "bench dynfor": bytes allocated and time per DynamicData.For call, for the same object, two alternating
+	// objects, 64 long-lived objects in turn, and new objects.
+	public static void RunDynamicDataFor()
+	{
+		var objects = new Sample[64];
+		for (int i = 0; i < objects.Length; i++) objects[i] = new Sample();
+		void Measure(string name, int n, Func<int, object> pick)
+		{
+			for (int i = 0; i < n; i++) DynamicData.For(pick(i)); // warm up
+			long bytes = GC.GetAllocatedBytesForCurrentThread();
+			var sw = Stopwatch.StartNew();
+			for (int i = 0; i < n; i++) DynamicData.For(pick(i));
+			sw.Stop();
+			bytes = GC.GetAllocatedBytesForCurrentThread() - bytes;
+			Console.WriteLine($"[bench] DynamicData.For, {name}: {bytes / (double)n:0.0} bytes/call, {sw.Elapsed.TotalMilliseconds * 1000 / n:0.00} us/call");
+		}
+		Measure("same object", 20000, _ => objects[0]);
+		Measure("two alternating", 20000, i => objects[i & 1]);
+		Measure("64 in turn", 20000, i => objects[i & 63]);
+		Measure("new objects", 2000, _ => new Sample());
+	}
+
 	// "bench dyndata": the first DynamicData of each kind of entity (TF.EX takes one in many entity
 	// constructors) plus first reads of 5 of its fields, which is what a new kind of entity appearing
 	// mid-game costs. Run it before playing, while those types are still new to DynamicData.
