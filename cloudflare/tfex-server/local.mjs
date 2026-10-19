@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs the TF.EX-compatible server (matchmaker.js, signal.js, relay.js) locally, with no dependencies beyond Node 18+:
-//   node cloudflare/tfex-server/local.mjs [--port 3000] [--host 127.0.0.1] [--origins a,b|*]
+//   node cloudflare/tfex-server/local.mjs [--port 3000] [--host 127.0.0.1] [--origins a,b|*] [--log-checksums]
 // TF.EX's LOCAL server setting is ws://127.0.0.1:3000, the default here. Open the site with
 // ?tfexserver=local to use it. The Cloudflare deployment (worker.js) runs the same core.
 //
@@ -25,6 +25,17 @@ const port = Number(arg("port", process.env.PORT ?? 3000));
 const host = arg("host", process.env.HOST ?? "127.0.0.1");
 const origins = allowedOrigins(arg("origins", process.env.ALLOWED_ORIGINS));
 const verbose = args.includes("--verbose");
+// --log-checksums: print every GGRS checksum report a peer sends through the match relay, as
+// "[checksum] <room> <peer> frame=<frame> checksum=<hex>" (for checking that a client change leaves them alone).
+const logChecksums = args.includes("--log-checksums");
+
+// A relayed message is one bincode'd ggrs::Message: magic u16, then the body's u32 tag; ChecksumReport (6) is
+// { checksum: u128, frame: i32 }, all little endian.
+function logChecksumReport(roomId, peer, data) {
+	if (data.length !== 26 || data.readUInt32LE(2) !== 6) return;
+	const checksum = (data.readBigUInt64LE(14) << 64n) | data.readBigUInt64LE(6);
+	console.log(`[checksum] ${roomId} ${peer} frame=${data.readInt32LE(22)} checksum=${checksum.toString(16)}`);
+}
 
 const MAX_MESSAGE = 1 << 20;
 let nextConn = 1;
@@ -249,7 +260,10 @@ server.on("upgrade", (req, socket) => {
 	if (!room) rooms.set(roomKey, (room = new (relay ? RelayRoom : SignalRoom)({ log: verbose ? console.log : () => {} })));
 	const conn = new Connection(
 		socket,
-		(c, data) => room.message(c, data, Date.now()),
+		(c, data) => {
+			if (logChecksums && relay && typeof data !== "string") logChecksumReport(route.roomId, route.peer, data);
+			room.message(c, data, Date.now());
+		},
 		(c) => {
 			room.close(c);
 			if (room.isEmpty() && rooms.get(roomKey) === room) rooms.delete(roomKey);

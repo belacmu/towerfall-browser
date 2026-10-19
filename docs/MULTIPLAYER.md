@@ -252,6 +252,8 @@ they're ever abused.
 - `tools/probe-page.mjs`: one headless browser; streams the in-page log.
 - `tools/netplay-driver.mjs`: several headless browsers (separate profiles), controlled over HTTP
   (keys, screenshots, log, eval), for lobby tests.
+- `node cloudflare/tfex-server/local.mjs --log-checksums`: the local server prints every GGRS checksum report sent
+  through its match relay (`xnet-*` rooms or `/relay/` matches), to check that a client change leaves them alone.
 - Lobby codes containing X can't be typed with the driver's `type` (X is also the menu's back
   key): put the code on the game's clipboard with
   `wasm.exports.BrowserHost.SetClipboardText("CODE")` (driver `eval`), then press `ShiftLeft`
