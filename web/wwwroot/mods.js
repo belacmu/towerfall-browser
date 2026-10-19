@@ -6,6 +6,9 @@
 // and writes fortrise/mods.json; the host's ModInstaller extracts them into FortRise's Mods/ folder.
 // Players can also add their own mod zips, identified by checksum.
 
+// createWritable() where the browser lacks it (iOS before 26).
+import "./opfs-write.js";
+
 const STATE_KEY = "towerfall.mods";
 // FortRise itself and its built-in modules satisfy these dependencies.
 const BUILT_IN = new Set(["FortRise", "FortRise.Content"]);

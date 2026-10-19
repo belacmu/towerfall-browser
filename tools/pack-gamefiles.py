@@ -4,7 +4,7 @@
 Reads gamefiles/manifest.json (tools/stage-gamefiles.sh) and writes, into OUT_DIR:
   pack-<sha256 prefix>.bin  the files the page imports (TowerFall.exe, Content/, DarkWorldContent/),
                             all but the music bank, one after another in path order
-  manifest.json             the manifest with "pack" and "offset" added to each packed file
+  manifest.json             the manifest with "pack", "offset" and "sha256" added to each packed file
 The page then reads the pack with a few range requests instead of one request per file (~1,600).
 The pack is named by its content, so it can be cached for good and a new upload never changes one
 a page is still reading. Files left out (or a page without pack support) load one by one as before.
@@ -41,6 +41,8 @@ def main():
                 sys.exit(f"{f['path']} changed since the manifest was written; run tools/stage-gamefiles.sh again")
             pack.write(data)
             digest.update(data)
+            # The page checks what it stored against this, and gets a damaged file again.
+            f["sha256"] = hashlib.sha256(data).hexdigest()
             f["offset"] = offset
             offset += len(data)
     name = f"pack-{digest.hexdigest()[:16]}.bin"

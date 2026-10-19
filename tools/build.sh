@@ -40,7 +40,7 @@ grep -q 'Object.values(GL.offscreenCanvases)\[0\]' $FW/dotnet.native.*.js || { e
 WWW=$PUB/wwwroot
 mkdir -p $WWW/fortrise && cp -R vendor/fortrise/data/. $WWW/fortrise/
 python3 - "$WWW/fortrise" "$(cat vendor/fortrise/version.txt)" <<'PY'
-import json, os, sys
+import hashlib, json, os, sys
 root, version = sys.argv[1], sys.argv[2]
 files = []
 for dirpath, _, names in os.walk(root):
@@ -48,7 +48,7 @@ for dirpath, _, names in os.walk(root):
         full = os.path.join(dirpath, n)
         rel = os.path.relpath(full, root)
         if rel != "manifest.json":
-            files.append({"path": rel, "size": os.path.getsize(full)})
+            files.append({"path": rel, "size": os.path.getsize(full), "sha256": hashlib.sha256(open(full, "rb").read()).hexdigest()})
 files.sort(key=lambda f: f["path"])
 json.dump({"version": version, "files": files}, open(os.path.join(root, "manifest.json"), "w"))
 PY

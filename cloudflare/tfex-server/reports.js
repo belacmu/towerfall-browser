@@ -21,7 +21,7 @@ export const SWITCH_PER_ADDRESS_PER_HOUR = 600;
 // Where a POST /report came from: "page" (an allowed Origin) or "switch" (no Origin).
 export const reportSource = (origin) => (origin ? "page" : "switch");
 export const maxReport = (source) => (source === "switch" ? MAX_SWITCH_REPORT : MAX_REPORT);
-const KINDS = { page: ["online", "solo"], switch: ["switch"] };
+const KINDS = { page: ["online", "solo", "loadfail"], switch: ["switch"] }; // loadfail: web/wwwroot/stats.js reportFailure
 
 // The report as it's stored (compact JSON), or null if it isn't one (from that source).
 export function parseReport(text, source = "page") {

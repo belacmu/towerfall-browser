@@ -5,7 +5,7 @@
 import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, fromZip, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
-import { startStats } from "./stats.js";
+import { reportFailure, startStats } from "./stats.js";
 
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
@@ -45,6 +45,7 @@ const progress = (fraction) => ($("bar").firstElementChild.style.width = `${(fra
 
 function fail(err) {
 	console.error(err);
+	const step = $("status").textContent;
 	status("Something went wrong");
 	// ManagedError's stack getter calls back into C#, which isn't allowed on this thread.
 	const message = String(err?.message ?? err);
@@ -52,6 +53,8 @@ function fail(err) {
 		? "The browser ran out of memory for the game. Right after a reload, the previous page's memory may not be freed yet: close this tab and open the page in a new one."
 		: message + "\n\n(See the browser console for details.)";
 	showOverlay();
+	const server = tfexServer();
+	reportFailure(server.url === TFEX_SERVERS.official ? null : server.url, { step, error: message, version: new URL(import.meta.url).searchParams.get("v") ?? "" });
 }
 
 // While the game runs (body.playing), touches only play. iOS Safari otherwise selects text, shows
@@ -519,7 +522,11 @@ async function ensureGameFiles() {
 		const missing = await missingFiles(located.content);
 		const game = located.content.filter((c) => c.to !== MUSIC);
 		const missingGame = missing.filter((c) => c.to !== MUSIC);
-		if (missingGame.length > 0 || !(await importedGame())) {
+		// A game imported before the host had checksums (or never checked) is checked once now:
+		// a damaged file can have the right size (importGame gets those again).
+		const imported = await importedGame();
+		const unchecked = imported && !imported.verified && located.content.some((c) => c.from.sha256);
+		if (missingGame.length > 0 || !imported || unchecked) {
 			const all = missingGame.length > 0 ? await chooseDownload(missing, missingGame) : false;
 			await copyIn({ ...located, content: all ? located.content : game }, "server");
 		}

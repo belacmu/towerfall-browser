@@ -209,6 +209,32 @@ function device() {
 	};
 }
 
+// A failure before or while starting the game (fail() in main.js), so problems on players' devices
+// show up in the reports (tools/reports.sh) like play does: the step, the error, the device and
+// what its browser supports. URLs are left out (a private file host's link holds its key).
+export function reportFailure(serverUrl, { step, error, version }) {
+	try {
+		const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+		if (!serverUrl || local) return;
+		const clean = (text) => String(text ?? "").replace(/[a-z]+:\/\/\S+/gi, "<url>").slice(0, 2000);
+		const body = JSON.stringify({
+			kind: "loadfail",
+			v: 1,
+			site: location.pathname.includes("/preview/") ? "preview" : "main",
+			version,
+			at: new Date().toISOString(),
+			step: clean(step),
+			error: clean(error),
+			device: device(),
+			standalone: matchMedia("(display-mode: standalone)").matches || navigator.standalone === true,
+			crossOriginIsolated: self.crossOriginIsolated === true,
+			createWritable: typeof FileSystemFileHandle !== "undefined" && "createWritable" in FileSystemFileHandle.prototype,
+		});
+		const url = serverUrl.replace(/^ws/, "http").replace(/\/+$/, "") + "/report";
+		fetch(url, { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
+	} catch {}
+}
+
 // startStats(host, { serverUrl, version }): starts collecting; returns nothing. host is the .NET
 // exports' BrowserHost; serverUrl the TF.EX server's ws(s) URL the page uses (or null).
 export function startStats(host, { serverUrl, official, version }) {
