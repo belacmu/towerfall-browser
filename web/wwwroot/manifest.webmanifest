@@ -1,0 +1,13 @@
+{
+	"name": "TowerFall",
+	"short_name": "TowerFall",
+	"description": "TowerFall in your browser, with your own copy of the game.",
+	"display": "fullscreen",
+	"orientation": "landscape",
+	"background_color": "#000000",
+	"theme_color": "#000000",
+	"icons": [
+		{ "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
+		{ "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+	]
+}

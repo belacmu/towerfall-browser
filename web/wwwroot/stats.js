@@ -246,6 +246,7 @@ export function startStats(host, { serverUrl, official, version }) {
 	let total = new Summary();
 	const recent = []; // the last 5 windows, for the panel
 	let online = null, quiet = 0, solo = new Summary();
+	let hiddenBefore = document.hidden;
 
 	const send = (kind, summary, beacon = false) => {
 		if (!reportUrl) return;
@@ -265,6 +266,12 @@ export function startStats(host, { serverUrl, official, version }) {
 			return;
 		}
 		Object.assign(w, takePackets(), { late: takeLate() });
+		// A hidden tab (in the background, or a locked phone) isn't play: its timers are throttled, so
+		// its windows would report 0 fps and a minute of lateness. They're left out, and so is the
+		// first one after it's shown again (it still holds the gap).
+		const skip = document.hidden || hiddenBefore;
+		hiddenBefore = document.hidden;
+		if (skip) return;
 		total.add(w);
 		recent.push(w);
 		if (recent.length > 5) recent.shift();
