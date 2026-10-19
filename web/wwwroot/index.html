@@ -4,6 +4,16 @@
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 		<title>TowerFall</title>
+		<!-- "Add to Home Screen": the game full screen, without the browser's bars. No start_url, so the
+		     app opens the page it was added from (a home-screen app has its own storage: the game files
+		     are copied into it once, and a private #gamefiles= link is pasted on its start screen). -->
+		<link rel="manifest" href="manifest.webmanifest">
+		<link rel="apple-touch-icon" href="icons/icon-180.png">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<meta name="apple-mobile-web-app-title" content="TowerFall">
+		<meta name="theme-color" content="#000000">
 		<style>
 			html, body {
 				margin: 0;
