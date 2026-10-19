@@ -10,6 +10,9 @@
 // Paths are relative to whatever folder was supplied; locateGame() finds the game inside it, so
 // the player can hand over the Steam folder, the .app bundle, or an extracted copy.
 
+// createWritable() where the browser lacks it (iOS before 26).
+import "./opfs-write.js";
+
 const MARKER = ".imported.json";
 
 // The game's music bank: most of the game's bytes (218 MB of 354), and the game runs fine without it
@@ -31,6 +34,7 @@ export async function fromServer(base = "") {
 	return manifest.files.map((f) => ({
 		path: f.path,
 		size: f.size,
+		sha256: f.sha256 ?? null, // (packed files, tools/pack-gamefiles.py)
 		// tools/upload-gamefiles.sh also puts the game's files (all but the music) one after another
 		// in a pack, so a first import is a few big range requests instead of one per file (~1,600,
 		// each a round trip); copyFiles uses it, and open() for anything it can't.
@@ -324,9 +328,10 @@ export async function importGame(located, source, onProgress) {
 	const root = await gameRoot(true);
 	// A stale marker would claim a half-copied game is complete.
 	await root.removeEntry(MARKER).catch(() => {});
-	await copyFiles(root, located.content, onProgress);
+	await copyFiles(root, located.content, onProgress, { verifyAll: true });
 	const total = located.content.reduce((n, c) => n + c.from.size, 0);
-	const info = { source, exe: located.exe, darkWorld: located.darkWorld, files: located.content.length, bytes: total, at: new Date().toISOString() };
+	const verified = located.content.some((c) => c.from.sha256);
+	const info = { source, exe: located.exe, darkWorld: located.darkWorld, files: located.content.length, bytes: total, verified, at: new Date().toISOString() };
 	await writeMarker(root, info);
 	return info;
 }
@@ -364,7 +369,10 @@ async function writeMarker(root, info) {
 	await marker.close();
 }
 
-async function copyFiles(root, content, onProgress) {
+// Then checks the copied files that have a checksum (all of them with verifyAll, e.g. a first import,
+// or a game imported before checksums: a file can have the right size and the wrong bytes) and gets
+// any that don't match again, on its own; twice wrong is an error.
+async function copyFiles(root, content, onProgress, { verifyAll = false } = {}) {
 	const total = content.reduce((n, c) => n + c.from.size, 0);
 	const todo = await notStored(root, content);
 	let done = total - todo.reduce((n, c) => n + c.from.size, 0);
@@ -387,6 +395,47 @@ async function copyFiles(root, content, onProgress) {
 		copyLoose(todo.filter((c) => !c.from.pack), create, progress),
 	]);
 	await copyLoose(failed, create, progress);
+
+	const bad = await damaged(root, verifyAll ? content : todo);
+	if (bad.length === 0) return;
+	console.warn(`[import] ${bad.length} file(s) didn't match their checksum, getting them again: ${bad.slice(0, 5).map((c) => c.to).join(", ")}`);
+	for (const c of bad) {
+		c.copied = false;
+		c.from = { ...c.from, pack: null };
+		progress(-c.from.size);
+	}
+	await copyLoose(bad, create, progress);
+	const still = await damaged(root, bad);
+	if (still.length > 0) throw new Error(`${still[0].to} came down damaged twice. Check the connection and try again.`);
+}
+
+// The entries whose stored file doesn't match their checksum (only those with one, and not the
+// biggest files, which a phone would have to read into memory whole: the music bank).
+const VERIFY_MAX = 64 << 20;
+async function damaged(root, content) {
+	const check = content.filter((c) => c.from.sha256 && c.from.size <= VERIFY_MAX);
+	const bad = [];
+	let next = 0;
+	const worker = async () => {
+		while (next < check.length) {
+			const c = check[next++];
+			let ok = false;
+			try {
+				const parts = c.to.split("/");
+				const name = parts.pop();
+				const file = await (await (await getDir(root, parts, false)).getFileHandle(name)).getFile();
+				ok = file.size === c.from.size && (await sha256Hex(await file.arrayBuffer())) === c.from.sha256;
+			} catch {}
+			if (!ok) bad.push(c);
+		}
+	};
+	await Promise.all(Array.from({ length: 4 }, worker));
+	return bad;
+}
+
+async function sha256Hex(buffer) {
+	const digest = await crypto.subtle.digest("SHA-256", buffer);
+	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // One file at a time per connection, biggest first: the music bank alone is most of the bytes, so it
@@ -458,6 +507,12 @@ async function copyRun(run, create, progress) {
 	if (res.status !== 206) {
 		res.body?.cancel();
 		throw new Error(`HTTP ${res.status}, not a range`);
+	}
+	// The range that came back must be the one asked for, or every file in it gets other bytes.
+	const range = /^bytes (\d+)-(\d+)\//.exec(res.headers.get("Content-Range") ?? "");
+	if (!range || Number(range[1]) !== run.start || Number(range[2]) !== run.end - 1) {
+		res.body?.cancel();
+		throw new Error(`asked for bytes ${run.start}-${run.end - 1}, got ${res.headers.get("Content-Range") ?? "no Content-Range"}`);
 	}
 	const reader = res.body.getReader();
 	let at = run.start; // pack offset of the next byte from the reader
@@ -551,6 +606,7 @@ export async function syncFortRise(onProgress) {
 		from: {
 			path: f.path,
 			size: f.size,
+			sha256: f.sha256 ?? null,
 			open: async () => {
 				const r = await fetch("fortrise/" + f.path.split("/").map(encodeURIComponent).join("/"));
 				if (!r.ok) throw new Error(`Failed to fetch FortRise file ${f.path}: ${r.status}`);
@@ -559,7 +615,12 @@ export async function syncFortRise(onProgress) {
 		},
 		to: f.path,
 	}));
-	await copyFiles(root, content, onProgress);
-	await writeMarker(root, { version: manifest.version, at: new Date().toISOString() });
+	// Every file is checked once per FortRise version (and from then on only what's copied again).
+	let verified = false;
+	try {
+		verified = JSON.parse(await (await (await root.getFileHandle(MARKER)).getFile()).text()).verified === true;
+	} catch {}
+	await copyFiles(root, content, onProgress, { verifyAll: installed !== manifest.version || !verified });
+	await writeMarker(root, { version: manifest.version, verified: content.some((c) => c.from.sha256), at: new Date().toISOString() });
 	return manifest.version;
 }
