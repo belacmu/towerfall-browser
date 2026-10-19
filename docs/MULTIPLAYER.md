@@ -252,6 +252,9 @@ they're ever abused.
 - `tools/probe-page.mjs`: one headless browser; streams the in-page log.
 - `tools/netplay-driver.mjs`: several headless browsers (separate profiles), controlled over HTTP
   (keys, screenshots, log, eval), for lobby tests.
+- `statehash` (host command): logs a hash of the last state saved for each frame of an online session
+  (`[statehash] <frame> <hash> <length>`). Two runs of the same scripted `xnet` match, one with a browser-side
+  speedup turned off, must print the same lines (frame 0 can differ: its save at session start varies by timing).
 - `node cloudflare/tfex-server/local.mjs --log-checksums`: the local server prints every GGRS checksum report sent
   through its match relay (`xnet-*` rooms or `/relay/` matches), to check that a client change leaves them alone.
 - Lobby codes containing X can't be typed with the driver's `type` (X is also the menu's back
