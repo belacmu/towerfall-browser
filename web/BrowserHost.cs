@@ -239,6 +239,12 @@ public static partial class BrowserHost
 				TfexPatches.Apply();
 				ReplayRecordFix.Install();
 				AheadThreshold.Install();
+				// ?fullchecksum=1: GGRS's desync checksum on every save, as TF.EX does (by default only on the compared frames).
+				if (Environment.GetEnvironmentVariable("TOWERFALL_FULLCHECKSUM") == "1")
+				{
+					TowerFallBrowser.Netplay.GgrsFfiImports.netplay_set_checksum_every_frame(true);
+					Console.WriteLine("[netplay] GGRS checksum on every save (?fullchecksum=1)");
+				}
 				ReplayKeyStates.Apply();
 			}
 			// Commands wait until the main menu has been up for 5 s (mods register theirs late; until

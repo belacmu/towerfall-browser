@@ -816,6 +816,9 @@ async function startDotnet() {
 	// rehearse a lobby match against the Switch (relay, 60 Hz; web/Netplay/SwitchLobby.cs).
 	const tfexPlatform = new URLSearchParams(location.search).get("tfexplatform");
 	if (tfexPlatform) builder = builder.withEnvironmentVariable("TOWERFALL_TFEX_PLATFORM", tfexPlatform);
+	// ?fullchecksum=1: GGRS computes a desync checksum on every state save, as TF.EX does, instead of only on the
+	// frames it compares with the other players (netplay/ggrs-ffi.patch). Same checksums sent either way.
+	if (new URLSearchParams(location.search).get("fullchecksum") === "1") builder = builder.withEnvironmentVariable("TOWERFALL_FULLCHECKSUM", "1");
 	// A 16 MB GC nursery instead of the default 4 MB: TF.EX's rollback state saves allocate a few MB
 	// per second, and each minor collection stops every thread at a cost set by the surviving
 	// objects, not the nursery size, so 4x fewer of them (measured: 27 -> 7 per 5 s in the rollback

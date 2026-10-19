@@ -27,6 +27,11 @@ Before merging it:
 2. Rebase the patches. In a scratch clone of each repo at the new commit, run `patch -p1 < netplay/ggrs-ffi.patch` (and
    `ggrs.patch`), fix any rejects, then write the patch back with `git diff <commit>` (no `.orig` files).
    - `netplay/ggrs-ffi.patch` adds `netplay_set_pending_checksum` (`?digest=1`).
+   - It computes GGRS's desync checksum only for the frames GGRS sends one for (multiples of the desync interval), not
+     on every save; `netplay_set_checksum_every_frame` (`?fullchecksum=1`) restores every save. This relies on GGRS's
+     `check_checksum_send_interval` reading the saved state of exactly that frame: if a new GGRS reads other frames, or
+     anything else reads `GameStateCell::checksum()`, revisit it. Check with two pages and
+     `cloudflare/tfex-server/local.mjs --log-checksums` (the reports sent must not change with `?fullchecksum=1`).
    - It also swaps TF.EX's UDP relay (`relay.rs`) for `relay_browser.rs`, a relay that never connects.
    - It makes the relay's WebSocket/TLS crates non-Emscripten-only.
 3. Lockfile: copy `netplay/ggrs-ffi.Cargo.lock` into the scratch `core/`, then run `cargo +<toolchain> fetch` with the two

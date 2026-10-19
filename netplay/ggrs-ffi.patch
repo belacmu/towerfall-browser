@@ -18,10 +18,10 @@ index 44a88c8..042fae1 100644
 +[target.'cfg(not(target_os = "emscripten"))'.dependencies]
 +async-tungstenite = { version = "0.29", default-features = false, features = ["async-std-runtime", "async-tls"] }
 diff --git a/core/src/ffi.rs b/core/src/ffi.rs
-index e97ceba..e88faa4 100644
+index e97ceba..d909492 100644
 --- a/core/src/ffi.rs
 +++ b/core/src/ffi.rs
-@@ -172,6 +172,12 @@ pub unsafe extern "C" fn netplay_save_game_state(game_state: SafeBytes) -> Statu
+@@ -172,6 +172,18 @@ pub unsafe extern "C" fn netplay_save_game_state(game_state: SafeBytes) -> Statu
      np.handle_save_game_state_request(safe_game_state)
  }
  
@@ -29,6 +29,12 @@ index e97ceba..e88faa4 100644
 +#[no_mangle]
 +pub unsafe extern "C" fn netplay_set_pending_checksum(checksum: u64) {
 +    *crate::neplay::PENDING_CHECKSUM.lock().unwrap() = Some(checksum);
++}
++
++// true: a checksum on every save, as TF.EX does; false (default): only on the frames GGRS compares (neplay.rs).
++#[no_mangle]
++pub unsafe extern "C" fn netplay_set_checksum_every_frame(every_frame: bool) {
++    crate::neplay::CHECKSUM_EVERY_FRAME.store(every_frame, std::sync::atomic::Ordering::Relaxed);
 +}
 +
  #[no_mangle]
@@ -63,10 +69,18 @@ index a32af58..093be4b 100644
              .worker_threads(4)
              .enable_all()
 diff --git a/core/src/neplay.rs b/core/src/neplay.rs
-index 8acf2ff..014e241 100644
+index 8acf2ff..a834fdc 100644
 --- a/core/src/neplay.rs
 +++ b/core/src/neplay.rs
-@@ -34,6 +34,10 @@ use crate::{
+@@ -3,6 +3,7 @@ use futures_timer::Delay;
+ use matchbox_socket::{PeerId, WebRtcSocket};
+ use std::collections::HashSet;
+ use std::net::SocketAddr;
++use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+ use std::sync::{Arc, Mutex};
+ use std::thread::sleep;
+ use std::time::{Duration, Instant};
+@@ -34,6 +35,17 @@ use crate::{
  
  const DESYNC_CHECK_INTERVAL: u32 = 120;
  
@@ -74,23 +88,58 @@ index 8acf2ff..014e241 100644
 +// of fletcher16 of the serialized state, so a peer that can't serialize TF.EX's state (the Switch) can compare a digest.
 +pub static PENDING_CHECKSUM: Mutex<Option<u64>> = Mutex::new(None);
 +
++// Browser: GGRS only sends a checksum for frames that are multiples of the desync interval (P2PSession's
++// check_checksum_send_interval), so only those saves compute one; the others store None. The same values reach
++// the wire either way. CHECKSUM_EVERY_FRAME (ffi netplay_set_checksum_every_frame) restores TF.EX's checksum on
++// every save. Sync tests compare every frame, so they always get one.
++static CHECKSUM_INTERVAL: AtomicU32 = AtomicU32::new(0);
++pub static CHECKSUM_EVERY_FRAME: AtomicBool = AtomicBool::new(false);
++
  pub struct Netplay {
      pub local_player_handle: Option<usize>,
      pub remote_player_handles: Vec<usize>,
-@@ -814,8 +818,11 @@ impl Netplay {
+@@ -191,7 +203,11 @@ impl Netplay {
+             .with_catchup_speed(scale(4).max(1))
+             .unwrap()
+             .with_desync_detection_mode(DesyncDetection::On {
+-                interval: DESYNC_CHECK_INTERVAL * fps as u32 / 60,
++                interval: {
++                    let interval = DESYNC_CHECK_INTERVAL * fps as u32 / 60;
++                    CHECKSUM_INTERVAL.store(interval, Ordering::Relaxed);
++                    interval
++                },
+             })
+     }
+ 
+@@ -814,12 +830,23 @@ impl Netplay {
                  GgrsRequest::SaveGameState { cell, frame } => {
                      assert_eq!(self.game_state.frame(), *frame);
  
 -                    let buffer = bincode::serialize(&game_state.data()).unwrap();
 -                    let checksum = fletcher16(&buffer) as u128;
+-                    cell.save(*frame, Some(game_state.clone()), Some(checksum as u128));
+-
+-                    self.game_state = game_state.clone();
++                    // Taken on every save, so a digest never outlives the save it was set for.
 +                    let pending = PENDING_CHECKSUM.lock().unwrap().take();
-+                    let checksum = match pending {
++                    let interval = CHECKSUM_INTERVAL.load(Ordering::Relaxed) as i32;
++                    let compared = self.is_test
++                        || CHECKSUM_EVERY_FRAME.load(Ordering::Relaxed)
++                        || interval <= 0
++                        || *frame % interval == 0;
++                    let checksum = compared.then(|| match pending {
 +                        Some(digest) => digest as u128,
 +                        None => fletcher16(&bincode::serialize(&game_state.data()).unwrap()) as u128,
-+                    };
-                     cell.save(*frame, Some(game_state.clone()), Some(checksum as u128));
++                    });
++
++                    // Only the frame of self.game_state is read after a save (game_state(), the assert above), so
++                    // the state moves into the cell instead of being copied twice.
++                    self.game_state = GameState::empty();
+                     self.game_state.update_frame(*frame);
++                    cell.save(*frame, Some(game_state), checksum);
  
-                     self.game_state = game_state.clone();
+                     self.requests.remove(0);
+ 
 diff --git a/core/src/relay_browser.rs b/core/src/relay_browser.rs
 new file mode 100644
 index 0000000..1b5f0b7

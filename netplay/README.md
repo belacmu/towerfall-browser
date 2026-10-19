@@ -7,7 +7,9 @@ into the app:
 
 - `ggrs-ffi.patch`, `ggrs.patch`: small changes to the pinned upstream commits. Tokio is
   single-threaded on Emscripten, GGRS's clock no longer assumes wasm-bindgen, and one Rust 1.87
-  API is backported for the pinned compiler.
+  API is backported for the pinned compiler. A save computes the desync checksum only on the
+  frames GGRS sends one for (every 120th at 60 Hz, 480th at 240 Hz), so every peer still gets the
+  same checksums; `?fullchecksum=1` computes it on every save, as TF.EX does.
 - `matchbox-browser/`: takes the place of `matchbox_socket` 0.12 (only the API ggrs-ffi uses),
   calling into `tfnet.js`.
 - `tfnet.js`: an Emscripten JS library on the page's main thread. It does matchbox's signaling
