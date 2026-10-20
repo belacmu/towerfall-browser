@@ -13,6 +13,7 @@ import { Matchmaker } from "./matchmaker.js";
 import { allowedOrigins, lobbyFreeRelay, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
 import { maxReport, MemoryReports, parseReport, RateLimit, reportSource, SWITCH_PER_ADDRESS_PER_HOUR } from "./reports.js";
+import { looksLikeZip, MATCH_PER_ADDRESS_PER_HOUR, matchReportKey, matchReportRequest, MAX_MATCH_REPORT, MemoryMatchReports } from "./match-reports.js";
 import { SignalRoom } from "./signal.js";
 import { RelayRoom } from "./relay.js";
 
@@ -168,9 +169,44 @@ class Connection {
 const reportStore = new MemoryReports();
 const reportLimit = new RateLimit();
 const switchReportLimit = new RateLimit(SWITCH_PER_ADDRESS_PER_HOUR);
+// TF.EX's match reports (match-reports.js), in memory; GET /reports/match needs no key here either.
+const matchStore = new MemoryMatchReports();
+const matchLimit = new RateLimit(MATCH_PER_ADDRESS_PER_HOUR);
 
 const server = createServer(async (req, res) => {
 	const url = new URL(req.url, "http://localhost");
+	if (url.pathname === "/report" && matchReportRequest(url)) {
+		const origin = req.headers.origin;
+		if (origin && !originAllowed(origin, origins)) return res.writeHead(403).end();
+		const headers = { "Cache-Control": "no-store", Vary: "Origin", ...(origin ? { "Access-Control-Allow-Origin": origin } : {}) };
+		if (req.method === "OPTIONS") return res.writeHead(204, { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" }).end();
+		if (req.method !== "POST") return res.writeHead(405, headers).end();
+		const chunks = [];
+		let size = 0;
+		for await (const chunk of req) {
+			size += chunk.length;
+			if (size > MAX_MATCH_REPORT) return res.writeHead(413, headers).end();
+			chunks.push(chunk);
+		}
+		const bytes = new Uint8Array(Buffer.concat(chunks));
+		if (!looksLikeZip(bytes)) return res.writeHead(400, headers).end();
+		if (!matchLimit.allow(req.socket.remoteAddress ?? "")) return res.writeHead(429, headers).end();
+		const meta = matchReportRequest(url);
+		const key = matchReportKey(meta);
+		matchStore.put(key, bytes, { ...meta, from: origin ? "page" : "client" });
+		if (verbose) console.log(`[tfex-server] match report ${key} (${bytes.byteLength} bytes)`);
+		return res.writeHead(204, headers).end();
+	}
+	if (url.pathname === "/reports/match") {
+		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+		return res.end(JSON.stringify({ reports: matchStore.list(), cursor: null }));
+	}
+	if (url.pathname.startsWith("/reports/match/")) {
+		const bytes = matchStore.get(decodeURIComponent(url.pathname.slice("/reports/match/".length)));
+		if (!bytes) return res.writeHead(404).end();
+		res.writeHead(200, { "Content-Type": "application/zip", "Cache-Control": "no-store" });
+		return res.end(Buffer.from(bytes));
+	}
 	if (url.pathname === "/report") {
 		// From a page (allowed origins), or the Switch's (no Origin; reports.js).
 		const origin = req.headers.origin;

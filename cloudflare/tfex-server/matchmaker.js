@@ -73,7 +73,8 @@ export class Matchmaker {
 			// (rooms stored before TF.EX 0.21 support)
 			room.measured = room.measured instanceof Set ? room.measured : new Set();
 			room.timers.checkConnections ??= null;
-			for (const [k, v] of Object.entries({ RelayedPairs: [], IsCheckingConnections: false, IsReportEnabled: false, MatchPlayers: [] })) room.lobby[k] ??= v;
+			for (const [k, v] of Object.entries({ RelayedPairs: [], IsCheckingConnections: false, IsReportEnabled: true, MatchPlayers: [] })) room.lobby[k] ??= v;
+			room.lobby.IsReportEnabled = true; // (lobbies saved before reports were on)
 			this.rooms.set(room.lobby.RoomId, room);
 		}
 		for (const room of [...this.rooms.values()]) {
@@ -649,7 +650,7 @@ export class Matchmaker {
 					Series: null,
 					RelayedPairs: [],
 					IsCheckingConnections: false,
-					IsReportEnabled: false,
+					IsReportEnabled: true,
 					MatchPlayers: [],
 					MissingVariants: [],
 				};
@@ -719,7 +720,7 @@ const handlers = {
 			Series: null,
 			RelayedPairs: [],
 			IsCheckingConnections: false,
-			IsReportEnabled: false,
+			IsReportEnabled: true, // TF.EX's MatchReport: desync / disconnect / crash zips (match-reports.js)
 			MatchPlayers: [],
 			MissingVariants: [],
 		};
