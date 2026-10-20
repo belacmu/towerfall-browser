@@ -11,6 +11,8 @@
 //    configured) for browser pages whose peer is in that lobby.
 //  - POST /report, GET /reports: the pages' performance reports (reports.js), kept in one Reports
 //    object.
+//  - POST /report?group=&name=&kind=: TF.EX's own match reports (match-reports.js), zips kept in the
+//    MATCH_REPORTS R2 bucket; GET /reports/match and /reports/match/<key> (STATUS_KEY) read them.
 // The logic lives in matchmaker.js, signal.js and relay.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
@@ -20,6 +22,7 @@ import { RelayRoom } from "./relay.js";
 import { allowedOrigins, lobbyFreeRelay, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
 import { KEEP, LIST_LIMIT, maxReport, parseReport, RateLimit, reportSource, SWITCH_PER_ADDRESS_PER_HOUR, TAG_OLD_ONLINE_REPORTS } from "./reports.js";
+import { looksLikeZip, MATCH_LIST_LIMIT, MATCH_PER_ADDRESS_PER_HOUR, matchReportKey, matchReportRequest, MAX_MATCH_REPORT } from "./match-reports.js";
 
 export default {
 	async fetch(request, env) {
@@ -28,8 +31,9 @@ export default {
 		if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
 			if (url.pathname === "/turn") return turn(request, env);
 			if (url.pathname === "/status") return status(request, env);
-			if (url.pathname === "/report") return report(request, env);
+			if (url.pathname === "/report") return matchReportRequest(url) ? matchReport(request, env, url) : report(request, env);
 			if (url.pathname === "/reports") return reports(request, env);
+			if (url.pathname === "/reports/match" || url.pathname.startsWith("/reports/match/")) return matchReports(request, env, url);
 			if (url.pathname === "/") {
 				return new Response("TF.EX-compatible server (towerfall-browser). WebSocket endpoints: /ws, /room/<id>?peer=<uuid>, /ping_measurement/<id>?peer=<uuid>, /relay/<id>?peer=<uuid>\n");
 			}
@@ -107,6 +111,46 @@ async function report(request, env) {
 	const forward = new Request("https://reports/add", { method: "POST", body, headers: { "X-Client-IP": clientIp(request) ?? "", "X-Report-Source": source } });
 	const r = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(forward);
 	return new Response(null, { status: r.status, headers });
+}
+
+// One of TF.EX's match reports (match-reports.js): a zip, from desktop TF.EX or the Switch (no Origin)
+// or the site's pages.
+async function matchReport(request, env, url) {
+	const origin = request.headers.get("Origin");
+	if (origin && !originAllowed(origin, allowedOrigins(env.ALLOWED_ORIGINS))) return new Response("Forbidden", { status: 403 });
+	const headers = { "Cache-Control": "no-store", Vary: "Origin", ...(origin ? { "Access-Control-Allow-Origin": origin } : {}) };
+	if (request.method === "OPTIONS") {
+		return new Response(null, { status: 204, headers: { ...headers, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" } });
+	}
+	if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers });
+	if (!env.MATCH_REPORTS) return new Response(null, { status: 503, headers });
+	if (Number(request.headers.get("Content-Length") ?? 0) > MAX_MATCH_REPORT) return new Response("Too large", { status: 413, headers });
+	const bytes = new Uint8Array(await request.arrayBuffer());
+	if (bytes.byteLength > MAX_MATCH_REPORT) return new Response("Too large", { status: 413, headers });
+	if (!looksLikeZip(bytes)) return new Response("Not a zip", { status: 400, headers });
+	const allow = await env.REPORTS.get(env.REPORTS.idFromName("reports")).fetch(new Request("https://reports/allow-match", { method: "POST", headers: { "X-Client-IP": clientIp(request) ?? "" } }));
+	if (allow.status !== 204) return new Response(null, { status: 429, headers });
+	const meta = matchReportRequest(url);
+	await env.MATCH_REPORTS.put(matchReportKey(meta), bytes, { httpMetadata: { contentType: "application/zip" }, customMetadata: { ...meta, from: origin ? "page" : "client" } });
+	return new Response(null, { status: 204, headers });
+}
+
+// TF.EX's match reports, for whoever has STATUS_KEY: GET /reports/match[?cursor=] lists them (oldest
+// first), GET /reports/match/<key> returns one zip.
+async function matchReports(request, env, url) {
+	if (!hasStatusKey(request, env) || !env.MATCH_REPORTS) return new Response("Not found", { status: 404 });
+	const key = decodeURIComponent(url.pathname.slice("/reports/match/".length));
+	if (url.pathname.startsWith("/reports/match/") && key) {
+		if (!key.startsWith("match/")) return new Response("Not found", { status: 404 });
+		const object = await env.MATCH_REPORTS.get(key);
+		if (!object) return new Response("Not found", { status: 404 });
+		return new Response(object.body, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${key.split("/").pop()}"`, "Cache-Control": "no-store" } });
+	}
+	const listed = await env.MATCH_REPORTS.list({ prefix: "match/", limit: MATCH_LIST_LIMIT, cursor: url.searchParams.get("cursor") || undefined, include: ["customMetadata"] });
+	return Response.json(
+		{ reports: listed.objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded, ...o.customMetadata })), cursor: listed.truncated ? listed.cursor : null },
+		{ headers: { "Cache-Control": "no-store" } },
+	);
 }
 
 // The stored reports, for whoever has STATUS_KEY.
@@ -337,6 +381,7 @@ export class ReportsObject extends DurableObject {
 		super(ctx, env);
 		this.limit = new RateLimit();
 		this.switchLimit = new RateLimit(SWITCH_PER_ADDRESS_PER_HOUR);
+		this.matchLimit = new RateLimit(MATCH_PER_ADDRESS_PER_HOUR);
 		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, report TEXT NOT NULL)");
 		ctx.storage.sql.exec(TAG_OLD_ONLINE_REPORTS);
 	}
@@ -353,6 +398,7 @@ export class ReportsObject extends DurableObject {
 			sql.exec("DELETE FROM reports WHERE id <= (SELECT MAX(id) FROM reports) - ?", KEEP);
 			return new Response(null, { status: 204 });
 		}
+		if (url.pathname === "/allow-match") return new Response(null, { status: this.matchLimit.allow(request.headers.get("X-Client-IP") ?? "") ? 204 : 429 });
 		if (url.pathname === "/list") {
 			const since = Number(url.searchParams.get("since") ?? 0) || 0;
 			const rows = sql.exec("SELECT id, at, report FROM reports WHERE id > ? ORDER BY id LIMIT ?", since, LIST_LIMIT).toArray();

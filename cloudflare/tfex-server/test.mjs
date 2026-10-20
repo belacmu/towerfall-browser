@@ -169,6 +169,26 @@ test("reports: the site's pages can send one; other pages, non-reports and huge 
 	}
 });
 
+test("match reports: TF.EX's zips (desync / disconnect / crash) are kept and listed; not-zips are refused", async () => {
+	const http = base.replace(/^ws/, "http");
+	// An empty zip (its end record) plus a marker, like MatchReport.Upload's body.
+	const marker = `m${Math.floor(Math.random() * 1e9)}`;
+	const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0), ...new TextEncoder().encode(marker)]);
+	const send = (query, body, origin) => fetch(`${http}/report?${query}`, { method: "POST", body, headers: origin ? { Origin: origin } : {} });
+	eq((await send(`group=ALICE-BOB&name=ALICE&kind=desync`, zip)).status, 204, "desktop / Switch (no Origin)");
+	eq((await send(`group=ALICE-BOB&name=BOB&kind=disconnect`, zip, "https://belacmu.github.io")).status, 204, "the site's pages");
+	eq((await send(`group=ALICE-BOB&name=EVE&kind=crash`, zip, "https://example.com")).status, 403, "another page");
+	eq((await send(`group=ALICE-BOB&name=ALICE&kind=desync`, "not a zip")).status, 400, "not a zip");
+	eq((await send(`group=ALICE-BOB&name=ALICE&kind=other`, zip)).status, 400, "another kind goes to the performance reports (and isn't one)");
+	if (child) {
+		const { reports } = await (await fetch(http + "/reports/match")).json();
+		const mine = reports.filter((r) => r.group === "ALICE-BOB");
+		eq(mine.slice(-2).map((r) => [r.kind, r.name, r.from]), [["desync", "ALICE", "client"], ["disconnect", "BOB", "page"]], "listed");
+		const got = new Uint8Array(await (await fetch(`${http}/reports/match/${encodeURIComponent(mine.at(-1).key)}`)).arrayBuffer());
+		eq(new TextDecoder().decode(got.slice(22)), marker, "the zip comes back as sent");
+	}
+});
+
 test("reports: the Switch's (kind switch, no Origin) are taken, bigger and more often; only that kind without an Origin", async () => {
 	const http = base.replace(/^ws/, "http");
 	const send = (body, origin) => fetch(http + "/report", { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body });
@@ -446,7 +466,7 @@ test("core: TF.EX 0.21 lobby fields; MatchPlayers is the match's players, cleare
 	const mm = await core();
 	const { A, B, all } = started(mm);
 	const l = A.last("LobbyUpdate").lobby;
-	eq([l.RelayedPairs, l.IsCheckingConnections, l.IsReportEnabled], [[], false, false], "0.21 fields");
+	eq([l.RelayedPairs, l.IsCheckingConnections, l.IsReportEnabled], [[], false, true], "0.21 fields (match reports on)");
 	eq(l.MatchPlayers.map((p) => p.Name), ["ALICE", "P1"], "MatchPlayers at the start");
 	for (const c of all) c.do({ MatchEnded: { winner_seat: 0, frame: 1000, checksum: null, scores: [5, 2] } });
 	A.do({ RematchLobbyChoice: {} });

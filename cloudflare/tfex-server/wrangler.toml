@@ -22,6 +22,11 @@ class_name = "ReportsObject"
 name = "RELAYS"
 class_name = "RelayRoomObject"
 
+# TF.EX's match reports (match-reports.js): zips, dropped after 60 days by the bucket's lifecycle rule.
+[[r2_buckets]]
+binding = "MATCH_REPORTS"
+bucket_name = "tfex-match-reports"
+
 # SQLite-backed Durable Objects are the ones the Workers free plan includes.
 [[migrations]]
 tag = "v1"
