@@ -14,11 +14,11 @@ namespace TowerFallBrowser;
 // UpdatePlayer says Platform "Switch" is the signal (TF.EX only shows a notice for it). When this page
 // starts a match (MapScene.StartSession -> NetplayManager.UpdatePlayers) in a lobby with a Switch player
 // in it, of any size, until the game is back at the main menu:
-//  - the session runs at 60 Hz (TfexFps.SetSessionRate): the Switch runs its session at the game's own
-//    60 Hz, where TF.EX runs 240 (and can't do 240 there), and GGRS peers must agree on the rate;
-//  - GGRS's desync checksums are the gameplay digest (GameplayDigest.cs): the Switch can't produce TF.EX's
-//    checksum (fletcher16 of TF.State's serialized state); every peer sees the same lobby, so all agree;
-//  - no spectators: the Switch doesn't serve them.
+//  - the session runs at 60 Hz (TfexFps.SetSessionRate): the Switch runs its session at 60 Hz (not yet TF.EX's
+//    240), and GGRS peers must agree on the rate;
+//  - no spectators: the Switch can't serve spectators at 60 Hz yet.
+// GGRS's desync checksum is TF.EX's own (fletcher16 of TF.State's state): the Switch rolls back with TF.State's own
+// state bytes, identical to the PC's.
 // A lobby of only browsers runs at 60 Hz with no spectators too (a browser-only rule, docs/BROWSER-60HZ.md); every
 // lobby with a desktop TF.EX player in it is left exactly as TF.EX makes it.
 // ?tfexplatform=Switch (TOWERFALL_TFEX_PLATFORM) makes this page claim that platform itself, so two
@@ -32,7 +32,6 @@ public static class SwitchLobby
 	public const string BrowserPlatform = "Browser";
 	public const int SessionFps = 60;
 
-	private static bool active; // this session plays a Switch (the gameplay digest)
 	private static bool lowRate; // this session runs at SessionFps (a Switch lobby, or browsers only)
 	private static object manager; // TF.EX's NetplayManager
 	private static PropertyInfo ggrsConfig, netplayConfig, serverConf, localPeerId, spectators;
@@ -41,7 +40,6 @@ public static class SwitchLobby
 	private static Type mainMenu, engineType;
 	private static PropertyInfo engineScene;
 
-	public static bool Active => active;
 
 	public static void Patch(Harmony harmony)
 	{
@@ -85,8 +83,6 @@ public static class SwitchLobby
 		harmony.Patch(addLate, prefix: noSpectators);
 		harmony.Patch(addSpectators, prefix: noSpectators);
 		harmony.Patch(sceneTransition, postfix: new HarmonyMethod(typeof(SwitchLobby).GetMethod(nameof(SceneTransitionPostfix), all)));
-		if (GameplayDigestHook.Install(mainMenu.Assembly) is string digestError)
-			Console.WriteLine($"[netplay] Switch lobbies: no gameplay digest ({digestError}); GGRS will report desyncs against a Switch");
 		string asked = Environment.GetEnvironmentVariable("TOWERFALL_TFEX_PLATFORM");
 		ClaimPlatform(harmony, string.IsNullOrEmpty(asked) && OperatingSystem.IsBrowser() ? BrowserPlatform : asked, debug: !string.IsNullOrEmpty(asked));
 	}
@@ -120,12 +116,10 @@ public static class SwitchLobby
 				Stop();
 				return;
 			}
-			spectators.SetValue(netplay, new List<string>());
+			spectators.SetValue(netplay, new List<string>()); // the Switch can't serve spectators at 60 Hz yet
 			lowRate = true;
-			active = switchLobby;
-			TfexFps.SetSessionRate(SessionFps);
+			TfexFps.SetSessionRate(SessionFps); // the Switch runs 60 Hz (not yet TF.EX's 240); GGRS peers must agree
 			Console.WriteLine($"[netplay] {(switchLobby ? "Switch" : "Browser")} lobby: this match ({players.Count} players) runs at {SessionFps} Hz over TF.EX's room, no spectators");
-			if (switchLobby && !GameplayDigestHook.Enabled) Console.WriteLine($"[digest] on for this match (a Switch player): GGRS checksums are the gameplay digest (version {GameplayDigest.Version})");
 		}
 		catch (Exception e)
 		{
@@ -136,11 +130,11 @@ public static class SwitchLobby
 	private static void Stop()
 	{
 		if (!lowRate) return;
-		lowRate = active = false;
+		lowRate = false;
 		TfexFps.SetSessionRate(0);
 	}
 
-	// The Switch serves no spectators, and a spectator joining a 60 Hz browser lobby may be desktop TF.EX at 240.
+	// The Switch can't serve spectators at 60 Hz yet, and a spectator joining a 60 Hz browser lobby may be desktop TF.EX at 240.
 	private static bool SpectatorsPrefix(MethodBase __originalMethod)
 	{
 		if (!lowRate) return true;
