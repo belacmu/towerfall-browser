@@ -724,6 +724,13 @@ public static partial class BrowserHost
 				Console.WriteLine($"[command] xnet: {XplayVersus.StartNet(towerFall, game, words)}");
 				return;
 			}
+			if (words[0] == "statedump")
+			{
+				// Switch harness (local only): every Nth GGRS save's TF.State bytes (web/Netplay/StateDump.cs); ?statedump=N.
+				string error = StateDump.Enable(words.Length > 1 && int.TryParse(words[1], out int n) ? n : 60);
+				Console.WriteLine(error == null ? "[state] dump ready" : $"[state] dump error: {error}");
+				return;
+			}
 			if (words[0] == "xlobby")
 			{
 				// xnet's log and scripted input for the next match started from a TF.EX lobby (web/Netplay/XplayLobby.cs).

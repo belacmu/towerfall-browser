@@ -979,6 +979,9 @@ async function main() {
 	self.towerfallSlowCpu = (factor) => exports.BrowserHost.SetSlowCpu(factor);
 	const slowCpu = Number(new URLSearchParams(location.search).get("slowcpu"));
 	if (slowCpu > 1) await exports.BrowserHost.SetSlowCpu(slowCpu);
+	// ?statedump=N (Switch harness, local only): every Nth GGRS save's TF.State bytes (web/Netplay/StateDump.cs).
+	const stateDump = new URLSearchParams(location.search).get("statedump");
+	if (stateDump != null) await exports.BrowserHost.RunCommand(`statedump ${Number(stateDump) || 60}`);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}
