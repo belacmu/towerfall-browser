@@ -7,7 +7,7 @@ namespace TowerFallBrowser.Netplay;
 // browser build links statically (tools/build-netplay.sh). WebAssembly needs the call glue for every
 // P/Invoke signature generated at build time, from declarations it can see; TF.EX's own declarations
 // only arrive with the mod. These mirror TF.EX's Externals/GGRSFFI.cs (same library, entry points
-// and blittable layouts) and are never called from here, except netplay_set_pending_checksum and netplay_set_checksum_every_frame, which TF.EX doesn't have.
+// and blittable layouts) and are never called from here, except netplay_set_checksum_every_frame, which TF.EX doesn't have.
 internal static class GgrsFfiImports
 {
 	[StructLayout(LayoutKind.Sequential)]
@@ -60,9 +60,7 @@ internal static class GgrsFfiImports
 	[DllImport("ggrs_ffi")] internal static extern void netplay_requests_free(NetplayRequets requests);
 	[DllImport("ggrs_ffi")] internal static extern Status netplay_save_game_state(SafeBytesFFI gameState);
 	[DllImport("ggrs_ffi")] internal static extern Inputs netplay_advance_game_state();
-	// Ours (netplay/ggrs-ffi.patch), called by GameplayDigestHook: the checksum of the state the next save hands GGRS.
-	[DllImport("ggrs_ffi")] internal static extern void netplay_set_pending_checksum(ulong checksum);
-	// Ours: true for a checksum on every save (TF.EX's way), false (default) for only the frames GGRS compares.
+	// Ours (netplay/ggrs-ffi.patch): true for a checksum on every save (TF.EX's way), false (default) for only the frames GGRS compares.
 	[DllImport("ggrs_ffi")] internal static extern void netplay_set_checksum_every_frame([MarshalAs(UnmanagedType.U1)] bool everyFrame);
 	[DllImport("ggrs_ffi")] internal static extern ActionResult netplay_load_game_state();
 	[DllImport("ggrs_ffi")] internal static extern void netplay_inputs_free(Inputs inputs);

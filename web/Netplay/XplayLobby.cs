@@ -13,7 +13,7 @@ namespace TowerFallBrowser;
 // `xlobby`: the xnet log and scripted input (XplayNet.cs) for a match started from a real TF.EX lobby (create / join, archer
 // select, ready, start), e.g. a rehearsal of a lobby match against the Switch (?tfexplatform=Switch on one page; SwitchLobby.cs).
 //
-//   xlobby [script0=<path or inline>] [script1=..] [maxticks=N] [origin=266] [margin=24] [digest=1]
+//   xlobby [script0=<path or inline>] [script1=..] [maxticks=N] [origin=266] [margin=24]
 //
 // Run it before the match (e.g. ?command=xlobby ...): it only arms the logging. Unlike xnet nothing of TF.EX's lobby path is
 // replaced: TF.EX's own mode (NetplayRoundLogic), seats and handles, seed, archers, the first round spawned on the first
@@ -52,8 +52,6 @@ public static partial class XplayVersus
 		maxTicks = Opt("maxticks", 6000);
 		netInputOrigin = Opt("origin", 266);
 		netMargin = Opt("margin", 24);
-		// digest=1: GGRS checksums are the gameplay digest (GameplayDigest.cs), for a match against the Switch with its npdigest on.
-		if (Opt("digest", 0) == 1 && GameplayDigestHook.Enable(towerFall) is string digestError) return "digest: " + digestError;
 		for (int i = 0; i < 2; i++)
 		{
 			string s = options.TryGetValue($"script{i}", out string sc) ? sc : "-";

@@ -7,8 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BASE=${1:-http://localhost:8080/}
-# ?tfexplatform=Switch also checks SwitchLobby's platform claim; digest=1 GameplayDigest's hooks.
-URL="${BASE%/}/?mute&nointro&autoplay&mods=TF.EX&tfexplatform=Switch&digest=1"
+# ?tfexplatform=Switch also checks SwitchLobby's platform claim.
+URL="${BASE%/}/?mute&nointro&autoplay&mods=TF.EX&tfexplatform=Switch"
 log=$(mktemp)
 trap 'rm -rf "$log" "$HOME/.towerfall-browser/tfexcheck-profile"' EXIT
 node tools/probe-page.mjs --url "$URL" --seconds "${SECONDS_TO_RUN:-150}" --profile tfexcheck --port 9341 > "$log" 2>&1 || true
@@ -25,7 +25,6 @@ expect=(
 	"slowing down from [0-9]+ ticks ahead"              # AheadThreshold
 	"Online catch-up capped"                            # TickCatchUp
 	"this page says it plays on \"Switch\""             # SwitchLobby.ClaimPlatform
-	"\[digest\] on: GGRS checksums"                     # GameplayDigest
 )
 # Lines a patch logs when TF.EX isn't as it expects.
 refuse="MISSING|isn't as expected|members missing|changed \(|not found|couldn't|stays as it is|Unhandled|Exception"

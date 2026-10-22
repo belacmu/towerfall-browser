@@ -16,7 +16,7 @@ namespace TowerFallBrowser;
 // sync-test version, and Towerfall Switch Mods/switch-online/BROWSER-RELAY.md for the full description).
 //
 //   xnet <roomUrl> <seat 0|1> <localPeerUuid> <remotePeerUuid> [script=<path or inline>] [seed=42] [maxticks=N] [fps=60]
-//        [delay=D] [origin=266] [host=1] [hello=1] [synctimeout=120] [margin=24] [replay=off] [variants=NO_AUTOBALANCE,SYMMETRICAL_TREASURE] [digest=1]
+//        [delay=D] [origin=266] [host=1] [hello=1] [synctimeout=120] [margin=24] [replay=off] [variants=NO_AUTOBALANCE,SYMMETRICAL_TREASURE]
 //
 // roomUrl is a room URL in the sense of ggrs-ffi: a relay one (ws://localhost:PORT/relay/<room>, see netplay/tfnet.js; ?peer=<local>&remote=<remote>
 // [&hello=1] is appended here) or a matchbox one (then it is a normal WebRTC match; the peers must be in one matchbox room).
@@ -111,8 +111,6 @@ public static partial class XplayVersus
 		if (Opt("fps", 60) != 60) return "fps must be 60 (the Switch's rate; the page needs tfexfps=60)";
 		bool host = Opt("host", 0) == 1;
 		bool replayOff = options.TryGetValue("replay", out string rp) && rp == "off";
-		// digest=1: GGRS checksums are the gameplay digest (GameplayDigest.cs); the other side (the Switch: npdigest 1) must do the same.
-		if (Opt("digest", 0) == 1 && GameplayDigestHook.Enable(towerFall) is string digestError) return "digest: " + digestError;
 		string scriptArg = options.TryGetValue("script", out string sc) ? sc : "-";
 		if (scriptArg.Length > 0 && scriptArg != "-" && !scriptArg.Contains(':') && File.Exists(scriptArg)) scriptArg = File.ReadAllText(scriptArg).Trim();
 		scripts[0] = new List<Step>();
