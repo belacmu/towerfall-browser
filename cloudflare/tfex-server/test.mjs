@@ -474,6 +474,19 @@ test("core: TF.EX 0.21 lobby fields; MatchPlayers is the match's players, cleare
 	eq(B.last("LobbyUpdate").lobby.MatchPlayers, [], "cleared at archer select");
 });
 
+test("core: TF.EX 0.22's StartsWithoutHat is passed on (true / false), anything else is null", async () => {
+	const mm = await core();
+	const { A, others } = readyLobby(mm);
+	const B = others[0];
+	const own = (c, name) => c.last("LobbyUpdate").lobby.Players.find((p) => p.Name === name);
+	A.do({ UpdatePlayer: { player: { ...own(A, "ALICE"), StartsWithoutHat: true } } });
+	B.do({ UpdatePlayer: { player: { ...own(B, "P1"), StartsWithoutHat: "yes" } } });
+	const players = B.last("LobbyUpdate").lobby.Players;
+	eq(players.map((p) => p.StartsWithoutHat), [true, null], "StartsWithoutHat");
+	A.do({ UpdatePlayer: { player: { ...own(A, "ALICE"), StartsWithoutHat: false } } });
+	eq(B.last("LobbyUpdate").lobby.Players[0].StartsWithoutHat, false, "false stays false");
+});
+
 test("core: players without ping measurement (0.19, the Switch build) start at once; PeerMeasured makes one count", async () => {
 	const mm = await core();
 	const { A, all } = readyLobby(mm, {}, 2, null);

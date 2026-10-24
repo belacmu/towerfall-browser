@@ -264,6 +264,7 @@ export class Matchmaker {
 			Team: team >= -1 && team <= 1 ? team : -1,
 			CustomArcherId: clean(p.CustomArcherId, 128),
 			ArcherMods: strings(p.ArcherMods, 64, 128),
+			StartsWithoutHat: typeof p.StartsWithoutHat === "boolean" ? p.StartsWithoutHat : null,   // TF.EX 0.22: the archer spawns without a hat (null: the game's own rule)
 			CustomVariants: strings(p.CustomVariants, 256, 128),
 			UseInstantReplay: p.UseInstantReplay === true,
 			HaveModifiedGameFiles: p.HaveModifiedGameFiles === true,
