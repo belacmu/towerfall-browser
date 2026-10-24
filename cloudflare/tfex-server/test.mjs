@@ -615,6 +615,43 @@ test("core: settings changes un-ready everyone; seats stay unique", async () => 
 	eq(E.last("LobbyUpdate"), undefined, "only the host changes settings");
 });
 
+test("core: local players (AddLocalPlayer): a seat after the device's first, UpdatePlayer by seat, one device leaving removes them all", async () => {
+	const mm = await core();
+	const A = new FakeConn(mm, "ALICE");
+	const sent = builtLobby("ALICE");
+	sent.MaxPlayers = 3;
+	A.do({ CreateLobby: { lobby: sent } });
+	const { lobby } = A.last("CreateLobbyResponse");
+	const B = new FakeConn(mm, "BOB");
+	B.do({ JoinPrivate: { code: lobby.JoinCode, name: "BOB", is_player: true } });
+	const bob = B.last("PrivateJoinResult").lobby.Players.find((p) => p.Name === "BOB");
+	B.do({ AddLocalPlayer: { player: { Name: "BOB 2", IsHost: true, Seat: 0 } } });
+	let l = A.last("LobbyUpdate").lobby;
+	const guest = l.Players.find((p) => p.Name === "BOB 2");
+	assert(guest && guest.RoomPeerId === bob.RoomPeerId && guest.Seat === 2 && !guest.IsHost, "BOB 2 shares BOB's peer id, at seat 2");
+	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2" } } });
+	eq(A.last("LobbyUpdate").lobby.Players.length, 3, "a full lobby takes no one");
+	B.do({ UpdatePlayer: { player: { ...guest, ArcherIndex: 5, Ready: true } } });
+	l = A.last("LobbyUpdate").lobby;
+	assert(l.Players.find((p) => p.Seat === 2).Ready && !l.Players.find((p) => p.Seat === 1).Ready, "UpdatePlayer with seat 2 updates BOB 2 only");
+	B.do({ UpdatePlayer: { player: { ...bob, Seat: 0, Ready: true } } });
+	l = A.last("LobbyUpdate").lobby;
+	assert(l.Players.find((p) => p.Seat === 1).Ready && l.Players.find((p) => p.Seat === 0).Ready === false, "a seat that isn't the device's falls back to its first player");
+	B.do({ RemoveLocalPlayer: { seat: 1 } });
+	eq(A.last("LobbyUpdate"), undefined, "the device's first player can't be removed that way");
+	eq(B.last("LobbyUpdate").lobby.Players.length, 3, "(the sender gets the lobby back)");
+	B.do({ RemoveLocalPlayer: { seat: 2 } });
+	eq(A.last("LobbyUpdate").lobby.Players.map((p) => p.Seat), [0, 1], "BOB 2 removed");
+	B.do({ AddLocalPlayer: { player: { Name: "BOB 2" } } });
+	eq(A.last("LobbyUpdate").lobby.Players.length, 3, "BOB 2 back");
+	B.do({ LeaveLobby: {} });
+	eq(A.last("LobbyUpdate").lobby.Players.map((p) => p.Name), ["ALICE"], "BOB leaving takes BOB 2 along");
+	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2" } } });
+	for (const p of A.last("LobbyUpdate").lobby.Players) A.do({ UpdatePlayer: { player: { ...p, Ready: true } } });
+	A.do({ StartLobbyChoice: {} });
+	eq(A.take("StartLobby").length, 0, "one device alone (with its local player) can't start");
+});
+
 test("core: a best-of-3 series (result, loser picks, auto start, finish)", async () => {
 	const mm = await core();
 	const { A, B, all } = started(mm, { BestOf: 3 });
@@ -672,13 +709,37 @@ test("core: series screen starts by itself after 60 s; a player leaving aborts t
 	eq([after.Series.Status, after.Series.AbortReason], ["Aborted", "PLAYER LEFT"], "aborted");
 });
 
+test("core: quick play with local players: devices match if their players fit, a device's players share its peer id", async () => {
+	const mm = await core();
+	const A = new FakeConn(mm, "ALICE");
+	const B = new FakeConn(mm, "BOB");
+	const C = new FakeConn(mm, "CAROL");
+	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false, local_players: 3 } });
+	eq(A.last("QuickPlayStatus").local_players, 3, "the status echoes the device's players");
+	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false, local_players: 2 } });
+	eq(B.last("QuickPlayMatchFound"), undefined, "3 + 2 players don't fit in 4");
+	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false, local_players: 3 } });
+	eq(B.last("QuickPlayMatchFound"), undefined, "nor 3 + 3");
+	C.do({ EnterQuickPlay: { name: "CAROL", is_wide: false } });
+	const a = A.last("QuickPlayMatchFound");
+	const c = C.last("QuickPlayMatchFound");
+	assert(a && c && a.lobby.RoomId === c.lobby.RoomId, "ALICE (3) and CAROL (1) matched, the first that fit");
+	const l = a.lobby;
+	eq(l.MaxPlayers, 4, "4 seats");
+	eq(l.Players.map((p) => p.Seat), [0, 1, 2, 3], "seats");
+	eq(new Set(l.Players.filter((p) => p.RoomPeerId === a.room_peer_id).map((p) => p.Seat)).size, 3, "ALICE's 3 players share her peer id");
+	eq(l.Players.filter((p) => p.IsHost).length, 1, "one host");
+	assert(B.state.quickPlay, "BOB still searching");
+	B.do({ ExitQuickPlay: {} });
+});
+
 test("core: quick play matches two searchers and starts once both are ready", async () => {
 	const mm = await core();
 	const A = new FakeConn(mm, "ALICE");
 	const W = new FakeConn(mm, "WIDE");
 	const B = new FakeConn(mm, "BOB");
 	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false } });
-	eq(A.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 0, message: "" }, "queued");
+	eq(A.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 0, message: "", local_players: 1 }, "queued");
 	W.do({ EnterQuickPlay: { name: "WIDE", is_wide: true } });
 	eq(W.last("QuickPlayStatus").searching_wide, 1, "wide counted apart");
 	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });

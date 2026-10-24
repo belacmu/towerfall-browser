@@ -56,6 +56,7 @@ internal static class GgrsFfiImports
 	[DllImport("ggrs_ffi")] internal static extern void netplay_events_free(Events events);
 	[DllImport("ggrs_ffi")] internal static extern Status netplay_advance_frame(Input input);
 	[DllImport("ggrs_ffi")] internal static extern Status netplay_set_test_inputs(Input[] inputs, int len);
+	[DllImport("ggrs_ffi")] internal static extern Status netplay_set_local_inputs(Input[] inputs, int len);
 	[DllImport("ggrs_ffi")] internal static extern NetplayRequets netplay_get_requests();
 	[DllImport("ggrs_ffi")] internal static extern void netplay_requests_free(NetplayRequets requests);
 	[DllImport("ggrs_ffi")] internal static extern Status netplay_save_game_state(SafeBytesFFI gameState);
@@ -73,6 +74,8 @@ internal static class GgrsFfiImports
 	[DllImport("ggrs_ffi")] internal static extern int netplay_remote_player_handle();
 	[DllImport("ggrs_ffi")] internal static extern int netplay_remote_player_handle_count();
 	[DllImport("ggrs_ffi")] internal static extern int netplay_remote_player_handle_at(int index);
+	[DllImport("ggrs_ffi")] internal static extern int netplay_local_player_handle_count();
+	[DllImport("ggrs_ffi")] internal static extern int netplay_local_player_handle_at(int index);
 	[DllImport("ggrs_ffi")] internal static extern Status netplay_add_spectator([MarshalAs(UnmanagedType.LPUTF8Str)] string peerId);
 	[DllImport("ggrs_ffi")] internal static extern int netplay_frames_behind();
 	[DllImport("ggrs_ffi")] internal static extern Status ping_measurement_start([MarshalAs(UnmanagedType.LPUTF8Str)] string roomUrl, [MarshalAs(UnmanagedType.U1)] bool isRelay);

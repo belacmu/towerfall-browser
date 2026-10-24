@@ -14,7 +14,9 @@ cd "$(dirname "$0")/.."
 # v0.22.2 (2026-10-24, with the Switch's switch-online): its release bundles ggrs-ffi v2.2.0, which tools/build-netplay.sh builds (the
 # Switch's ggrs-ffi-switch has the same change).
 TFEX_VERSION=v0.22.2
-TFEX_SOURCE=${TFEX_SOURCE-}
+# Our fork (docs/TFEX-UPDATE.md "TF.EX from a fork"): v0.22.2 + Fcornaire/TF.EX#283 (several local players on one device online),
+# branch belacmu/TF.EX lmp-v0.22.2. Identical to v0.22.2 until a second local player joins; back to a release when #283 is in one.
+TFEX_SOURCE=${TFEX_SOURCE-belacmu/TF.EX@761f0492f9dd132d07f423f9d32f40d4cf827151}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
 DShad.TF.EX:bedfa8496a1cf19093793f02ec27cdd92f83c260feeb991f43bc823d249c4280
