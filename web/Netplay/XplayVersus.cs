@@ -51,7 +51,7 @@ public static partial class XplayVersus
 	}
 
 	private const int NoOrigin = int.MinValue;
-	private static readonly List<Step>[] scripts = { new(), new() };
+	private static readonly List<Step>[] scripts = { new(), new(), new(), new() };   // a seat per player (up to 4: several local players per device); one without a script stands idle
 	private static int maxTicks = 6000;
 	private static int rngTrace; // log the callers of the first N gameplay RNG draws
 	private static int rngDraws;
