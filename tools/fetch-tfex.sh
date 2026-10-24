@@ -11,11 +11,13 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-TFEX_VERSION=v0.21.1
+# v0.22.2 (2026-10-24, with the Switch's switch-online): its release bundles ggrs-ffi v2.2.0, which tools/build-netplay.sh builds (the
+# Switch's ggrs-ffi-switch has the same change).
+TFEX_VERSION=v0.22.2
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:9928a0e4fb0f275a866142f3cc6b1236251bbffcf3f7e9d0797276c81e9188f7
+DShad.TF.EX:bedfa8496a1cf19093793f02ec27cdd92f83c260feeb991f43bc823d249c4280
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
