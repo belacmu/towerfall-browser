@@ -33,10 +33,12 @@ public static class StateDump
 
 	private static void SavePrefix(byte[] state)
 	{
-		if (state == null || ++saves % every != 0) return;
+		if (state == null) return;
 		try
 		{
+			// by frame, as the Switch's hw.txt statedump (a frame re-saved by a rollback logs again: the last is what GGRS kept)
 			int frame = (int)currentFrame.GetValue(null);
+			if (frame % every != 0) return;
 			string b64 = Convert.ToBase64String(state);
 			int parts = Math.Max(1, (b64.Length + LineChars - 1) / LineChars);
 			var sb = new System.Text.StringBuilder(b64.Length + parts * 48);
