@@ -11,9 +11,8 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.22.2 (2026-10-24, with the Switch's switch-online): adopted by hand. Its release bundles ggrs-ffi v2.2.0; the browser and the Switch
-# both still build v2.1.0 (2fe64d9, tools/build-netplay.sh). The one difference, deferring a late spectator while a match synchronizes,
-# changes nothing on the wire, so Switch-browser play is unaffected; move both together when ggrs-ffi is next updated.
+# v0.22.2 (2026-10-24, with the Switch's switch-online): its release bundles ggrs-ffi v2.2.0, which tools/build-netplay.sh builds (the
+# Switch's ggrs-ffi-switch has the same change).
 TFEX_VERSION=v0.22.2
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
