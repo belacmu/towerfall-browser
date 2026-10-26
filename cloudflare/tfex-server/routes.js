@@ -34,5 +34,5 @@ export function parseRoute(url) {
 	const peer = url.searchParams.get("peer");
 	if (peer !== null && !UUID.test(peer)) return { bad: true };
 	if (m[1] === "relay") return peer === null ? { bad: true } : { kind: "relay", roomId: m[2], peer: peer.toLowerCase() };
-	return { kind: m[1] === "room" ? "room" : "ping", roomId: m[2], peer };
+	return { kind: m[1] === "room" ? "room" : "ping", roomId: m[2], peer: peer === null ? null : peer.toLowerCase() };
 }

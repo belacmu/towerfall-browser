@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { Matchmaker } from "./matchmaker.js";
+import { Matchmaker, versionRefusal } from "./matchmaker.js";
 import { allowedOrigins, lobbyFreeRelay, originAllowed, parseRoute } from "./routes.js";
 import { iceServers, STUN_ONLY } from "./turn.js";
 import { maxReport, MemoryReports, parseReport, RateLimit, reportSource, SWITCH_PER_ADDRESS_PER_HOUR } from "./reports.js";
@@ -41,7 +41,10 @@ function logChecksumReport(roomId, peer, data) {
 const MAX_MESSAGE = 1 << 20;
 let nextConn = 1;
 
-const matchmaker = new Matchmaker({ log: verbose ? console.log : () => {} });
+// TFEX_FIXED_SEED: every match gets that seed (tests with scripted inputs that need a known level). MIN_CLIENT_VERSION: TF.EX's version gate.
+const fixedSeed = /^\d+$/.test(process.env.TFEX_FIXED_SEED ?? "") ? Number(process.env.TFEX_FIXED_SEED) : null;
+const minVersion = process.env.MIN_CLIENT_VERSION ?? "0.0.0";
+const matchmaker = new Matchmaker({ log: verbose ? console.log : () => {}, fixedSeed });
 const rooms = new Map(); // "room:<id>" | "ping:<id>" -> SignalRoom, "relay:<id>" -> RelayRoom
 
 class Connection {
@@ -195,7 +198,7 @@ const server = createServer(async (req, res) => {
 		const key = matchReportKey(meta);
 		matchStore.put(key, bytes, { ...meta, from: origin ? "page" : "client" });
 		if (verbose) console.log(`[tfex-server] match report ${key} (${bytes.byteLength} bytes)`);
-		return res.writeHead(204, headers).end();
+		return res.writeHead(201, headers).end();
 	}
 	if (url.pathname === "/reports/match") {
 		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -265,6 +268,12 @@ server.on("upgrade", (req, socket) => {
 		if (verbose) console.log(`[tfex-server] refused relay ${route.roomId} for ${route.peer}`);
 		return reject(403, "Forbidden");
 	}
+	if ((route.kind === "room" || route.kind === "ping") && !lobbyFreeRelay(route.roomId) && !matchmaker.isMember(route.roomId, route.peer)) {
+		if (verbose) console.log(`[tfex-server] refused signaling ${route.roomId} for ${route.peer}`);
+		return reject(404, "Not Found");
+	}
+	const refusedVersion = route.kind === "ws" ? versionRefusal(url.searchParams.get("version"), minVersion) : null;
+	if (refusedVersion?.status) return reject(426, "Upgrade Required");
 	if (route.kind === "relay") {
 		const refused = rooms.get(`relay:${route.roomId}`)?.refusal(route.peer, Date.now(), req.socket.remoteAddress ?? null);
 		if (refused) return reject(409, "Conflict");
@@ -274,6 +283,11 @@ server.on("upgrade", (req, socket) => {
 	const accept = createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
 	socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
 
+	if (refusedVersion) {
+		const conn = new Connection(socket, () => {}, () => {});
+		conn.send(`{"UpdateRequired":${JSON.stringify({ version: refusedVersion.updateRequired })}}`);
+		return conn.close(1000, "update required");
+	}
 	if (route.kind === "ws") {
 		const conn = new Connection(
 			socket,

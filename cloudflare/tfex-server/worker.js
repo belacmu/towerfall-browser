@@ -16,7 +16,7 @@
 // The logic lives in matchmaker.js, signal.js and relay.js; local.mjs runs the same code under Node.
 
 import { DurableObject } from "cloudflare:workers";
-import { Matchmaker, MAX_FRAME } from "./matchmaker.js";
+import { Matchmaker, MAX_FRAME, versionRefusal } from "./matchmaker.js";
 import { MAX_SIGNAL_FRAME, SignalRoom } from "./signal.js";
 import { RelayRoom } from "./relay.js";
 import { allowedOrigins, lobbyFreeRelay, originAllowed, parseRoute } from "./routes.js";
@@ -45,6 +45,14 @@ export default {
 			return new Response("Forbidden", { status: 403 });
 		}
 		if (route.kind === "relay" && !lobbyFreeRelay(route.roomId) && !(await playingIn(env, route.roomId, route.peer))) return new Response("Forbidden", { status: 403 });
+		// Signaling and ping measurement only for a member of that lobby (TF.EX's server: is_room_peer_known).
+		if ((route.kind === "room" || route.kind === "ping") && !lobbyFreeRelay(route.roomId) && !(await memberOf(env, route.roomId, route.peer))) return new Response("Not found", { status: 404 });
+		if (route.kind === "ws") {
+			// TF.EX's version gate (check_version): no version, 426; an older one gets UpdateRequired and the socket closes.
+			const refused = versionRefusal(url.searchParams.get("version"), env.MIN_CLIENT_VERSION);
+			if (refused?.status) return new Response("Upgrade Required", { status: refused.status });
+			if (refused) return updateRequired(refused.updateRequired);
+		}
 		const name = route.kind === "ws" ? "matchmaker" : `${route.kind}:${route.roomId}`;
 		// The client's address, for per-address limits (the Durable Object only sees the Worker).
 		request = new Request(request);
@@ -53,6 +61,21 @@ export default {
 		return ns.get(ns.idFromName(name)).fetch(request);
 	},
 };
+
+function updateRequired(version) {
+	const [client, server] = Object.values(new WebSocketPair());
+	server.accept();
+	server.send(`{"UpdateRequired":${JSON.stringify({ version })}}`);
+	server.close(1000, "update required");
+	return new Response(null, { status: 101, webSocket: client });
+}
+
+async function memberOf(env, room, peer) {
+	if (!peer) return false;
+	const query = new URL("https://matchmaker/member");
+	query.search = new URLSearchParams({ room, peer }).toString();
+	return (await env.MATCHMAKER.get(env.MATCHMAKER.idFromName("matchmaker")).fetch(query)).ok;
+}
 
 // The match relay is only for the players of a lobby whose match is on.
 async function playingIn(env, room, peer) {
@@ -132,7 +155,7 @@ async function matchReport(request, env, url) {
 	if (allow.status !== 204) return new Response(null, { status: 429, headers });
 	const meta = matchReportRequest(url);
 	await env.MATCH_REPORTS.put(matchReportKey(meta), bytes, { httpMetadata: { contentType: "application/zip" }, customMetadata: { ...meta, from: origin ? "page" : "client" } });
-	return new Response(null, { status: 204, headers });
+	return new Response(null, { status: 201, headers });
 }
 
 // TF.EX's match reports, for whoever has STATUS_KEY: GET /reports/match[?cursor=] lists them (oldest
