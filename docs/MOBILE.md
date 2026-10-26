@@ -186,7 +186,7 @@ the iOS Simulator (iOS 26.4, iPhone 17e), where the Mac can read the tab process
 To look inside a page that has no console you can read (Safari in the Simulator), run
 `python3 tools/serve.py 8081 --diag` (or the `towerfall-diag` launch config): pages report their
 WebAssembly heap, audio state, output level and gaps, and notable log lines every 5 s as `[diag]`
-lines, and run JavaScript queued with `curl localhost:8081/__eval --data 'towerfallCommand("…")'`.
+lines (an error whole, with every line of its stack; one already reported only counted), and run JavaScript queued with `curl localhost:8081/__eval --data 'towerfallCommand("…")'`.
 If the main thread spins (Emscripten waits for locks there by spinning on `performance.now()`),
 it sends its JavaScript stack, with WebAssembly function names when the build keeps them
 (temporarily add `--profiling-funcs` to `EmccExtraLDFlags` and `<WasmNativeStrip>false`). A

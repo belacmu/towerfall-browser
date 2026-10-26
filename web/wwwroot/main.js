@@ -10,6 +10,8 @@ import { reportFailure, startStats } from "./stats.js";
 // Keep the last lines of console output (including .NET's, which is forwarded from its worker
 // threads) so problems can be read back from the page: self.consoleLog.
 self.consoleLog = [];
+// How many of the oldest lines were dropped (serve.py --diag's reports count lines from the start).
+self.consoleLogDropped = 0;
 // Also handed each line while set (see showActivity).
 let onConsoleLine = null;
 // A .NET exception's stack getter calls back into C#, which isn't allowed on this thread and throws:
@@ -32,7 +34,10 @@ for (const level of ["log", "info", "warn", "error", "debug"]) {
 		}
 		const line = `[${level}] ` + args.map(logText).join(" ");
 		self.consoleLog.push(line);
-		if (self.consoleLog.length > 2000) self.consoleLog.splice(0, 500);
+		if (self.consoleLog.length > 2000) {
+			self.consoleLog.splice(0, 500);
+			self.consoleLogDropped += 500;
+		}
 		onConsoleLine?.(line);
 		original(...args);
 	};
