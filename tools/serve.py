@@ -3,12 +3,15 @@
 Usage: serve.py [port] [--pages] [--public] [--verbose] [--diag]
 --public: without the game files, like the public site (a first visit asks for them)
 --diag: pages report their memory (WebAssembly heap, JS heap), audio output level (peak sample; gaps: blocks with runs of exact silence) and new [perf]/error log lines
-here every 5 s, printed as [diag] lines, and run JavaScript queued with
+here every 5 s, printed as [diag] lines (a report's log lines each on its own indented line, an error whole with its stack; an
+error already reported is only counted, in "repeated"; uncaught JavaScript errors come with their stack), and run JavaScript queued with
 `curl 'localhost:PORT/__eval' --data 'towerfallCommand("profile")'` (result: a [diag] line). For browsers whose console can't be read, e.g. iOS
 Safari in the Simulator or on a phone on this network (with --host 0.0.0.0 that isn't localhost,
 the page isn't cross-origin isolated, so prefer the Simulator)."""
+import json
 import os
 import sys
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,8 +62,8 @@ DIAG_SCRIPT = b"""<script>
 			spinSent = true;
 			try {
 				const xhr = new XMLHttpRequest();
-				xhr.open("GET", "/__diag?" + encodeURIComponent(JSON.stringify({ spinStack: String(new Error().stack), timer: Atomics.load(watch, 3) })), false);
-				xhr.send();
+				xhr.open("POST", "/__diag", false);
+				xhr.send(JSON.stringify({ spin: true, timer: Atomics.load(watch, 3), lines: String(new Error().stack).split("\\n") }));
 			} catch {}
 		}
 		return now();
@@ -103,18 +106,48 @@ DIAG_SCRIPT = b"""<script>
 		});
 		return node;
 	};
+	// Reports go by POST: a whole exception doesn't fit in a URL.
+	const send = (d) => fetch("/__diag", { method: "POST", body: JSON.stringify(d), cache: "no-store" }).catch(() => {});
+	// Notable lines since the last report, each with the lines that continue it (indented: .NET prints
+	// an exception's stack one frame per line, "   at ..."), so an error arrives whole, top first. An
+	// entry already sent (an error repeated every frame) is only counted, in "repeated".
+	const NOTABLE = /\\[perf\\]|\\[diag\\]|rror|InstantReplay|etablished|Lobby|exception|command|sweep|scenario/i;
+	const CONTINUES = /^\\[\\w+\\] \\s/;
+	const MAX_LINES = 400;
+	const sent = new Set();
 	let from = 0;
 	const report = () => {
 		const log = self.consoleLog ?? [];
-		if (from > log.length) from = 0;
-		const lines = log.slice(from).filter((l) => /\\[perf\\]|\\[diag\\]|rror|InstantReplay|etablished|Lobby|exception|command|sweep|scenario/i.test(l)).slice(-8);
-		from = log.length;
+		// main.js drops the oldest lines in blocks (self.consoleLogDropped counts them).
+		const total = (self.consoleLogDropped ?? 0) + log.length;
+		if (from > total) from = 0;
+		const missed = Math.max(0, total - log.length - from);
+		const entries = [];
+		for (const l of log.slice(Math.max(0, from - (total - log.length)))) {
+			if (CONTINUES.test(l) && entries.length) entries.at(-1).push(l);
+			else entries.push([l]);
+		}
+		from = total;
+		const lines = missed ? [`[diag] ${missed} log lines dropped before they were reported`] : [];
+		const repeated = {};
+		for (const entry of entries) {
+			if (!NOTABLE.test(entry[0]) && !CONTINUES.test(entry[0])) continue;
+			const text = entry.join("\\n");
+			if (sent.has(text)) {
+				repeated[entry[0]] = (repeated[entry[0]] ?? 0) + 1;
+				continue;
+			}
+			if (sent.size > 1000) sent.clear();
+			sent.add(text);
+			lines.push(...entry);
+		}
+		if (lines.length > MAX_LINES) lines.splice(MAX_LINES, Infinity, `[diag] ${lines.length - MAX_LINES} more lines not sent`);
 		const heap = self.wasm?.Module?.HEAPU8?.length;
-		const d = { wasmMB: heap ? Math.round(heap / 1048576) : null, jsMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, audioPeak: Math.round(peak * 1000) / 1000, audioState: self.wasm?.Module?.SDL3?.audioContext?.state ?? null, audioCallbacks: Atomics.load(watch, 2), audioGaps: `${gaps}/${blocks}`, lines };
+		const d = { wasmMB: heap ? Math.round(heap / 1048576) : null, jsMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, audioPeak: Math.round(peak * 1000) / 1000, audioState: self.wasm?.Module?.SDL3?.audioContext?.state ?? null, audioCallbacks: Atomics.load(watch, 2), audioGaps: `${gaps}/${blocks}`, ...(Object.keys(repeated).length ? { repeated } : {}), lines };
 		peak = 0;
 		gaps = 0;
 		blocks = 0;
-		fetch("/__diag?" + encodeURIComponent(JSON.stringify(d)), { cache: "no-store" }).catch(() => {});
+		send(d);
 	};
 	setInterval(report, 5000);
 	setInterval(async () => {
@@ -126,9 +159,18 @@ DIAG_SCRIPT = b"""<script>
 		} catch (e) {
 			result = "error: " + e;
 		}
-		fetch("/__diag?" + encodeURIComponent(JSON.stringify({ eval: js, result: String(result) })));
+		send({ eval: js, result: String(result) });
 	}, 1000);
-	addEventListener("error", (e) => fetch("/__diag?" + encodeURIComponent(JSON.stringify({ error: String(e.message) }))));
+	// Uncaught errors with their stack. A .NET exception's stack getter calls back into C#, which may throw.
+	const stackOf = (err) => {
+		try {
+			return String(err?.stack ?? "").split("\\n").filter(Boolean);
+		} catch {
+			return [];
+		}
+	};
+	addEventListener("error", (e) => send({ error: String(e.message), where: `${e.filename}:${e.lineno}:${e.colno}`, lines: stackOf(e.error) }));
+	addEventListener("unhandledrejection", (e) => send({ rejection: String(e.reason?.message ?? e.reason), lines: stackOf(e.reason) }));
 })();
 </script>"""
 
@@ -141,15 +183,32 @@ WATCHDOG_SCRIPT = b"""
 			if (started) return;
 			started = true;
 			const [watch, t0] = data;
-			fetch("/__diag?" + encodeURIComponent(JSON.stringify({ watchdog: "up" })));
+			fetch("/__diag", { method: "POST", body: JSON.stringify({ watchdog: "up" }) });
 			setInterval(() => {
 				const age = Math.round(performance.timeOrigin + performance.now() - t0 - Atomics.load(watch, 0));
-				if (age > 3000) fetch("/__diag?" + encodeURIComponent(JSON.stringify({ frozenMs: age, inAudioCallback: Atomics.load(watch, 1), audioCallbacks: Atomics.load(watch, 2), inTimer: timers.get(Atomics.load(watch, 3)) ?? Atomics.load(watch, 3) })));
+				if (age > 3000) fetch("/__diag", { method: "POST", body: JSON.stringify({ frozenMs: age, inAudioCallback: Atomics.load(watch, 1), audioCallbacks: Atomics.load(watch, 2), inTimer: timers.get(Atomics.load(watch, 3)) ?? Atomics.load(watch, 3) }) });
 			}, 2000);
 		};
 	"""
 
 PENDING_EVAL = []
+DIAG_LOCK = threading.Lock()
+
+
+def print_diag(client, body):
+    """A page's report: its fields on one [diag] line, then each log line it carries on its own
+    [diag] line (indented), so a whole stack reads top to bottom. One write, so concurrent reports
+    don't interleave."""
+    try:
+        d = json.loads(body)
+        lines = d.pop("lines", []) if isinstance(d, dict) else []
+        head = json.dumps(d, ensure_ascii=False)
+    except ValueError:
+        head, lines = body, []
+    out = "".join(f"[diag] {client} {l}\n" for l in [head] + ["  | " + str(l) for l in lines])
+    with DIAG_LOCK:
+        sys.stdout.write(out)
+        sys.stdout.flush()
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -163,8 +222,9 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if "--diag" in sys.argv and self.path.startswith("/__diag?"):
+            # Pages from before reports went by POST.
             from urllib.parse import unquote
-            print(f"[diag] {self.client_address[0]} {unquote(self.path[len('/__diag?'):])}", flush=True)
+            print_diag(self.client_address[0], unquote(self.path[len('/__diag?'):]))
             self.send_response(204)
             self.end_headers()
             return
@@ -193,6 +253,11 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if "--diag" in sys.argv and self.path == "/__diag":
+            print_diag(self.client_address[0], self.rfile.read(int(self.headers.get("Content-Length", 0))).decode(errors="replace"))
+            self.send_response(204)
+            self.end_headers()
+            return
         if "--diag" in sys.argv and self.path == "/__eval":
             PENDING_EVAL.append(self.rfile.read(int(self.headers.get("Content-Length", 0))).decode())
             self.send_response(204)
