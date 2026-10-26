@@ -55,9 +55,13 @@ docs/tfex-0.21.1-update.md):
 - TF.EX's own relay (`/relay/room/`, `/relay/ping_measurement/`) needs UDP, which Workers can't take: those paths are 404,
   and TF.EX then stays direct.
 
-The official server isn't open source, so
-where the client leaves room the choices below are ours. Desktop TF.EX can use it too: set TF.EX's
-SERVER option (Mod options) to its `wss://` address.
+It behaves as TF.EX's own server does (Fcornaire/tf-ex-matchmaking-server, open source since
+2026-10-25; matchmaker.js follows its 980e86c, and its header lists the few differences: local players,
+no UDP relay on Workers, 30 s keep-alives for the free plan, the limits below). The real server
+refuses browser pages, which is why the site runs this one. Desktop TF.EX can use it too: set TF.EX's
+SERVER option (Mod options) to its `wss://` address. `/ws` needs TF.EX's `?version=` (426 without
+one; `MIN_CLIENT_VERSION`, a variable, sends older clients `UpdateRequired`). Signaling and ping
+rooms are only for that lobby's members (404), except the lobby-free `xnet-*` rooms.
 
 - `matchmaker.js`: matchmaking at `/ws` (lobbies, join codes, quick play, end-of-match votes,
   series).
@@ -97,7 +101,7 @@ SERVER option (Mod options) to its `wss://` address.
   - Matchmaking: messages up to 336 KB (a skin chunk is the biggest), 100 at once then 20 a
     second per connection, 16 connections per address, lobbies up to 64 KB serialized, 8
     spectators. Past one: closed with 4029 (or refused, for lobbies and spectators).
-  - 20 wrong join codes from one address lock it out for 10 minutes (`TOO MANY TRIES`).
+  - One private-code try every 3 s per connection, as TF.EX's server (`Too many attempts, wait a moment`).
   - Signaling: messages up to 64 KB, 200 at once then 20 a second per connection.
   - `GetLobbies` leaves out peer ids (TF.EX's lobby list doesn't use them).
 - `local.mjs`: the same code under Node (18+, no dependencies), for development or self-hosting.
