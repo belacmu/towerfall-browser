@@ -101,6 +101,9 @@ public static partial class BrowserHost
 			Directory.CreateDirectory(target);
 			if (!Directory.Exists(dir)) Directory.CreateSymbolicLink(dir, target);
 		}
+		// The game folder of a Steam install has a Workshop folder (empty without subscriptions); the game and mods list it
+		// (MapScene's WORKSHOP LEVELS button reads it, and TF.EX's map screen can confirm that button), so it's here too.
+		Directory.CreateDirectory(Root + GameDir + "/Workshop");
 	}
 
 	// What patching needs: the app's assemblies where Cecil looks, and TowerFall.exe's references
