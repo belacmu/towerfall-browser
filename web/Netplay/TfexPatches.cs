@@ -44,6 +44,7 @@ public static class TfexPatches
 				postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(ClipboardSet), all)));
 		}
 		StateSpeedups.Patch(harmony);
+		WideMapSet.Patch(harmony); // a wide rematch opens WiderSet's towers, as the lobby start does
 		RenderKeepsState.Patch(harmony); // drawing doesn't change the saved state (the Switch does the same)
 		TfexFps.Patch(harmony); // TF.EX's session rate: ?tfexfps=N (experiment), or per session (SwitchLobby)
 		SwitchLobby.Patch(harmony); // lobby matches against the Switch: 60 Hz, gameplay digest
