@@ -119,19 +119,22 @@ function handshake(path, origin) {
 }
 
 const uuid = () => crypto.randomUUID();
+// /ws with the TF.EX version, as TF.EX connects (MATCHMAKING_URL); without one the server refuses (426).
+const WS = "/ws?version=0.22.2";
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
 // ---- Origins and routes ----
 
 test("origins: desktop (none) and the site are let in, other pages aren't", async () => {
-	eq(await handshake("/ws"), 101, "no Origin");
-	eq(await handshake("/ws", "https://belacmu.github.io"), 101, "the site");
-	eq(await handshake("/ws", "http://localhost:8080"), 101, "the dev server");
-	eq(await handshake("/ws", "http://127.0.0.1:8081"), 101, "another local port");
-	eq(await handshake("/ws", "http://localhost.example.com"), 403, "not local");
-	eq(await handshake(`/room/abc?peer=${uuid()}`, "https://belacmu.github.io"), 101, "room");
-	eq(await handshake("/ws", "https://example.com"), 403, "another page");
+	eq(await handshake(WS), 101, "no Origin");
+	eq(await handshake(WS, "https://belacmu.github.io"), 101, "the site");
+	eq(await handshake(WS, "http://localhost:8080"), 101, "the dev server");
+	eq(await handshake(WS, "http://127.0.0.1:8081"), 101, "another local port");
+	eq(await handshake(WS, "http://localhost.example.com"), 403, "not local");
+	eq(await handshake(`/room/xnet-abc?peer=${uuid()}`, "https://belacmu.github.io"), 101, "a lobby-free room");
+	eq(await handshake("/ws"), 426, "no TF.EX version");
+	eq(await handshake(WS, "https://example.com"), 403, "another page");
 	eq(await handshake("/nope"), 404, "unknown path");
 });
 
@@ -175,8 +178,8 @@ test("match reports: TF.EX's zips (desync / disconnect / crash) are kept and lis
 	const marker = `m${Math.floor(Math.random() * 1e9)}`;
 	const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0), ...new TextEncoder().encode(marker)]);
 	const send = (query, body, origin) => fetch(`${http}/report?${query}`, { method: "POST", body, headers: origin ? { Origin: origin } : {} });
-	eq((await send(`group=ALICE-BOB&name=ALICE&kind=desync`, zip)).status, 204, "desktop / Switch (no Origin)");
-	eq((await send(`group=ALICE-BOB&name=BOB&kind=disconnect`, zip, "https://belacmu.github.io")).status, 204, "the site's pages");
+	eq((await send(`group=ALICE-BOB&name=ALICE&kind=desync`, zip)).status, 201, "desktop / Switch (no Origin)");
+	eq((await send(`group=ALICE-BOB&name=BOB&kind=disconnect`, zip, "https://belacmu.github.io")).status, 201, "the site's pages");
 	eq((await send(`group=ALICE-BOB&name=EVE&kind=crash`, zip, "https://example.com")).status, 403, "another page");
 	eq((await send(`group=ALICE-BOB&name=ALICE&kind=desync`, "not a zip")).status, 400, "not a zip");
 	eq((await send(`group=ALICE-BOB&name=ALICE&kind=other`, zip)).status, 400, "another kind goes to the performance reports (and isn't one)");
@@ -220,7 +223,7 @@ test("core: Switch reports have their own limits", async () => {
 // ---- Signaling (matchbox) ----
 
 test("signaling: ids from ?peer=, NewPeer to those already in, signals relayed, PeerLeft", async () => {
-	const room = `/room/r${Date.now()}`;
+	const room = `/room/xnet-r${Date.now()}`;
 	const [a, b] = [uuid(), uuid()];
 	const A = await Client.open(`${room}?peer=${a}`);
 	eq(await A.next("IdAssigned"), { IdAssigned: a }, "A's id");
@@ -240,7 +243,7 @@ test("signaling: ids from ?peer=, NewPeer to those already in, signals relayed, 
 });
 
 test("signaling: ping rooms are separate from match rooms; no ?peer= gets a random id", async () => {
-	const id = `r${Date.now()}`;
+	const id = `xnet-r${Date.now()}`;
 	const [a, b] = [uuid(), uuid()];
 	const A = await Client.open(`/room/${id}?peer=${a}`);
 	await A.next("IdAssigned");
@@ -252,6 +255,15 @@ test("signaling: ping rooms are separate from match rooms; no ?peer= gets a rand
 	assert(/^[0-9a-f-]{36}$/.test(assigned), "random id is a UUID");
 	eq(await B.next("NewPeer"), { NewPeer: assigned }, "B hears of C");
 	for (const c of [A, B, C]) c.close();
+});
+
+test("signaling: only a member of the lobby gets into its rooms (TF.EX's server)", async () => {
+	const { A, B, lobby, host } = await privateLobby();
+	eq(await handshake(`/room/${lobby.RoomId}?peer=${uuid()}`), 404, "a stranger");
+	eq(await handshake(`/ping_measurement/${lobby.RoomId}`), 404, "no peer");
+	const H = await Client.open(`/room/${lobby.RoomId}?peer=${host.RoomPeerId}`);
+	eq(await H.next("IdAssigned"), { IdAssigned: host.RoomPeerId }, "the host");
+	for (const c of [A, B, H]) c.close();
 });
 
 test("signaling: a peer id that isn't a UUID is refused", async () => {
@@ -270,7 +282,7 @@ function builtLobby(name, kind = "Private") {
 }
 
 async function tfex(name) {
-	const c = await Client.open("/ws", { binary: true });
+	const c = await Client.open(WS, { binary: true });
 	eq(await c.next("KeepAlive"), { KeepAlive: {} }, "KeepAlive first");
 	c.send({ KeepAlive: {} });
 	c.send({ Identify: { player_id: `local:${uuid()}`, name } });
@@ -313,29 +325,32 @@ test("matchmaking: private lobby, archer select, start", async () => {
 	assert(a.Ready && a.ArcherIndex === 3, "A ready with archer 3");
 	assert(a.IsHost && a.Seat === 0 && a.RoomPeerId === host.RoomPeerId, "server keeps host, seat and peer id");
 	await A.next("LobbyUpdate");
-	A.send({ StartLobbyChoice: {} });
-	await B.none("StartLobby"); // not everyone is ready
 	B.send({ UpdatePlayer: { player: { ...bob, ArcherIndex: 1, Ready: true } } });
 	await A.next("LobbyUpdate");
 	await B.next("LobbyUpdate");
+	A.send({ StartLobbyChoice: {} });
+	await B.none("StartLobby"); // the connection check isn't over
+	B.send({ PeerMeasured: { room_peer_id: host.RoomPeerId } });
+	l = (await A.next("LobbyUpdate")).LobbyUpdate.lobby;
+	assert(!l.IsCheckingConnections, "checked");
 	B.send({ StartLobbyChoice: {} }); // only the host starts
 	await A.none("StartLobby");
 	A.send({ StartLobbyChoice: {} });
 	await A.next("StartLobby");
 	await B.next("StartLobby");
-	l = (await B.next("LobbyUpdate")).LobbyUpdate.lobby;
-	assert(l.InGame, "in game");
 	A.close();
 	B.close();
 });
 
 test("matchmaking: bad codes, full lobbies, host leaving", async () => {
 	const { A, B, lobby } = await privateLobby();
+	const X = await tfex("XAVIER");
+	X.send({ JoinPrivate: { code: "ZZZZZ", name: "XAVIER", is_player: true } });
+	eq((await X.next("PrivateJoinResult")).PrivateJoinResult.message, "Invalid or expired code", "unknown code refused");
+	const Y = await tfex("YVES");
+	Y.send({ JoinPrivate: { code: lobby.JoinCode, name: "YVES", is_player: true } });
+	eq((await Y.next("PrivateJoinResult")).PrivateJoinResult.message, `Lobby ${lobby.RoomId} is full`, "full lobby refused");
 	const C = await tfex("CAROL");
-	C.send({ JoinPrivate: { code: "ZZZZZ", name: "CAROL", is_player: true } });
-	assert(!(await C.next("PrivateJoinResult")).PrivateJoinResult.success, "unknown code refused");
-	C.send({ JoinPrivate: { code: lobby.JoinCode, name: "CAROL", is_player: true } });
-	assert(!(await C.next("PrivateJoinResult")).PrivateJoinResult.success, "full lobby refused");
 	C.send({ JoinPrivate: { code: lobby.JoinCode, name: "CAROL", is_player: false } });
 	const spect = (await C.next("PrivateJoinResult")).PrivateJoinResult;
 	assert(spect.success && spect.lobby.Spectators.length === 1, "spectator joins");
@@ -347,7 +362,7 @@ test("matchmaking: bad codes, full lobbies, host leaving", async () => {
 	const D = await tfex("DAVE");
 	D.send({ JoinPrivate: { code: lobby.JoinCode, name: "DAVE", is_player: false } });
 	assert(!(await D.next("PrivateJoinResult")).PrivateJoinResult.success, "lobby is gone");
-	for (const c of [B, C, D]) c.close();
+	for (const c of [B, C, D, X, Y]) c.close();
 });
 
 test("matchmaking: public lobbies are listed and joined by room id; skins relay", async () => {
@@ -355,7 +370,7 @@ test("matchmaking: public lobbies are listed and joined by room id; skins relay"
 	const sent = builtLobby("ALICE", "Standard");
 	A.send({ CreateLobby: { lobby: sent } });
 	const lobby = (await A.next("CreateLobbyResponse")).CreateLobbyResponse.lobby;
-	eq(lobby.JoinCode, "", "no code for public lobbies");
+	eq(lobby.JoinCode, null, "no code for public lobbies");
 	const B = await tfex("BOB");
 	B.send({ GetLobbies: {} });
 	const listed = (await B.next("GetLobbiesResponse")).GetLobbiesResponse.lobbies;
@@ -371,6 +386,7 @@ test("matchmaking: public lobbies are listed and joined by room id; skins relay"
 	const chunk = { bundle_id: "b", custom_archer_id: "x", chunk_index: 0, chunk_count: 1, data: "AAAA" };
 	A.send({ SkinChunk: { chunk } });
 	eq((await B.next("SkinChunk")).SkinChunk, { chunk, from: lobby.Players[0].RoomPeerId }, "skin relayed");
+	eq((await A.next("SkinChunk")).SkinChunk.from, lobby.Players[0].RoomPeerId, "to the sender too");
 	B.send({ LeaveLobby: {} });
 	assert((await B.next("LeaveLobbyResponse")).LeaveLobbyResponse.success, "left");
 	eq((await A.next("LobbyUpdate")).LobbyUpdate.lobby.Players.length, 1, "A alone again");
@@ -421,27 +437,23 @@ const tick = (mm, ms) => {
 	mm.wake(clock);
 };
 
-async function core() {
+async function core(options = {}) {
 	const { Matchmaker } = await import("./matchmaker.js");
-	return new Matchmaker();
+	return new Matchmaker(options);
 }
 
-// A two-player private lobby, both ready, started.
-function started(mm, gameData = {}, maxPlayers = 2) {
-	const { A, others, lobby } = readyLobby(mm, gameData, maxPlayers);
-	const all = [A, ...others];
-	A.do({ StartLobbyChoice: {} });
-	for (const c of all) {
-		const tags = c.tags();
-		assert(tags.lastIndexOf("StartLobby") > tags.lastIndexOf("LobbyUpdate"), `LobbyUpdate before StartLobby (${tags.join(",")})`);
-		c.take("StartLobby");
-	}
-	return { A, B: others[0], all, roomId: lobby.RoomId };
+const peerOf = (lobby, name) => lobby.Players.find((p) => p.Name === name).RoomPeerId;
+const roomOf = (mm) => [...mm.rooms.values()].at(-1);
+
+// Every device measures every other one (TF.EX's lobby ping measurement), so the connection check is over.
+function measureAll(all) {
+	const lobby = roomOf(all[0].mm).lobby;
+	for (const c of all) for (const peer of new Set(lobby.Players.map((p) => p.RoomPeerId))) if (peer !== c.state.peer) c.do({ PeerMeasured: { room_peer_id: peer } });
 }
 
-// A private lobby whose players are all ready (version: their TF.EX's, from /ws?version=).
-function readyLobby(mm, gameData = {}, maxPlayers = 2, version = null) {
-	const A = new FakeConn(mm, "ALICE", null, version);
+// A private lobby whose players have picked and are ready, connections checked.
+function readyLobby(mm, gameData = {}, maxPlayers = 2, { teams = maxPlayers === 4 } = {}) {
+	const A = new FakeConn(mm, "ALICE");
 	const sent = builtLobby("ALICE");
 	Object.assign(sent.GameData, gameData);
 	sent.MaxPlayers = maxPlayers;
@@ -449,316 +461,462 @@ function readyLobby(mm, gameData = {}, maxPlayers = 2, version = null) {
 	const lobby = A.last("CreateLobbyResponse").lobby;
 	const others = [];
 	for (let i = 1; i < maxPlayers; i++) {
-		const c = new FakeConn(mm, `P${i}`, null, version);
+		const c = new FakeConn(mm, `P${i}`);
 		c.do({ JoinPrivate: { code: lobby.JoinCode, name: `P${i}`, is_player: true } });
 		assert(c.last("PrivateJoinResult").success, "joined");
 		others.push(c);
 	}
 	const all = [A, ...others];
 	for (const [i, c] of all.entries()) {
-		const self = c.last("LobbyUpdate")?.lobby.Players.find((p) => p.Name === (i ? `P${i}` : "ALICE")) ?? lobby.Players[0];
-		c.do({ UpdatePlayer: { player: { ...self, Ready: true, ArcherIndex: i, Team: maxPlayers === 4 ? i % 2 : -1 } } });
+		const self = roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === c.state.peer);
+		c.do({ UpdatePlayer: { player: { ...self, Ready: true, ArcherIndex: i, Team: teams ? i % 2 : -1 } } });
 	}
+	measureAll(all);
 	return { A, others, all, lobby };
 }
 
-test("core: TF.EX 0.21 lobby fields; MatchPlayers is the match's players, cleared at archer select", async () => {
+// ...and started by the host.
+function started(mm, gameData = {}, maxPlayers = 2, options) {
+	const { A, others, lobby } = readyLobby(mm, gameData, maxPlayers, options);
+	const all = [A, ...others];
+	for (const c of all) c.inbox.length = 0;
+	A.do({ StartLobbyChoice: {} });
+	for (const c of all) assert(c.take("StartLobby").length === 1, `${c.state.name} got StartLobby`);
+	return { A, B: others[0], all, roomId: lobby.RoomId };
+}
+
+const ended = (all, winner = 0, scores = [5, 2]) => {
+	for (const c of all) c.do({ MatchEnded: { winner_seat: winner, frame: 1000, checksum: "ab", scores } });
+};
+
+test("core: lobby fields as TF.EX's server sends them; MatchPlayers is the match's players, cleared at archer select", async () => {
 	const mm = await core();
 	const { A, B, all } = started(mm);
-	const l = A.last("LobbyUpdate").lobby;
-	eq([l.RelayedPairs, l.IsCheckingConnections, l.IsReportEnabled], [[], false, true], "0.21 fields (match reports on)");
+	const l = roomOf(mm).lobby;
+	eq([l.RelayedPairs, l.IsCheckingConnections, l.IsReportEnabled, l.RankedSeats, l.EndGameChoice], [[], false, true, [], []], "fields");
+	assert(/^[A-HJ-NP-Z2-9]{5}$/.test(l.JoinCode), "a private lobby's code");
+	assert(l.GameData.Seed >= 0 && l.GameData.Seed < 100000, "seed 0..100000");
 	eq(l.MatchPlayers.map((p) => p.Name), ["ALICE", "P1"], "MatchPlayers at the start");
-	for (const c of all) c.do({ MatchEnded: { winner_seat: 0, frame: 1000, checksum: null, scores: [5, 2] } });
+	ended(all);
 	A.do({ RematchLobbyChoice: {} });
 	B.do({ ArcherSelectChoice: {} });
 	eq(B.last("LobbyUpdate").lobby.MatchPlayers, [], "cleared at archer select");
+	const P = new FakeConn(mm, "PUB");
+	P.do({ CreateLobby: { lobby: builtLobby("PUB", "Standard") } });
+	const pub = P.last("CreateLobbyResponse").lobby;
+	eq([pub.JoinCode, pub.EndGameChoice], [null, null], "no code for a public lobby; no votes before a match");
 });
 
 test("core: TF.EX 0.22's StartsWithoutHat is passed on (true / false), anything else is null", async () => {
 	const mm = await core();
 	const { A, others } = readyLobby(mm);
 	const B = others[0];
-	const own = (c, name) => c.last("LobbyUpdate").lobby.Players.find((p) => p.Name === name);
-	A.do({ UpdatePlayer: { player: { ...own(A, "ALICE"), StartsWithoutHat: true } } });
-	B.do({ UpdatePlayer: { player: { ...own(B, "P1"), StartsWithoutHat: "yes" } } });
-	const players = B.last("LobbyUpdate").lobby.Players;
-	eq(players.map((p) => p.StartsWithoutHat), [true, null], "StartsWithoutHat");
-	A.do({ UpdatePlayer: { player: { ...own(A, "ALICE"), StartsWithoutHat: false } } });
+	const own = (c) => roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === c.state.peer);
+	A.do({ UpdatePlayer: { player: { ...own(A), StartsWithoutHat: true } } });
+	B.do({ UpdatePlayer: { player: { ...own(B), StartsWithoutHat: "yes" } } });
+	eq(B.last("LobbyUpdate").lobby.Players.map((p) => p.StartsWithoutHat), [true, null], "StartsWithoutHat");
+	A.do({ UpdatePlayer: { player: { ...own(A), StartsWithoutHat: false } } });
 	eq(B.last("LobbyUpdate").lobby.Players[0].StartsWithoutHat, false, "false stays false");
 });
 
-test("core: players without ping measurement (0.19, the Switch build) start at once; PeerMeasured makes one count", async () => {
+test("core: the connection check runs in the lobby: each pair until one PeerMeasured either way; the host can't start meanwhile", async () => {
 	const mm = await core();
-	const { A, all } = readyLobby(mm, {}, 2, null);
+	const A = new FakeConn(mm, "ALICE");
+	A.do({ CreateLobby: { lobby: builtLobby("ALICE") } });
+	const { JoinCode } = A.last("CreateLobbyResponse").lobby;
+	const B = new FakeConn(mm, "BOB");
+	B.do({ JoinPrivate: { code: JoinCode, name: "BOB", is_player: true } });
+	let l = B.last("PrivateJoinResult").lobby;
+	assert(l.IsCheckingConnections, "checking as soon as there's a pair");
+	for (const c of [A, B]) {
+		const self = roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === c.state.peer);
+		c.do({ UpdatePlayer: { player: { ...self, Ready: true } } });
+	}
+	A.inbox.length = 0;
 	A.do({ StartLobbyChoice: {} });
-	for (const c of all) assert(c.tags().includes("StartLobby"), "started at once");
-	// A mixed lobby (one 0.21.1, one without ?version=) starts at once too.
-	const mixed = readyLobby(mm, {}, 2, null);
-	mixed.A.state.version = "0.21.1";
-	mixed.A.do({ StartLobbyChoice: {} });
-	for (const c of mixed.all) assert(c.tags().includes("StartLobby"), "mixed lobby started at once");
-});
-
-test("core: TF.EX 0.20+ players: CHECKING CONNECTIONS until each pair is measured both ways, then StartLobby", async () => {
-	const mm = await core();
-	const { A, others, all } = readyLobby(mm, {}, 2, "0.21.1");
-	const [B] = others;
-	const players = B.last("LobbyUpdate").lobby.Players;
-	const [pa, pb] = ["ALICE", "P1"].map((name) => players.find((p) => p.Name === name).RoomPeerId);
-	A.do({ StartLobbyChoice: {} });
-	assert(!A.tags().includes("StartLobby"), "not started yet");
-	assert(A.last("LobbyUpdate").lobby.IsCheckingConnections, "IsCheckingConnections");
-	A.do({ PeerMeasured: { room_peer_id: pb } });
-	assert(!A.tags().includes("StartLobby"), "one direction isn't enough");
+	assert(!A.tags().includes("StartLobby"), "refused while checking");
 	B.do({ PeerMeasured: { room_peer_id: "not-a-player" } });
-	B.do({ PeerMeasured: { room_peer_id: pa } });
-	for (const c of all) assert(c.tags().includes("StartLobby"), "started once measured both ways");
-	const l = A.last("LobbyUpdate").lobby;
-	eq([l.IsCheckingConnections, l.RelayedPairs, l.InGame], [false, [], true], "check over, nothing relayed");
-});
-
-test("core: an unfinished connection check starts the match after 8 s anyway (no relay on Workers: RelayedPairs stays empty)", async () => {
-	const mm = await core();
-	const { A, all } = readyLobby(mm, {}, 2, "v0.20.1");
+	B.do({ PeerMeasured: { room_peer_id: peerOf(l, "ALICE") } });
+	l = A.last("LobbyUpdate").lobby;
+	assert(!l.IsCheckingConnections, "one direction settles the pair; everyone ready, so the lobby goes out");
 	A.do({ StartLobbyChoice: {} });
-	assert(!A.tags().includes("StartLobby"), "checking");
-	tick(mm, 8_100);
-	for (const c of all) assert(c.tags().includes("StartLobby"), "started after the timeout");
-	const l = A.last("LobbyUpdate").lobby;
-	eq([l.IsCheckingConnections, l.RelayedPairs], [false, []], "nothing relayed");
+	eq(A.tags(), ["StartLobby"], "StartLobby alone (no LobbyUpdate before it, as TF.EX's server)");
+	assert(roomOf(mm).lobby.InGame, "in game");
 });
 
-test("core: everyone votes rematch -> LobbyUpdate (new seed) then RematchLobby", async () => {
+test("core: a pair that never measures fails after 10 s and the check ends (no relay on Workers: RelayedPairs stays empty)", async () => {
 	const mm = await core();
+	const A = new FakeConn(mm, "ALICE");
+	A.do({ CreateLobby: { lobby: builtLobby("ALICE") } });
+	const B = new FakeConn(mm, "BOB");
+	B.do({ JoinPrivate: { code: A.last("CreateLobbyResponse").lobby.JoinCode, name: "BOB", is_player: true } });
+	assert(mm.nextWake() <= clock + 10_000, "a wake for the deadline");
+	tick(mm, 9_000);
+	assert(roomOf(mm).lobby.IsCheckingConnections, "still checking");
+	tick(mm, 1_100);
+	const l = roomOf(mm).lobby;
+	eq([l.IsCheckingConnections, l.RelayedPairs], [false, []], "check over, nothing relayed");
+	A.inbox.length = 0;
+	A.do({ StartLobbyChoice: {} });
+	assert(A.tags().includes("StartLobby"), "the host can start");
+});
+
+test("core: the server leaves the ready check to the client; only the host starts", async () => {
+	const mm = await core();
+	const A = new FakeConn(mm, "ALICE");
+	A.do({ CreateLobby: { lobby: builtLobby("ALICE") } });
+	const B = new FakeConn(mm, "BOB");
+	B.do({ JoinPrivate: { code: A.last("CreateLobbyResponse").lobby.JoinCode, name: "BOB", is_player: true } });
+	measureAll([A, B]);
+	B.inbox.length = 0;
+	B.do({ StartLobbyChoice: {} });
+	assert(!B.tags().includes("StartLobby"), "not the host");
+	A.do({ StartLobbyChoice: {} });
+	assert(B.tags().includes("StartLobby"), "the host's start goes through (TF.EX's AreAllPlayersReady is the client's)");
+});
+
+test("core: everyone votes rematch -> everyone un-ready, a new seed, MatchPlayers again; LobbyUpdate, RematchLobby", async () => {
+	let n = 0;
+	const mm = await core({ random: () => ((n += 0.137) % 1) });
 	const { A, B, all } = started(mm);
-	const seed = A.last("LobbyUpdate").lobby.GameData.Seed;
-	for (const c of all) c.do({ MatchEnded: { winner_seat: 0, frame: 1000, checksum: null, scores: [5, 2] } });
+	const seed = roomOf(mm).lobby.GameData.Seed;
+	ended(all);
 	A.do({ RematchLobbyChoice: {} });
 	const vote = B.last("LobbyUpdate").lobby;
-	eq(vote.EndGameChoice.length, 1, "A's vote shows");
-	eq(vote.EndGameChoice[0].Choice, "Rematch", "as Rematch");
+	eq(vote.EndGameChoice.map((v) => [v.RoomPeerId, v.Choice]), [[A.state.peer, "Rematch"]], "A's vote shows");
+	for (const c of all) c.inbox.length = 0;
 	B.do({ RematchLobbyChoice: {} });
-	for (const c of all) {
-		const tags = c.tags();
-		assert(tags.at(-1) === "RematchLobby" && tags.at(-2) === "LobbyUpdate", `order ${tags.join(",")}`);
-	}
+	for (const c of all) eq(c.tags(), ["LobbyUpdate", "RematchLobby", "LobbyUpdate"], "order");
 	const l = A.last("LobbyUpdate").lobby;
-	assert(l.InGame && l.Players.every((p) => p.Ready), "still in game and ready");
+	assert(l.InGame && l.Players.every((p) => !p.Ready), "in game, everyone un-ready (TF.EX's server resets the lobby)");
 	assert(l.GameData.Seed !== seed && l.EndGameChoice.length === 0, "new seed, votes cleared");
+	eq(l.MatchPlayers.map((p) => p.Ready), [false, false], "MatchPlayers taken again");
 });
 
-test("core: an archer-select vote, or nobody voting in 30 s, returns to archer select", async () => {
+test("core: an archer-select vote, or the 30 s window running out, returns to archer select", async () => {
 	const mm = await core();
-	let { A, B } = started(mm);
+	let { A, B, all } = started(mm);
+	ended(all);
 	A.do({ RematchLobbyChoice: {} });
+	for (const c of all) c.inbox.length = 0;
 	B.do({ ArcherSelectChoice: {} });
-	let tags = B.tags();
-	assert(tags.at(-2) === "ArcherSelectLobby" && tags.at(-1) === "LobbyUpdate", `order ${tags.join(",")}`);
-	let l = B.last("LobbyUpdate").lobby;
+	eq(B.tags(), ["LobbyUpdate", "ArcherSelectLobby", "LobbyUpdate"], "the lobby before ArcherSelectLobby");
+	const l = B.last("LobbyUpdate").lobby;
 	assert(!l.InGame && l.Players.every((p) => !p.Ready), "back in the lobby, unready");
 
-	({ A, B } = started(new (await import("./matchmaker.js")).Matchmaker()));
+	({ A, B, all } = started(await core()));
 	const mm2 = A.mm;
-	A.do({ MatchEnded: { winner_seat: 1, frame: 1, checksum: null, scores: [0, 5] } });
 	A.do({ RematchLobbyChoice: {} });
-	tick(mm2, 20_000);
+	tick(mm2, 40_000);
+	assert(!B.tags().includes("ArcherSelectLobby"), "no window before a MatchEnded");
+	A.do({ MatchEnded: { winner_seat: 1, frame: 1, checksum: null, scores: [0, 5] } });
+	tick(mm2, 25_000);
 	assert(!B.tags().includes("ArcherSelectLobby"), "not yet");
-	tick(mm2, 15_000);
+	tick(mm2, 6_000);
 	assert(B.tags().includes("ArcherSelectLobby"), "timed out to archer select");
 	assert(mm2.nextWake() - clock <= 30_000, "only keep-alives left");
 });
 
-test("core: spectators join mid-match (SpectatorJoined, InGame lobby); host leaving closes the lobby", async () => {
+test("core: a player leaving mid-match doesn't start the vote; the window from MatchEnded decides", async () => {
 	const mm = await core();
-	const { A, B, roomId } = started(mm);
-	const code = [...mm.rooms.values()][0].lobby.JoinCode;
-	const S = new FakeConn(mm, "SPEC");
-	S.do({ JoinPrivate: { code, name: "SPEC", is_player: false } });
-	const result = S.last("PrivateJoinResult");
-	assert(result.success && result.lobby.Spectators.length === 1, "spectator joined");
-	assert(S.last("LobbyUpdate").lobby.InGame, "spectator sees InGame");
-	eq(A.last("SpectatorJoined"), { room_peer_id: result.room_peer_id }, "host told");
-	const P = new FakeConn(mm, "LATE");
-	P.do({ JoinPrivate: { code, name: "LATE", is_player: true } });
-	assert(!P.last("PrivateJoinResult").success, "no joining as a player mid-match");
-	mm.close(A, clock);
-	assert(!B.last("LobbyUpdate").lobby.Players.some((p) => p.IsHost), "hostless lobby sent");
-	assert(!mm.rooms.has(roomId), "lobby gone");
-	assert(!B.state.roomId && !S.state.roomId, "members detached");
+	const { A, all } = started(mm, { Mode: 3 }, 3);
+	mm.close(all[2], clock);
+	for (const c of all) c.inbox.length = 0;
+	tick(mm, 40_000);
+	assert(!A.tags().includes("ArcherSelectLobby"), "nothing without a MatchEnded");
+	ended(all.slice(0, 2));
+	for (const c of all.slice(0, 2)) c.do({ RematchLobbyChoice: {} });
+	assert(A.tags().includes("RematchLobby"), "the two left rematch");
 });
 
-test("core: settings changes un-ready everyone; seats stay unique", async () => {
+test("core: match results wait for every device and are compared; winner_seat is a lobby seat", async () => {
+	const mm = await core();
+	// Seats 0 and 2 (a seat in between left): a 1v1 series between them.
+	const A = new FakeConn(mm, "ALICE");
+	const sent = builtLobby("ALICE");
+	Object.assign(sent, { MaxPlayers: 3 });
+	sent.GameData.BestOf = 3;
+	A.do({ CreateLobby: { lobby: sent } });
+	const { JoinCode } = A.last("CreateLobbyResponse").lobby;
+	const [B, C] = ["BOB", "CAROL"].map((name) => {
+		const c = new FakeConn(mm, name);
+		c.do({ JoinPrivate: { code: JoinCode, name, is_player: true } });
+		return c;
+	});
+	B.do({ LeaveLobby: {} });
+	eq(roomOf(mm).lobby.Players.map((p) => p.Seat), [0, 2], "seats 0 and 2");
+	measureAll([A, C]);
+	A.do({ StartLobbyChoice: {} });
+	const series = () => roomOf(mm).lobby.Series;
+	eq(series().Sides, [[0], [2]], "sides by seat");
+	A.do({ MatchEnded: { winner_seat: 2, frame: 900, checksum: "x", scores: [1, 0, 5] } });
+	eq(series().Games.length, 0, "one device's report isn't enough");
+	C.do({ MatchEnded: { winner_seat: 2, frame: 900, checksum: "x", scores: [1, 0, 5] } });
+	eq([series().Games[0].WinnerSide, series().PickerSide], [1, 0], "seat 2 won: side 1; side 0 picks");
+});
+
+test("core: match results that disagree abort the series (RESULT MISMATCH), then archer select", async () => {
+	const mm = await core();
+	const { A, B, all } = started(mm, { BestOf: 3 });
+	A.do({ MatchEnded: { winner_seat: 0, frame: 900, checksum: "x", scores: [5, 2] } });
+	B.do({ MatchEnded: { winner_seat: 1, frame: 900, checksum: "y", scores: [2, 5] } });
+	eq([roomOf(mm).lobby.Series.Status, roomOf(mm).lobby.Series.AbortReason], ["Aborted", "RESULT MISMATCH"], "aborted");
+	for (const c of all) c.do({ SeriesContinueChoice: {} });
+	assert(A.tags().includes("ArcherSelectLobby"), "an aborted series goes back to archer select");
+});
+
+test("core: a best-of-3 series (result, loser picks, auto start, finish, restart)", async () => {
+	const mm = await core();
+	const { A, B, all } = started(mm, { BestOf: 3 });
+	let l = roomOf(mm).lobby;
+	const first = l.GameData.MapId;
+	assert(first >= 0 && first < 16 && l.Series.AwaitingResult, "first tower drawn");
+	ended(all, 0, [5, 2]);
+	for (const c of all) c.do({ SeriesContinueChoice: {} });
+	assert(A.tags().includes("SeriesLobby"), "series screen");
+	l = A.last("LobbyUpdate").lobby;
+	eq([l.Series.Games.length, l.Series.PickerSide, l.InGame], [1, 1, false], "game 1 to side 0; side 1 picks");
+	A.do({ SeriesPickMap: { map_id: (first + 1) % 16 } });
+	assert(roomOf(mm).lobby.Series.Picks.length === 0, "not A's pick");
+	B.do({ SeriesPickMap: { map_id: first } });
+	assert(roomOf(mm).lobby.Series.NextMapId === null, "a played tower is refused");
+	B.do({ SeriesPickMap: { map_id: (first + 1) % 16 } });
+	eq(roomOf(mm).lobby.Series.NextMapId, (first + 1) % 16, "B's pick is next");
+	for (const c of all) c.inbox.length = 0;
+	for (const c of all) c.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === c.state.peer), Ready: true } } });
+	for (const c of all) assert(c.tags().includes("StartLobby"), "starts by itself once everyone is ready");
+	ended(all, 0, [5, 3]);
+	for (const c of all) c.do({ SeriesContinueChoice: {} });
+	l = A.last("LobbyUpdate").lobby;
+	eq([l.Series.Status, l.Series.WinnerSide], ["Finished", 0], "won 2-0");
+	for (const c of all) c.inbox.length = 0;
+	for (const c of all) c.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === c.state.peer), Ready: true } } });
+	assert(A.tags().includes("StartLobby") && roomOf(mm).lobby.Series.Games.length === 0, "a finished series restarts when everyone is ready");
+});
+
+test("core: a series is a 1v1 or a 2v2 team deathmatch", async () => {
+	const mm = await core();
+	const ffa = readyLobby(mm, { BestOf: 3, Mode: 3 }, 3);
+	ffa.A.inbox.length = 0;
+	ffa.A.do({ StartLobbyChoice: {} });
+	assert(!ffa.A.tags().includes("StartLobby"), "a 3-player series is refused");
+	const teams = started(await core(), { BestOf: 3, Mode: 5 }, 4);
+	eq(roomOf(teams.A.mm).lobby.Series.Sides, [[0, 2], [1, 3]], "2v2 sides by team");
+});
+
+test("core: the series screen starts by itself after 60 s; a player leaving aborts the series", async () => {
+	const mm = await core();
+	const { A, B, all } = started(mm, { BestOf: 3 });
+	ended(all);
+	for (const c of all) c.do({ SeriesContinueChoice: {} });
+	for (const c of all) c.inbox.length = 0;
+	tick(mm, 61_000);
+	assert(A.tags().includes("StartLobby"), "started after 60 s");
+	const series = roomOf(mm).lobby.Series;
+	assert(series.AwaitingResult && series.Games.length === 1, "game 2 on a drawn tower");
+	mm.close(B, clock);
+	eq([roomOf(mm).lobby.Series.Status, roomOf(mm).lobby.Series.AbortReason], ["Aborted", "PLAYER LEFT"], "aborted");
+});
+
+test("core: settings changes un-ready everyone, clear the series, keep the seed; MaxPlayers 2..4 and never under the players", async () => {
+	const mm = await core();
+	const { A, all } = readyLobby(mm, {}, 3);
+	const seed = roomOf(mm).lobby.GameData.Seed;
+	roomOf(mm).lobby.Series = { Status: "Finished" };
+	A.do({ UpdateLobbySettings: { max_players: 1, game_data: { MapId: 3, Mode: 5, MatchLength: 1, Variants: ["V"], Seed: 1, BestOf: 3 }, mods: [] } });
+	const l = A.last("LobbyUpdate").lobby;
+	eq([l.MaxPlayers, l.GameData.MapId, l.GameData.Seed, l.GameData.BestOf, l.Series], [3, 3, seed, 3, null], "applied (BestOf can change)");
+	assert(l.Players.every((p) => !p.Ready), "everyone un-ready");
+	all[1].do({ UpdateLobbySettings: { max_players: 4, game_data: l.GameData, mods: [] } });
+	eq(roomOf(mm).lobby.MaxPlayers, 3, "only the host");
+	eq(new Set(l.Players.map((p) => p.Seat)).size, 3, "seats unique");
+});
+
+test("core: local players (AddLocalPlayer): a seat after the device's first, UpdatePlayer by seat, one device counts once", async () => {
 	const mm = await core();
 	const A = new FakeConn(mm, "ALICE");
 	const sent = builtLobby("ALICE");
 	sent.MaxPlayers = 4;
 	A.do({ CreateLobby: { lobby: sent } });
-	const { lobby } = A.last("CreateLobbyResponse");
-	const joiners = ["B", "C", "D"].map((n) => {
-		const c = new FakeConn(mm, n);
-		c.do({ JoinPrivate: { code: lobby.JoinCode, name: n, is_player: true } });
-		return c;
-	});
-	joiners[0].do({ LeaveLobby: {} });
-	const E = new FakeConn(mm, "E");
-	E.do({ JoinPrivate: { code: lobby.JoinCode, name: "E", is_player: true } });
-	const seats = E.last("PrivateJoinResult").lobby.Players.map((p) => p.Seat).sort();
-	eq(seats, [0, 1, 2, 3], "freed seat reused");
-	A.do({ UpdatePlayer: { player: { ...lobby.Players[0], Ready: true } } });
-	A.do({ UpdateLobbySettings: { max_players: 2, game_data: { ...lobby.GameData, Mode: 4, Seed: 1, BestOf: 7 }, mods: [] } });
-	const l = E.last("LobbyUpdate").lobby;
-	eq(l.MaxPlayers, 4, "can't shrink below the players");
-	eq(l.GameData.Mode, 4, "mode changed");
-	eq([l.GameData.Seed, l.GameData.BestOf], [lobby.GameData.Seed, 0], "seed and series kept");
-	assert(l.Players.every((p) => !p.Ready), "everyone un-readied");
-	joiners[1].do({ UpdateLobbySettings: { max_players: 4, game_data: { ...lobby.GameData, Mode: 3 }, mods: [] } });
-	eq(E.last("LobbyUpdate"), undefined, "only the host changes settings");
-});
-
-test("core: local players (AddLocalPlayer): a seat after the device's first, UpdatePlayer by seat, one device leaving removes them all", async () => {
-	const mm = await core();
-	const A = new FakeConn(mm, "ALICE");
-	const sent = builtLobby("ALICE");
-	sent.MaxPlayers = 3;
-	A.do({ CreateLobby: { lobby: sent } });
-	const { lobby } = A.last("CreateLobbyResponse");
-	const B = new FakeConn(mm, "BOB");
-	B.do({ JoinPrivate: { code: lobby.JoinCode, name: "BOB", is_player: true } });
-	const bob = B.last("PrivateJoinResult").lobby.Players.find((p) => p.Name === "BOB");
-	B.do({ AddLocalPlayer: { player: { Name: "BOB 2", IsHost: true, Seat: 0 } } });
+	const { JoinCode } = A.last("CreateLobbyResponse").lobby;
+	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2", Platform: "Switch" } } });
 	let l = A.last("LobbyUpdate").lobby;
-	const guest = l.Players.find((p) => p.Name === "BOB 2");
-	assert(guest && guest.RoomPeerId === bob.RoomPeerId && guest.Seat === 2 && !guest.IsHost, "BOB 2 shares BOB's peer id, at seat 2");
+	eq(l.Players.map((p) => [p.Name, p.Seat, p.IsHost, p.RoomPeerId === A.state.peer]), [["ALICE", 0, true, true], ["ALICE 2", 1, false, true]], "seated on A's device");
+	assert(!l.IsCheckingConnections, "one device: nothing to check");
+	const B = new FakeConn(mm, "BOB");
+	B.do({ JoinPrivate: { code: JoinCode, name: "BOB", is_player: true } });
+	eq(B.last("PrivateJoinResult").lobby.Players.at(-1).Seat, 2, "B after them");
+	A.do({ PeerMeasured: { room_peer_id: B.state.peer } });
+	assert(!roomOf(mm).lobby.IsCheckingConnections, "one measurement between the two devices settles it");
+	A.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players[1], ArcherIndex: 4, Ready: true } } });
+	l = A.last("LobbyUpdate").lobby;
+	eq([l.Players[0].ArcherIndex, l.Players[1].ArcherIndex], [0, 4], "UpdatePlayer goes to the sent seat");
+	A.do({ StartLobbyChoice: {} });
+	A.do({ MatchEnded: { winner_seat: 2, frame: 1, checksum: null, scores: [0, 0, 5] } });
+	B.do({ MatchEnded: { winner_seat: 2, frame: 1, checksum: null, scores: [0, 0, 5] } });
+	assert(roomOf(mm).reports === null, "two devices, two reports: compared");
+	for (const c of [A, B]) c.do({ ArcherSelectChoice: {} });
+	A.do({ RemoveLocalPlayer: { seat: 0 } });
+	eq(roomOf(mm).lobby.Players.length, 3, "the device's first player isn't removed that way");
+	A.do({ RemoveLocalPlayer: { seat: 1 } });
+	eq(roomOf(mm).lobby.Players.map((p) => p.Name), ["ALICE", "BOB"], "removed");
 	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2" } } });
-	eq(A.last("LobbyUpdate").lobby.Players.length, 3, "a full lobby takes no one");
-	B.do({ UpdatePlayer: { player: { ...guest, ArcherIndex: 5, Ready: true } } });
-	l = A.last("LobbyUpdate").lobby;
-	assert(l.Players.find((p) => p.Seat === 2).Ready && !l.Players.find((p) => p.Seat === 1).Ready, "UpdatePlayer with seat 2 updates BOB 2 only");
-	B.do({ UpdatePlayer: { player: { ...bob, Seat: 0, Ready: true } } });
-	l = A.last("LobbyUpdate").lobby;
-	assert(l.Players.find((p) => p.Seat === 1).Ready && l.Players.find((p) => p.Seat === 0).Ready === false, "a seat that isn't the device's falls back to its first player");
-	B.do({ RemoveLocalPlayer: { seat: 1 } });
-	eq(A.last("LobbyUpdate"), undefined, "the device's first player can't be removed that way");
-	eq(B.last("LobbyUpdate").lobby.Players.length, 3, "(the sender gets the lobby back)");
-	B.do({ RemoveLocalPlayer: { seat: 2 } });
-	eq(A.last("LobbyUpdate").lobby.Players.map((p) => p.Seat), [0, 1], "BOB 2 removed");
-	B.do({ AddLocalPlayer: { player: { Name: "BOB 2" } } });
-	eq(A.last("LobbyUpdate").lobby.Players.length, 3, "BOB 2 back");
 	B.do({ LeaveLobby: {} });
-	eq(A.last("LobbyUpdate").lobby.Players.map((p) => p.Name), ["ALICE"], "BOB leaving takes BOB 2 along");
-	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2" } } });
-	for (const p of A.last("LobbyUpdate").lobby.Players) A.do({ UpdatePlayer: { player: { ...p, Ready: true } } });
-	A.do({ StartLobbyChoice: {} });
-	eq(A.take("StartLobby").length, 0, "one device alone (with its local player) can't start");
+	mm.close(A, clock);
+	eq(mm.rooms.size, 0, "the device leaving takes its players along");
 });
 
-test("core: a best-of-3 series (result, loser picks, auto start, finish)", async () => {
+test("core: spectators join mid-match (SpectatorJoined to the host only); host leaving closes the lobby", async () => {
 	const mm = await core();
-	const { A, B, all } = started(mm, { BestOf: 3 });
-	let l = A.last("LobbyUpdate").lobby;
-	const s0 = l.Series;
-	assert(s0 && s0.Status === "InProgress" && s0.AwaitingResult, "series started");
-	eq(s0.Sides, [[0], [1]], "sides");
-	assert(l.GameData.MapId >= 0 && l.GameData.MapId < 16, "server picked the tower");
-	const firstMap = l.GameData.MapId;
-	// Game 1: seat 0 wins 5-3. Both report; only one result counts.
-	for (const c of all) c.do({ MatchEnded: { winner_seat: 0, frame: 1, checksum: null, scores: [5, 3] } });
-	l = B.last("LobbyUpdate").lobby;
-	eq(l.Series.Games, [{ MapId: firstMap, WinnerSide: 0, Scores: [5, 3] }], "game recorded once");
-	eq(l.Series.PickerSide, 1, "loser picks");
-	for (const c of all) c.do({ SeriesContinueChoice: {} });
-	let tags = A.tags();
-	assert(tags.includes("SeriesLobby"), `series lobby (${tags.join(",")})`);
-	l = A.last("LobbyUpdate").lobby;
-	assert(!l.InGame && l.Players.every((p) => !p.Ready), "on the series screen, unready");
-	A.do({ SeriesPickMap: { map_id: firstMap === 4 ? 5 : 4 } });
-	eq(A.last("LobbyUpdate").lobby.Series.Picks, [], "only the picker side picks");
-	B.do({ SeriesPickMap: { map_id: firstMap } });
-	eq(B.last("LobbyUpdate").lobby.Series.Picks, [], "no replaying a tower");
-	const pick = firstMap === 4 ? 5 : 4;
-	B.do({ SeriesPickMap: { map_id: pick } });
-	l = B.last("LobbyUpdate").lobby;
-	eq([l.Series.Picks, l.Series.NextMapId], [[{ Seat: 1, MapId: pick }], pick], "pick echoed");
-	for (const [i, c] of all.entries()) c.do({ UpdatePlayer: { player: { ...l.Players[i], Ready: true } } });
-	tags = A.tags();
-	assert(tags.at(-1) === "StartLobby", `auto start (${tags.join(",")})`);
-	l = A.last("LobbyUpdate").lobby;
-	assert(l.InGame && l.GameData.MapId === pick && l.Series.AwaitingResult, "game 2 on the picked tower");
-	A.take("StartLobby");
-	// Game 2: seat 0 wins again: series over.
-	A.do({ MatchEnded: { winner_seat: 0, frame: 1, checksum: null, scores: [5, 1] } });
-	l = A.last("LobbyUpdate").lobby;
-	eq([l.Series.Status, l.Series.WinnerSide], ["Finished", 0], "series won");
-	// Nobody continues: after the vote window, the series screen anyway.
-	tick(mm, 34_000);
-	assert(B.tags().includes("SeriesLobby"), "series screen after timeout");
+	const { A, B, roomId } = started(mm);
+	const code = roomOf(mm).lobby.JoinCode;
+	const S = new FakeConn(mm, "SPEC");
+	S.do({ JoinPrivate: { code, name: "SPEC", is_player: false } });
+	const result = S.last("PrivateJoinResult");
+	assert(result.success && result.lobby.Spectators.length === 1 && result.lobby.InGame, "spectator joined an InGame lobby");
+	eq(A.last("SpectatorJoined"), { room_peer_id: result.room_peer_id }, "host told");
+	assert(!B.take("SpectatorJoined").length, "only the host");
+	const P = new FakeConn(mm, "LATE");
+	clock += 3_000;
+	P.do({ JoinPrivate: { code, name: "LATE", is_player: true } });
+	eq(P.last("PrivateJoinResult").message, `Lobby ${roomId} is full`, "no joining as a player");
+	mm.close(A, clock);
+	assert(!B.last("LobbyUpdate").lobby.Players.some((p) => p.IsHost), "hostless lobby sent");
+	assert(!mm.rooms.has(roomId) && !B.state.roomId && !S.state.roomId, "lobby gone, members detached");
 });
 
-test("core: series screen starts by itself after 60 s; a player leaving aborts the series", async () => {
-	const mm = await core();
-	const { A, B, all } = started(mm, { BestOf: 5 });
-	A.do({ MatchEnded: { winner_seat: 1, frame: 1, checksum: null, scores: [0, 5] } });
-	for (const c of all) c.do({ SeriesContinueChoice: {} });
-	for (const c of all) c.inbox.length = 0;
-	tick(mm, 63_000);
-	assert(A.tags().includes("StartLobby"), "forced start");
-	const l = A.last("LobbyUpdate").lobby;
-	assert(l.GameData.MapId !== l.Series.Games[0].MapId, "a tower not yet played");
-	mm.close(B, clock);
-	const after = A.last("LobbyUpdate").lobby;
-	eq([after.Series.Status, after.Series.AbortReason], ["Aborted", "PLAYER LEFT"], "aborted");
-});
-
-test("core: quick play with local players: devices match if their players fit, a device's players share its peer id", async () => {
+test("core: joining: messages as TF.EX's server words them; one private-code try every 3 s", async () => {
 	const mm = await core();
 	const A = new FakeConn(mm, "ALICE");
-	const B = new FakeConn(mm, "BOB");
-	const C = new FakeConn(mm, "CAROL");
-	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false, local_players: 3 } });
-	eq(A.last("QuickPlayStatus").local_players, 3, "the status echoes the device's players");
-	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false, local_players: 2 } });
-	eq(B.last("QuickPlayMatchFound"), undefined, "3 + 2 players don't fit in 4");
-	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false, local_players: 3 } });
-	eq(B.last("QuickPlayMatchFound"), undefined, "nor 3 + 3");
-	C.do({ EnterQuickPlay: { name: "CAROL", is_wide: false } });
-	const a = A.last("QuickPlayMatchFound");
-	const c = C.last("QuickPlayMatchFound");
-	assert(a && c && a.lobby.RoomId === c.lobby.RoomId, "ALICE (3) and CAROL (1) matched, the first that fit");
-	const l = a.lobby;
-	eq(l.MaxPlayers, 4, "4 seats");
-	eq(l.Players.map((p) => p.Seat), [0, 1, 2, 3], "seats");
-	eq(new Set(l.Players.filter((p) => p.RoomPeerId === a.room_peer_id).map((p) => p.Seat)).size, 3, "ALICE's 3 players share her peer id");
-	eq(l.Players.filter((p) => p.IsHost).length, 1, "one host");
-	assert(B.state.quickPlay, "BOB still searching");
-	B.do({ ExitQuickPlay: {} });
+	A.do({ CreateLobby: { lobby: builtLobby("ALICE") } });
+	const lobby = A.last("CreateLobbyResponse").lobby;
+	const G = new FakeConn(mm, "GUESS");
+	G.do({ JoinPrivate: { code: "ZZZZZ", name: "G", is_player: true } });
+	eq(G.last("PrivateJoinResult").message, "Invalid or expired code", "bad code");
+	G.do({ JoinPrivate: { code: lobby.JoinCode, name: "G", is_player: true } });
+	eq(G.last("PrivateJoinResult").message, "Too many attempts, wait a moment", "within 3 s");
+	clock += 3_000;
+	G.do({ JoinPrivate: { code: ` ${lobby.JoinCode.toLowerCase()} `, name: "G", is_player: true } });
+	assert(G.last("PrivateJoinResult").success, "a sloppy code later");
+	const H = new FakeConn(mm, "H");
+	H.do({ JoinPrivate: { code: lobby.JoinCode, name: "H", is_player: true } });
+	eq(H.last("PrivateJoinResult").message, `Lobby ${lobby.RoomId} is full`, "full");
+	H.do({ JoinLobby: { room_id: "nope", name: "H", is_player: true } });
+	eq(H.last("JoinLobbyResponse").message, "Lobby nope not found", "unknown room");
+	H.do({ JoinLobby: { room_id: lobby.RoomId, name: "H", is_player: false } });
+	assert(H.last("JoinLobbyResponse").success, "a private lobby can be joined by room id too (as TF.EX's server allows)");
+	A.do({ CreateLobby: { lobby: { ...builtLobby("X"), Kind: "Ranked" } } });
+	eq(A.last("CreateLobbyResponse").message, "Ranked lobbies are automated", "no ranked lobbies by hand");
 });
 
-test("core: quick play matches two searchers and starts once both are ready", async () => {
+test("core: the lobby list: open Standard lobbies, running matches (quick play too), never private; peer ids hidden", async () => {
 	const mm = await core();
-	const A = new FakeConn(mm, "ALICE");
-	const W = new FakeConn(mm, "WIDE");
-	const B = new FakeConn(mm, "BOB");
+	const open = new FakeConn(mm, "OPEN");
+	open.do({ CreateLobby: { lobby: builtLobby("OPEN", "Standard") } });
+	const full = started(mm, {}, 2);
+	const priv = roomOf(mm).lobby.RoomId;
+	const F = new FakeConn(mm, "FULL");
+	const fullLobby = { ...builtLobby("FULL", "Standard"), MaxPlayers: 2 };
+	F.do({ CreateLobby: { lobby: fullLobby } });
+	const G = new FakeConn(mm, "G2");
+	G.do({ JoinLobby: { room_id: fullLobby.RoomId, name: "G2", is_player: true } });
+	const [q1, q2] = [new FakeConn(mm, "Q1"), new FakeConn(mm, "Q2")];
+	q1.do({ EnterQuickPlay: { name: "Q1", is_wide: false } });
+	q2.do({ EnterQuickPlay: { name: "Q2", is_wide: false } });
+	const L = new FakeConn(mm, "LIST");
+	L.do({ GetLobbies: {} });
+	let names = L.last("GetLobbiesResponse").lobbies.map((l) => l.Name);
+	eq(names, ["OPEN"], "the open one only (full, private and waiting quick play aren't listed)");
+	for (const q of [q1, q2]) q.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === q.state.peer), Ready: true } } });
+	measureAll([q1, q2]);
+	tick(mm, 6_000);
+	L.do({ GetLobbies: {} });
+	const listed = L.last("GetLobbiesResponse").lobbies;
+	eq(listed.map((l) => l.Name), ["OPEN", "QUICK PLAY"], "a running quick play match is listed (to spectate), last");
+	assert(listed.every((l) => l.Players.every((p) => p.RoomPeerId === "")), "without peer ids");
+	assert(!listed.some((l) => l.RoomId === priv), "private never");
+	void full;
+});
+
+test("core: quick play: pairs the first two, seats the next into the open lobby (4 seats), starts once full or after 5 s of everyone ready", async () => {
+	const mm = await core();
+	const [A, B, C] = ["ALICE", "BOB", "CAROL"].map((n) => new FakeConn(mm, n));
 	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false } });
-	eq(A.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 0, message: "", local_players: 1 }, "queued");
-	W.do({ EnterQuickPlay: { name: "WIDE", is_wide: true } });
-	eq(W.last("QuickPlayStatus").searching_wide, 1, "wide counted apart");
+	eq(A.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 0, message: "" }, "queued");
 	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });
-	const a = A.last("QuickPlayMatchFound");
-	const b = B.last("QuickPlayMatchFound");
-	assert(a && b && a.lobby.RoomId === b.lobby.RoomId, "matched together");
-	eq(a.lobby.Kind, "QuickPlay", "kind");
-	eq(a.lobby.Players.filter((p) => p.IsHost).length, 1, "one host");
-	eq(W.last("QuickPlayStatus").searching_standard, 0, "queue counts updated");
-	A.do({ StartLobbyChoice: {} });
-	eq(A.take("StartLobby").length, 0, "nobody starts quick play by hand");
-	A.do({ UpdatePlayer: { player: { ...a.lobby.Players[0], Ready: true } } });
-	B.do({ UpdatePlayer: { player: { ...b.lobby.Players[1], Ready: true } } });
-	tick(mm, 1000);
-	eq(B.take("StartLobby").length, 0, "short pause first");
-	tick(mm, 600);
-	eq(B.take("StartLobby").length, 1, "started");
+	const found = A.last("QuickPlayMatchFound");
+	eq([found.lobby.Name, found.lobby.MaxPlayers, found.lobby.Kind, found.lobby.Mods], ["QUICK PLAY", 4, "QuickPlay", []], "a 4-seat lobby");
+	eq(found.lobby.Players.map((p) => [p.Name, p.Seat, p.IsHost]), [["ALICE", 0, true], ["BOB", 1, false]], "the first searcher hosts");
+	C.do({ EnterQuickPlay: { name: "CAROL", is_wide: false } });
+	eq(C.last("QuickPlayMatchFound").lobby.Players.length, 3, "seated into the open lobby");
+	const all = [A, B, C];
+	measureAll(all);
+	for (const c of all) c.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players.find((p) => p.RoomPeerId === c.state.peer), Ready: true } } });
+	for (const c of all) c.inbox.length = 0;
+	tick(mm, 4_000);
+	assert(!A.tags().includes("StartLobby"), "not before 5 s");
+	tick(mm, 1_100);
+	for (const c of all) eq(c.tags(), ["StartLobby"], "started by itself");
+	assert(mm.nextWake() - clock <= 30_000, "nothing left but keep-alives");
+	const W = new FakeConn(mm, "WAIT");
+	W.do({ EnterQuickPlay: { name: "WAIT", is_wide: false } });
+	assert(W.state.quickPlay, "a match running: W waits");
 	W.do({ ExitQuickPlay: {} });
-	assert(!W.state.quickPlay, "left the queue");
+	eq(W.last("QuickPlayStatus"), { queued: false, searching_standard: 0, searching_wide: 0, message: "" }, "ExitQuickPlay is answered");
+});
+
+test("core: quick play: the host leaving passes the lobby on; a seat freed in the lobby goes to the next searcher", async () => {
+	const mm = await core();
+	const [A, B] = ["ALICE", "BOB"].map((n) => new FakeConn(mm, n));
+	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false } });
+	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });
+	const roomId = B.last("QuickPlayMatchFound").lobby.RoomId;
+	A.do({ LeaveLobby: {} });
+	const l = B.last("LobbyUpdate").lobby;
+	eq(l.Players.map((p) => [p.Name, p.IsHost]), [["BOB", true]], "B hosts now");
+	const C = new FakeConn(mm, "CAROL");
+	C.do({ EnterQuickPlay: { name: "CAROL", is_wide: false } });
+	eq(C.last("QuickPlayMatchFound").lobby.RoomId, roomId, "C seated with B");
+});
+
+test("core: quick play: wide searchers only meet wide ones, in a lobby with WiderSet's IsWide", async () => {
+	const mm = await core();
+	const [A, B, C] = ["ALICE", "BOB", "CAROL"].map((n) => new FakeConn(mm, n));
+	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: true } });
+	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });
+	eq(B.last("QuickPlayStatus"), { queued: true, searching_standard: 1, searching_wide: 1, message: "" }, "not matched");
+	C.do({ EnterQuickPlay: { name: "CAROL", is_wide: true } });
+	eq(C.last("QuickPlayMatchFound").lobby.Mods, [{ Name: "Teuria.WiderSet", Data: { IsWide: "True" } }], "the wide lobby");
+	assert(B.state.quickPlay, "B still searching");
+});
+
+test("core: version gate, Identify's player id, and the answers of a server without ranking", async () => {
+	const { versionRefusal } = await import("./matchmaker.js");
+	eq(versionRefusal(null), { status: 426 }, "no version: 426");
+	eq(versionRefusal("v0.22"), { status: 426 }, "not a version: 426");
+	eq(versionRefusal("0.21.1", "0.22.0"), { updateRequired: "0.22.0" }, "older: UpdateRequired");
+	eq([versionRefusal("0.22.0", "0.22.0"), versionRefusal("0.23.0.1", "0.22.0"), versionRefusal("0.22.2")], [null, null, null], "same or newer");
+	const mm = await core();
+	const A = new FakeConn(mm, "ALICE");
+	A.do({ Identify: { player_id: "evil:1", name: "EVE" } });
+	eq(A.state.name, "ALICE", "an Identify with another prefix is ignored");
+	A.do({ EnterRanked: { name: "ALICE", is_wide: false } });
+	eq(A.last("RankedStatus"), { queued: false, searching_standard: 0, searching_wide: 0, message: "RANKED IS NOT AVAILABLE ON THIS SERVER" }, "no ranked");
+	A.do({ GetLeaderboard: {} });
+	A.do({ GetLeaderboard: {} });
+	eq(A.take("Leaderboard"), [{ entries: [], own: null, around: [], total: 0 }], "an empty leaderboard, once per 2 s");
+	A.do({ GetPlayerProfile: { rank: 3 } });
+	eq(A.last("PlayerProfile"), { rank: 3, profile: null }, "no profile");
+});
+
+test("core: skin chunks go to the whole lobby, the sender included; oversized ones are dropped", async () => {
+	const mm = await core();
+	const { A, others } = readyLobby(mm);
+	const chunk = { bundle_id: "b", custom_archer_id: "x", chunk_index: 0, chunk_count: 1, data: "AAAA" };
+	A.do({ SkinChunk: { chunk } });
+	eq([A.last("SkinChunk"), others[0].last("SkinChunk")], [{ chunk, from: A.state.peer }, { chunk, from: A.state.peer }], "both");
+	A.do({ SkinChunk: { chunk: { ...chunk, chunk_count: 33 } } });
+	assert(!others[0].take("SkinChunk").length, "too many chunks");
 });
 
 test("core: lobbies survive hibernation; members whose sockets closed are removed", async () => {
@@ -766,7 +924,7 @@ test("core: lobbies survive hibernation; members whose sockets closed are remove
 	const saved = new Map();
 	const persist = { save: (room) => saved.set(room.lobby.RoomId, structuredClone(room)), remove: (id) => saved.delete(id) };
 	const mm = new Matchmaker({ persist });
-	const { A, B } = started(mm);
+	const { A, B, all } = started(mm);
 	const C = new FakeConn(mm, "SPEC");
 	C.do({ JoinPrivate: { code: [...saved.values()][0].lobby.JoinCode, name: "SPEC", is_player: false } });
 	// Wake up with A and B still connected, the spectator's socket gone.
@@ -775,8 +933,8 @@ test("core: lobbies survive hibernation; members whose sockets closed are remove
 	for (const c of [A, B]) c.mm = woke;
 	const l = [...woke.rooms.values()][0].lobby;
 	eq([l.Players.length, l.Spectators.length], [2, 0], "spectator dropped, players kept");
-	A.do({ MatchEnded: { winner_seat: 0, frame: 1, checksum: null, scores: [1, 0] } });
-	for (const c of [A, B]) c.do({ ArcherSelectChoice: {} });
+	ended(all);
+	for (const c of all) c.do({ ArcherSelectChoice: {} });
 	assert(B.tags().includes("ArcherSelectLobby"), "lobby still works");
 });
 
@@ -811,7 +969,6 @@ test("core: a full match room's peers can't be taken over from elsewhere", async
 	const Y = conn("Y");
 	room.open(Y, host, clock + 6000 + 26_000, "6.6.6.6");
 	eq(Y.closed, null, "a peer quiet past its keep-alives can be replaced");
-	// Rate and size limits.
 	const C = conn("C");
 	room.open(C, uuid(), clock, "3.3.3.3");
 	room.message(C, "x".repeat(70 * 1024), clock);
@@ -826,7 +983,7 @@ test("core: a full match room's peers can't be taken over from elsewhere", async
 	eq(E.closed, null, "10 a second is fine");
 });
 
-test("core: per-address and per-connection limits", async () => {
+test("core: per-address and per-connection limits; spectators and lobby size are capped", async () => {
 	const mm = await core();
 	const conns = Array.from({ length: 16 }, (_, i) => new FakeConn(mm, `P${i}`, "9.9.9.9"));
 	assert(conns.every((c) => !c.closed), "16 from one address");
@@ -844,10 +1001,6 @@ test("core: per-address and per-connection limits", async () => {
 		G.do({ KeepAlive: {} });
 	}
 	assert(!G.closed, "10 a second is fine");
-});
-
-test("core: guessing join codes runs out of tries; spectators and lobby size are capped", async () => {
-	const mm = await core();
 	const A = new FakeConn(mm, "ALICE", "1.1.1.1");
 	A.do({ CreateLobby: { lobby: builtLobby("ALICE") } });
 	const lobby = A.last("CreateLobbyResponse").lobby;
@@ -856,31 +1009,13 @@ test("core: guessing join codes runs out of tries; spectators and lobby size are
 	assert(S.every((c) => c.last("PrivateJoinResult").success), "8 spectators");
 	const S9 = new FakeConn(mm, "S9", "3.3.4.4");
 	S9.do({ JoinPrivate: { code: lobby.JoinCode, name: "S9", is_player: false } });
-	eq(S9.last("PrivateJoinResult").message, "LOBBY FULL", "a 9th spectator");
-	const G = new FakeConn(mm, "GUESS", "2.2.2.2");
-	for (let i = 0; i < 20; i++) G.do({ JoinPrivate: { code: "ZZZZZ", name: "G", is_player: true } });
-	G.take("PrivateJoinResult");
-	G.do({ JoinPrivate: { code: lobby.JoinCode, name: "G", is_player: true } });
-	eq(G.last("PrivateJoinResult").message, "TOO MANY TRIES", "locked out after 20 wrong codes");
-	clock += 11 * 60_000;
-	G.do({ JoinPrivate: { code: lobby.JoinCode, name: "G", is_player: true } });
-	assert(G.last("PrivateJoinResult").success, "until a while later");
+	eq(S9.last("PrivateJoinResult").message, `Lobby ${lobby.RoomId} is full`, "a 9th spectator");
 	const big = builtLobby("BIG");
 	big.Mods = Array.from({ length: 16 }, (_, i) => ({ Name: `M${i}`, Data: Object.fromEntries(Array.from({ length: 32 }, (_, k) => [`k${k}`, "v".repeat(256)])) }));
 	const H = new FakeConn(mm, "BIG");
 	H.do({ CreateLobby: { lobby: big } });
-	eq(H.last("CreateLobbyResponse").message, "LOBBY TOO BIG", "oversized lobby refused");
-	assert(mm.isMember(lobby.RoomId, lobby.Players[0].RoomPeerId) && !mm.isMember(lobby.RoomId, uuid()), "isMember (for /turn)");
-});
-
-test("core: a player leaving mid-match still gets the lobby back to archer select", async () => {
-	const mm = await core();
-	const { A, all } = started(mm, { Mode: 3 }, 3);
-	mm.close(all[2], clock);
-	for (const c of all) c.inbox.length = 0;
-	tick(mm, 34_000);
-	assert(A.tags().includes("ArcherSelectLobby"), "back to archer select");
-	assert(!A.last("LobbyUpdate").lobby.InGame, "not in game");
+	eq(H.last("CreateLobbyResponse").message, "Lobby too big", "oversized lobby refused");
+	assert(mm.isMember(lobby.RoomId, lobby.Players[0].RoomPeerId) && !mm.isMember(lobby.RoomId, uuid()), "isMember (signaling, /turn)");
 });
 
 test("core: stats count connections, lobbies and matches (for safe redeploys)", async () => {
@@ -890,18 +1025,6 @@ test("core: stats count connections, lobbies and matches (for safe redeploys)", 
 	const S = new FakeConn(mm, "SEARCH");
 	S.do({ EnterQuickPlay: { name: "SEARCH", is_wide: false } });
 	eq(mm.stats(), { connections: 3, lobbies: 1, matches: 1, playersInMatches: 2, searching: 1 }, "one match, one searching");
-});
-
-test("core: quick play lobbies close when a player leaves before the match", async () => {
-	const mm = await core();
-	const A = new FakeConn(mm, "ALICE");
-	const B = new FakeConn(mm, "BOB");
-	A.do({ EnterQuickPlay: { name: "ALICE", is_wide: false } });
-	B.do({ EnterQuickPlay: { name: "BOB", is_wide: false } });
-	const roomId = A.last("QuickPlayMatchFound").lobby.RoomId;
-	B.do({ LeaveLobby: {} });
-	eq(A.last("LobbyUpdate").lobby.Players, [], "A gets a lobby without a host (TF.EX leaves it)");
-	assert(!mm.rooms.has(roomId) && !A.state.roomId, "closed");
 });
 
 // ---- Match relay (/relay/<id>, relay.js) ----
@@ -946,6 +1069,8 @@ async function startedMatch() {
 	m.A.send({ UpdatePlayer: { player: { ...m.host, Ready: true } } });
 	m.B.send({ UpdatePlayer: { player: { ...m.bob, Ready: true, Platform: "Switch" } } });
 	await m.A.next(allReady);
+	m.B.send({ PeerMeasured: { room_peer_id: m.host.RoomPeerId } });
+	await m.A.next((t) => t.startsWith('{"LobbyUpdate"') && !JSON.parse(t).LobbyUpdate.lobby.IsCheckingConnections);
 	m.A.send({ StartLobbyChoice: {} });
 	await m.B.next("StartLobby");
 	return m;
@@ -963,6 +1088,8 @@ test("relay: only the players of a lobby whose match is on get in; peer is requi
 	m.A.send({ UpdatePlayer: { player: { ...m.host, Ready: true } } });
 	m.B.send({ UpdatePlayer: { player: { ...m.bob, Ready: true } } });
 	await m.A.next(allReady);
+	m.B.send({ PeerMeasured: { room_peer_id: m.host.RoomPeerId } });
+	await m.A.next((t) => t.startsWith('{"LobbyUpdate"') && !JSON.parse(t).LobbyUpdate.lobby.IsCheckingConnections);
 	m.A.send({ StartLobbyChoice: {} });
 	await m.B.next("StartLobby");
 	eq(await handshake(`/relay/${room}?peer=${spectator}`), 403, "a spectator");
@@ -1016,7 +1143,7 @@ test("relay: xnet-* rooms need no lobby (lobby-free tests), still 2 peers; no lo
 	const lobby = builtLobby("HOST");
 	lobby.RoomId = `xnet-${Date.now()}`;
 	H.send({ CreateLobby: { lobby } });
-	eq((await H.next("CreateLobbyResponse")).CreateLobbyResponse.message, "BAD ROOM ID", "no lobby named xnet-*");
+	eq((await H.next("CreateLobbyResponse")).CreateLobbyResponse.message, "Bad room id", "no lobby named xnet-*");
 	for (const c of [A, B, H]) c.close();
 });
 
@@ -1068,11 +1195,11 @@ test("core: a stale relay peer can be replaced from another address", async () =
 let failed = 0;
 for (const t of tests) {
 	try {
-		await t.fn();
+		await Promise.race([t.fn(), sleep(20_000).then(() => { throw new Error("timed out (20 s)"); })]);
 		console.log(`ok   ${t.name}`);
 	} catch (e) {
 		failed++;
-		console.log(`FAIL ${t.name}\n     ${e.stack.split("\n").slice(0, 3).join("\n     ")}`);
+		console.log(`FAIL ${t.name}\n     ${String(e?.stack ?? e?.message ?? e).split("\n").slice(0, 3).join("\n     ")}`);
 	}
 }
 console.log(failed ? `${failed} of ${tests.length} failed` : `all ${tests.length} passed`);

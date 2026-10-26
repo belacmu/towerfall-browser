@@ -1,92 +1,112 @@
-// Matchmaking at /ws, compatible with TF.EX's client (v0.19.1, checked against v0.21.1: src/network/TF.EX.Domain/Services/
-// MatchmakingService.cs and the menus that call it; TFEX_PROTOCOL names the version last checked). The protocol is read from that client; the
-// official server isn't open source, so where the client leaves room the choices here are ours
-// (docs/MULTIPLAYER.md lists them).
+// Matchmaking at /ws, behaving as TF.EX's own server does: Fcornaire/tf-ex-matchmaking-server (Rust, open source since
+// 2026-10-25; checked against 980e86c). Function names here follow its (state/*.rs) where they do the same thing. The
+// differences, each needed:
+//  - Local players (Fcornaire/TF.EX#283): AddLocalPlayer / RemoveLocalPlayer seat more Players on one connection; they share its
+//    room peer id, UpdatePlayer goes to the sent seat, a device counts once in the connection check and for match reports.
+//  - Workers can't take UDP, so TF.EX's relay doesn't exist: RelayedPairs stays empty and an unreachable pair is left to try
+//    directly (the real server without its relay does the same).
+//  - Cost (the Workers free plan): KeepAlive every 30 s instead of 3, and QuickPlayStatus when the queue changes and with each
+//    keep-alive instead of every second. Durable Object alarms are requests.
+//  - Limits for a server anyone can reach (message rate and size, connections per address, lobby size, spectators).
+//  - GetLobbies leaves out peer ids (the lobby list doesn't use them).
+//  - No GeoIP: every player is the same distance, as on the real server without a MaxMind key.
+//  - No ranking: the real server's NoRanking answers (empty leaderboard, no profile, ranked unavailable).
 //
-// Messages are JSON objects with one key, the message name. TF.EX sends them as binary frames and
-// recognizes ours by their first characters ({"Name"), so the name always comes first. Lobby
-// objects use TF.EX's field names (Lobby.cs, PascalCase); message fields are snake_case. Integers
-// must stay integers and collections must never be null (TF.EX parses JSON via MessagePack).
+// Messages are JSON objects with one key, the message name. TF.EX sends them as binary frames and recognizes ours by their
+// first characters ({"Name"), so the name always comes first. Lobby objects use TF.EX's field names (PascalCase); message
+// fields are snake_case.
 //
-// A connection (`conn`) is anything with an `id`, send(text), close(code, reason) and a `state`
-// object that save() persists (a Durable Object keeps it with the socket through hibernation).
-// Lobbies are kept as records { lobby, timers } and handed to `persist` when they change.
+// A connection (`conn`) is anything with an `id`, send(text), close(code, reason) and a `state` object that save() persists
+// (a Durable Object keeps it with the socket through hibernation). Lobbies are kept as records ("rooms") { lobby, ... } and
+// handed to `persist` when they change.
 
 export const KEEPALIVE_MS = 30_000;
 // Connections that send nothing for this long are dropped (TF.EX echoes every KeepAlive).
 const IDLE_MS = 3 * KEEPALIVE_MS + 10_000;
-// The end-of-match vote ("PICK IN 30" in TF.EX); undecided players go to archer select.
-const VOTE_MS = 33_000;
-// The series screen's "STARTS IN 60": then the server picks a tower if needed and starts.
-const SERIES_PICK_MS = 62_000;
-// Quick play starts this long after everyone has picked an archer ("MATCH STARTING...").
-const QUICK_START_MS = 1_500;
-// TF.EX 0.20.0: once everyone is ready, the server waits for each pair's PeerMeasured (both ways) before StartLobby, at most this
-// long; pairs still unmeasured then go through the relay (RelayedPairs). Only in lobbies where every player measures (measures()).
-const CHECK_CONNECTIONS_MS = 8_000;
+const END_GAME_CHOICE_MS = 30_000; // END_GAME_CHOICE_SECONDS
+const SERIES_READY_MS = 60_000; // SERIES_READY_SECONDS
+const QUICK_PLAY_AUTO_START_GRACE_MS = 5_000; // QUICK_PLAY_AUTO_START_GRACE_SECS
+const CONNECTION_CHECK_MS = 10_000; // CONNECTION_CHECK_SECS
+const PRIVATE_JOIN_COOLDOWN_MS = 3_000; // PRIVATE_JOIN_COOLDOWN_SECS
+const STALE_REPORTS_MS = 300_000; // STALE_REPORTS_SECS
+const LEADERBOARD_COOLDOWN_MS = 2_000;
+const PROFILE_COOLDOWN_MS = 250;
+const RANKED_UNAVAILABLE_MESSAGE = "RANKED IS NOT AVAILABLE ON THIS SERVER";
+export const WIDER_SET_MOD_NAME = "Teuria.WiderSet";
 
-const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // JoinCodeEntry: A-Z without I and O, 2-9
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
 const CODE_LENGTH = 5;
-// TF.EX's relay (ggrs_ffi relay.rs) is a WebSocket control channel (Welcome {token, udp_port}, UdpConfirmed, PeerConnected {peer,
-// id}, PeerDisconnected, SpectatorsFull) plus a UDP socket on the server carrying the game packets (HELLO 1 / GAME 2, an 8-byte
-// token, pieces of at most 1200 bytes). Cloudflare Workers can't take UDP, so it needs another host; until then: false.
-const RELAY_AVAILABLE = false;
 const MAX_NAME = 10; // NetplayPreferences.MaxNameLength
 const MAX_PLAYERS = 4;
-const MAX_WIDE_PLAYERS = 8; // WiderSet
-const TOWERS = 16; // TF.EX's netplay towers (Constants.cs): map ids 0..15, -1 random
+const SERIES_TOWER_COUNT = 16;
+const SERIES_TEAM_SIZE = 2;
 const TEAM_DEATHMATCH = 5; // TowerFall.Modes
-const MAX_SKIN_CHUNK = 320 * 1024; // 192 KiB per chunk, as base64
+const MAX_SKIN_CHUNK_DATA = 400_000;
+const MAX_SKIN_CHUNKS = 32;
 
-// Limits for a server anyone can reach. TF.EX stays well inside them: its biggest message is a skin
-// chunk, and it sends a skin as up to 32 of them in a row.
-export const MAX_FRAME = MAX_SKIN_CHUNK + 16 * 1024;
+// Limits for a server anyone can reach. TF.EX stays well inside them: its biggest message is a skin chunk.
+export const MAX_FRAME = MAX_SKIN_CHUNK_DATA + 16 * 1024;
 const MAX_LOBBY_JSON = 64 * 1024; // a lobby, serialized (it goes out with every update and listing)
 const MAX_SPECTATORS = 8;
 const MAX_CONNS_PER_IP = 16;
 // Messages per connection: a bucket of BURST that refills at RATE per second. Running dry closes it.
 const BURST = 100;
 const RATE = 20;
-// Wrong join codes per address before it has to wait (codes are 5 of 32 characters).
-const CODE_MISSES = 20;
-const CODE_MISS_WINDOW_MS = 10 * 60_000;
 
 const clean = (s, max) => String(s ?? "").slice(0, max);
 const int = (v, fallback = 0) => (Number.isInteger(v) ? v : fallback);
 const strings = (list, n, max) => (Array.isArray(list) ? list.slice(0, n).map((s) => clean(s, max)) : []);
+const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+const unique = (list) => [...new Set(list)];
+
+// "0.21.1" -> [0, 21, 1] (a fourth part is ignored), else null (ExVersion::parse).
+export function parseVersion(value) {
+	const parts = String(value ?? "").trim().split(".");
+	if (parts.length < 3 || !parts.slice(0, 3).every((p) => /^\d+$/.test(p))) return null;
+	return parts.slice(0, 3).map(Number);
+}
+
+// Whether a client may connect (check_version): null when it may, { status: 426 } without a version, { updateRequired } when older.
+export function versionRefusal(version, minimum = "0.0.0") {
+	const required = parseVersion(minimum) ?? [0, 0, 0];
+	const v = parseVersion(version);
+	if (!v) return { status: 426 };
+	for (let i = 0; i < 3; i++) {
+		if (v[i] !== required[i]) return v[i] < required[i] ? { updateRequired: required.join(".") } : null;
+	}
+	return null;
+}
 
 export class Matchmaker {
-	constructor({ persist = null, log = () => {}, random = Math.random } = {}) {
+	constructor({ persist = null, log = () => {}, random = Math.random, reportsEnabled = true, fixedSeed = null } = {}) {
 		this.persist = persist;
 		this.log = log;
 		this.random = random;
-		this.rooms = new Map(); // RoomId -> { lobby, timers: { vote, seriesPick, quickStart } }
+		this.reportsEnabled = reportsEnabled;
+		this.fixedSeed = Number.isInteger(fixedSeed) ? fixedSeed : null; // tests with scripted inputs (a known level)
+		this.rooms = new Map(); // RoomId -> room
 		this.conns = new Map(); // conn.id -> conn
 		this.keepAliveAt = 0;
-		this.codeMisses = new Map(); // address -> { n, until }
 	}
 
-	// After a Durable Object wakes up: its lobbies from storage and the sockets still connected.
-	// Members whose connection is gone are removed (everyone, after a redeploy).
+	// After a Durable Object wakes up: its lobbies from storage and the sockets still connected. Members whose connection is
+	// gone are removed (everyone, after a redeploy).
 	restore(rooms, conns) {
 		for (const conn of conns) if (!conn.state.refused) this.conns.set(conn.id, conn);
 		for (const room of rooms) {
-			// (rooms stored before TF.EX 0.21 support)
-			room.measured = room.measured instanceof Set ? room.measured : new Set();
-			room.timers.checkConnections ??= null;
-			for (const [k, v] of Object.entries({ RelayedPairs: [], IsCheckingConnections: false, IsReportEnabled: true, MatchPlayers: [] })) room.lobby[k] ??= v;
-			room.lobby.IsReportEnabled = true; // (lobbies saved before reports were on)
+			if (!room.connectivity || !("RankedSeats" in room.lobby)) continue; // (stored before this version: dropped)
 			this.rooms.set(room.lobby.RoomId, room);
 		}
+		const now = Date.now();
 		for (const room of [...this.rooms.values()]) {
 			const live = new Set(this.members(room).map((c) => c.state.peer));
-			for (const m of [...room.lobby.Players, ...room.lobby.Spectators]) if (!live.has(m.RoomPeerId)) this.removeMember(room, m.RoomPeerId, Date.now());
+			for (const peer of unique([...room.lobby.Players, ...room.lobby.Spectators].map((m) => m.RoomPeerId))) {
+				if (!live.has(peer) && this.rooms.has(room.lobby.RoomId)) this.removeFromLobby(room, peer, now);
+			}
 		}
 	}
 
-	// `ip` is the client's address (for per-address limits), if known.
-	// `version` is the client's TF.EX version from /ws?version= (v0.21.1+; older clients and the Switch send none). Not enforced:
-	// no UpdateRequired is sent, so a cached older page or the Switch build keeps playing.
+	// `ip` is the client's address (for per-address limits), if known. The version was checked before (versionRefusal).
 	open(conn, now = Date.now(), ip = null, version = null) {
 		const refused = !!ip && [...this.conns.values()].filter((c) => c.state.ip === ip).length >= MAX_CONNS_PER_IP;
 		conn.state = { seen: now, ip, tokens: BURST, refused, version: version ? clean(version, 32) : null };
@@ -99,6 +119,7 @@ export class Matchmaker {
 
 	close(conn, now = Date.now()) {
 		if (!this.conns.has(conn.id)) return;
+		this.exitQuickPlay(conn);
 		this.leave(conn, now);
 		this.conns.delete(conn.id);
 	}
@@ -127,7 +148,7 @@ export class Matchmaker {
 		conn.save?.();
 	}
 
-	// Runs what is due: keep-alives (dropping silent connections) and lobby timers.
+	// Runs what is due: keep-alives (dropping silent connections), the lobbies' deadlines.
 	wake(now = Date.now()) {
 		if (now >= this.keepAliveAt) {
 			this.keepAliveAt = now + KEEPALIVE_MS;
@@ -137,24 +158,32 @@ export class Matchmaker {
 					this.close(conn, now);
 				} else this.send(conn, "KeepAlive", {});
 			}
+			this.pushQueueStatus();
 		}
 		for (const room of [...this.rooms.values()]) {
+			if (!this.rooms.has(room.lobby.RoomId)) continue;
 			const t = room.timers;
-			if (t.vote && now >= t.vote) this.resolveVote(room, now);
-			if (t.quickStart && now >= t.quickStart) {
-				t.quickStart = null;
-				if (this.allReady(room.lobby)) this.start(room, now);
-			}
-			if (t.seriesPick && now >= t.seriesPick) this.forceSeriesStart(room, now);
-			if (t.checkConnections && now >= t.checkConnections) this.finishConnectionCheck(room, now);
+			if (t.endGame !== null && now >= t.endGame) this.resolveEndGame(room, true, now);
+			if (!this.rooms.has(room.lobby.RoomId)) continue;
+			if (t.seriesReady !== null && now >= t.seriesReady) this.expireSeriesWait(room, now);
+			if (room.reports && now - room.reports.createdAt >= STALE_REPORTS_MS) room.reports = null;
+			this.connectivityTick(room, now);
 		}
+		this.autoStartQuickPlayLobbies(now);
 	}
 
 	// When wake() should run next (null: nothing to do until a message arrives).
 	nextWake() {
 		let next = this.conns.size ? this.keepAliveAt || Date.now() : null;
+		const consider = (t) => {
+			if (t !== null && t !== undefined && (next === null || t < next)) next = t;
+		};
 		for (const room of this.rooms.values()) {
-			for (const t of Object.values(room.timers)) if (t && (next === null || t < next)) next = t;
+			consider(room.timers.endGame);
+			consider(room.timers.seriesReady);
+			if (room.reports) consider(room.reports.createdAt + STALE_REPORTS_MS);
+			if (!room.lobby.InGame) for (const link of Object.values(room.connectivity)) if (link.since !== undefined) consider(link.since + CONNECTION_CHECK_MS);
+			consider(this.autoStartAt(room));
 		}
 		return next;
 	}
@@ -172,18 +201,29 @@ export class Matchmaker {
 		return conns;
 	}
 
-	sendAll(room, name, body = {}) {
+	connOfPeer(peer) {
+		for (const conn of this.conns.values()) if (conn.state.peer === peer) return conn;
+		return null;
+	}
+
+	sendToLobby(room, name, body = {}) {
 		for (const conn of this.members(room)) this.send(conn, name, body);
 	}
 
-	// Stores the lobby and sends it to every member.
-	changed(room) {
+	// Stores the lobby and sends it to every member (send_lobby_update).
+	sendLobbyUpdate(room) {
 		this.persist?.save(room);
-		this.sendAll(room, "LobbyUpdate", { lobby: room.lobby });
+		this.sendToLobby(room, "LobbyUpdate", { lobby: room.lobby });
 	}
 
 	roomOf(conn) {
 		return conn.state.roomId ? this.rooms.get(conn.state.roomId) ?? null : null;
+	}
+
+	// The room in which the connection is a player (a device's players share its peer id).
+	playingRoomOf(conn) {
+		const room = this.roomOf(conn);
+		return room && room.lobby.Players.some((p) => p.RoomPeerId === conn.state.peer) ? room : null;
 	}
 
 	playerOf(room, conn) {
@@ -191,7 +231,7 @@ export class Matchmaker {
 	}
 
 	isHost(room, conn) {
-		return this.playerOf(room, conn)?.IsHost === true;
+		return room.lobby.Players.some((p) => p.RoomPeerId === conn.state.peer && p.IsHost);
 	}
 
 	attach(conn, room, peer) {
@@ -200,62 +240,79 @@ export class Matchmaker {
 		conn.save?.();
 	}
 
-	closeRoom(room) {
-		for (const conn of this.members(room)) this.attach(conn, null, null);
-		this.rooms.delete(room.lobby.RoomId);
-		this.persist?.remove(room.lobby.RoomId);
-		this.log(`[lobby] ${room.lobby.RoomId} closed`);
+	newSeed() {
+		return this.fixedSeed ?? Math.floor(this.random() * 100000);
 	}
 
-	// Leaves whatever lobby or queue the connection is in.
-	leave(conn, now) {
-		this.leaveQuickPlay(conn);
-		const room = this.roomOf(conn);
-		const peer = conn.state.peer;
-		this.attach(conn, null, null);
-		if (!room) return false;
-		this.removeMember(room, peer, now);
-		return true;
+	newCode() {
+		const used = new Set([...this.rooms.values()].map((r) => r.lobby.JoinCode));
+		for (;;) {
+			let code = "";
+			for (let i = 0; i < CODE_LENGTH; i++) code += CODE_CHARS[Math.floor(this.random() * CODE_CHARS.length)];
+			if (!used.has(code)) return code;
+		}
 	}
 
-	removeMember(room, peer, now) {
+	newRoom(lobby, now) {
+		return { lobby, timers: { endGame: null, seriesReady: null }, connectivity: {}, membershipChangedAt: now, allReadySince: null, inGameSince: null, reports: null };
+	}
+
+	maxPlayers(lobby) {
+		return Math.min(MAX_PLAYERS, Math.max(2, lobby.MaxPlayers));
+	}
+
+	isFull(lobby) {
+		return lobby.Players.length >= this.maxPlayers(lobby);
+	}
+
+	firstFreeSeat(lobby) {
+		for (let seat = 0; seat < MAX_PLAYERS; seat++) if (!lobby.Players.some((p) => p.Seat === seat)) return seat;
+		return lobby.Players.length;
+	}
+
+	seriesInProgress(lobby) {
+		return lobby.Series?.Status === "InProgress";
+	}
+
+	allPlayersReady(lobby) {
+		return lobby.Players.length > 0 && lobby.Players.every((p) => p.Ready);
+	}
+
+	// One per device: local players share their device's room peer id.
+	playerPeers(lobby) {
+		return unique(lobby.Players.map((p) => p.RoomPeerId));
+	}
+
+	tooBig(lobby) {
+		return JSON.stringify(lobby).length > MAX_LOBBY_JSON;
+	}
+
+	setInGame(room, inGame, now) {
 		const lobby = room.lobby;
-		const player = lobby.Players.find((p) => p.RoomPeerId === peer);
-		lobby.Players = lobby.Players.filter((p) => p.RoomPeerId !== peer);
-		lobby.Spectators = lobby.Spectators.filter((p) => p.RoomPeerId !== peer);
-		lobby.EndGameChoice = lobby.EndGameChoice.filter((v) => v.RoomPeerId !== peer);
-		if (player?.IsHost || lobby.Players.length === 0) {
-			// TF.EX leaves a lobby whose host has gone (HandleLobbyUpdate: "Host left the game"), so
-			// the others get it without a host once, and it closes. There's no host migration: the
-			// host's role in the GGRS session is fixed when it joins.
-			this.changed(room);
-			this.closeRoom(room);
-			return;
-		}
-		if (player && lobby.Kind === "QuickPlay" && !lobby.InGame) {
-			// A quick play lobby can't take anyone new: the one left is sent a lobby without a host,
-			// which takes TF.EX back to the online menu, and it closes.
-			this.sendAll(room, "LobbyUpdate", { lobby: { ...lobby, Players: [] } });
-			this.closeRoom(room);
-			return;
-		}
-		if (player && lobby.Series?.Status === "InProgress") this.abortSeries(room, "PLAYER LEFT");
-		// Someone leaving mid-match starts the end-of-match vote clock, so a lobby whose match ended
-		// that way (nobody sends MatchEnded) still goes back to archer select.
-		if (player && lobby.InGame) room.timers.vote ??= now + VOTE_MS;
-		if (player && room.timers.vote && this.votesComplete(lobby)) {
-			this.resolveVote(room, now);
-			return;
-		}
-		this.changed(room);
+		room.inGameSince = inGame ? now : null;
+		lobby.InGame = inGame;
+		lobby.MatchPlayers = inGame ? structuredClone(lobby.Players) : [];
 	}
 
-	// A Player as TF.EX sends it. The server keeps the fields it owns (peer id, seat, host, name).
+	// Ready flags changed: when everyone became ready (secs_since_all_ready).
+	refreshReady(room, now) {
+		if (!this.allPlayersReady(room.lobby)) room.allReadySince = null;
+		else room.allReadySince ??= now;
+	}
+
+	membershipChanged(room, now) {
+		room.membershipChangedAt = now;
+		this.refreshReady(room, now);
+		this.updateDirect(room, now);
+		this.refreshCheckingConnections(room);
+	}
+
+	// A Player as TF.EX sends it, with the fields the server owns.
 	player(sent, own) {
 		const p = sent && typeof sent === "object" ? sent : {};
-		const team = int(p.Team, own.Team ?? -1);
+		const team = int(p.Team, -1);
 		return {
-			Name: own.Name,
+			Name: clean(p.Name, MAX_NAME) || own.Name,
 			ArcherIndex: int(p.ArcherIndex),
 			ArcherAltIndex: int(p.ArcherAltIndex),
 			Ready: p.Ready === true,
@@ -263,9 +320,9 @@ export class Matchmaker {
 			IsHost: own.IsHost,
 			Seat: own.Seat,
 			Team: team >= -1 && team <= 1 ? team : -1,
-			CustomArcherId: clean(p.CustomArcherId, 128),
+			CustomArcherId: clean(p.CustomArcherId, 256),
 			ArcherMods: strings(p.ArcherMods, 64, 128),
-			StartsWithoutHat: typeof p.StartsWithoutHat === "boolean" ? p.StartsWithoutHat : null,   // TF.EX 0.22: the archer spawns without a hat (null: the game's own rule)
+			StartsWithoutHat: typeof p.StartsWithoutHat === "boolean" ? p.StartsWithoutHat : null,
 			CustomVariants: strings(p.CustomVariants, 256, 128),
 			UseInstantReplay: p.UseInstantReplay === true,
 			HaveModifiedGameFiles: p.HaveModifiedGameFiles === true,
@@ -274,20 +331,19 @@ export class Matchmaker {
 		};
 	}
 
-	newMember(name, isHost, seat) {
-		return this.player({}, { Name: clean(name, MAX_NAME) || "PLAYER", RoomPeerId: crypto.randomUUID(), IsHost: isHost, Seat: seat, Team: -1 });
+	newMember(name, peer, isHost, seat) {
+		return this.player({ Name: name }, { Name: clean(name, MAX_NAME) || "PLAYER", RoomPeerId: peer, IsHost: isHost, Seat: seat });
 	}
 
-	gameData(sent, keep) {
+	gameData(sent, seed) {
 		const g = sent && typeof sent === "object" ? sent : {};
-		const map = int(g.MapId, -1);
 		return {
-			MapId: map >= -1 && map < TOWERS ? map : -1,
-			Mode: [3, 4, 5].includes(g.Mode) ? g.Mode : 3,
-			MatchLength: int(g.MatchLength, 2) >= 0 && int(g.MatchLength, 2) <= 3 ? int(g.MatchLength, 2) : 2,
+			MapId: int(g.MapId, -1),
+			Mode: int(g.Mode, 3),
+			MatchLength: int(g.MatchLength, 2),
 			Variants: strings(g.Variants, 256, 128),
-			Seed: keep?.Seed ?? this.newSeed(),
-			BestOf: keep ? keep.BestOf : [0, 1, 3, 5, 7].includes(g.BestOf) ? g.BestOf : 0,
+			Seed: seed,
+			BestOf: int(g.BestOf, 0),
 		};
 	}
 
@@ -300,275 +356,532 @@ export class Matchmaker {
 		});
 	}
 
-	newCode() {
-		const used = new Set([...this.rooms.values()].map((r) => r.lobby.JoinCode));
-		for (;;) {
-			let code = "";
-			for (let i = 0; i < CODE_LENGTH; i++) code += CODE_CHARS[Math.floor(this.random() * CODE_CHARS.length)];
-			if (!used.has(code)) return code;
+	// WiderSet changes level geometry, so wide and standard players never meet in quick play.
+	lobbyIsWide(lobby) {
+		return lobby.Mods.some((m) => m.Name === WIDER_SET_MOD_NAME && String(m.Data?.IsWide ?? "").toLowerCase() === "true");
+	}
+
+	newLobby({ name, roomId, maxPlayers, players, gameData, mods, kind, joinCode }) {
+		return {
+			Name: name,
+			RoomId: roomId,
+			MaxPlayers: Math.min(MAX_PLAYERS, Math.max(2, maxPlayers)),
+			Players: players,
+			Spectators: [],
+			GameData: gameData,
+			EndGameChoice: null,
+			InGame: false,
+			MatchPlayers: [],
+			Mods: mods,
+			Kind: kind,
+			JoinCode: joinCode,
+			Series: null,
+			RankedSeats: [],
+			RelayedPairs: [],
+			IsCheckingConnections: false,
+			IsReportEnabled: this.reportsEnabled,
+		};
+	}
+
+	// ---- leaving (remove_from_lobbies, purge_lobby_async) ----
+
+	// Leaves whatever lobby the connection is in. Returns whether it was in one.
+	leave(conn, now) {
+		const room = this.roomOf(conn);
+		const peer = conn.state.peer;
+		this.attach(conn, null, null);
+		if (!room) return false;
+		this.removeFromLobby(room, peer, now);
+		return true;
+	}
+
+	removeFromLobby(room, peer, now) {
+		const lobby = room.lobby;
+		const seatedBefore = lobby.Players.length;
+		lobby.Players = lobby.Players.filter((p) => p.RoomPeerId !== peer);
+		lobby.Spectators = lobby.Spectators.filter((p) => p.RoomPeerId !== peer);
+		if (lobby.Players.length !== seatedBefore) {
+			if (this.seriesInProgress(lobby)) this.abortSeries(room, "PLAYER LEFT");
+			this.membershipChanged(room, now);
+		} else room.membershipChangedAt = now;
+		this.promoteHostIfNeeded(lobby);
+		this.sendLobbyUpdate(room);
+		this.purge(room);
+		if (this.rooms.has(lobby.RoomId) && lobby.Kind === "QuickPlay") this.drainQueueIntoOpenLobbies(now);
+	}
+
+	promoteHostIfNeeded(lobby) {
+		if (!["QuickPlay", "Ranked"].includes(lobby.Kind) || lobby.Players.length === 0 || lobby.Players.some((p) => p.IsHost)) return;
+		const lowest = lobby.Players.reduce((a, b) => (b.Seat < a.Seat ? b : a));
+		lowest.IsHost = true;
+	}
+
+	// An empty lobby, or one without a host (its host left a Standard or Private lobby; TF.EX leaves those: "Host left the
+	// game"), goes away.
+	purge(room) {
+		const lobby = room.lobby;
+		if (lobby.Players.length > 0 && lobby.Players.some((p) => p.IsHost)) return;
+		for (const conn of this.members(room)) this.attach(conn, null, null);
+		this.rooms.delete(lobby.RoomId);
+		this.persist?.remove(lobby.RoomId);
+		this.log(`[lobby] ${lobby.RoomId} closed`);
+	}
+
+	// ---- joining (seat_member) ----
+
+	seatMember(conn, room, name, isPlayer, now) {
+		const lobby = room.lobby;
+		if (isPlayer) {
+			if (this.isFull(lobby)) return { error: `Lobby ${lobby.RoomId} is full` };
+			if (lobby.InGame) return { error: `Lobby ${lobby.RoomId} already started` };
+			if (this.seriesInProgress(lobby)) return { error: `Lobby ${lobby.RoomId} has a series running` };
+		} else if (lobby.Spectators.length >= MAX_SPECTATORS) return { error: `Lobby ${lobby.RoomId} is full` };
+		const peer = crypto.randomUUID();
+		const member = this.newMember(name || conn.state.name, peer, false, -1);
+		conn.state.name = member.Name;
+		this.attach(conn, room, peer);
+		if (isPlayer) {
+			member.Seat = this.firstFreeSeat(lobby);
+			lobby.Players.push(member);
+			this.membershipChanged(room, now);
+		} else lobby.Spectators.push(member);
+		this.log(`[lobby] ${member.Name} joined ${lobby.RoomId} as ${isPlayer ? "player" : "spectator"}`);
+		return { peer };
+	}
+
+	// A spectator arriving mid-match: the host adds it to the running GGRS session.
+	notifyHostOfLateSpectator(room, peer) {
+		if (!room.lobby.InGame) return;
+		const host = room.lobby.Players.find((p) => p.IsHost);
+		const conn = host && this.connOfPeer(host.RoomPeerId);
+		if (conn) this.send(conn, "SpectatorJoined", { room_peer_id: peer });
+	}
+
+	// ---- the connection check (connectivity.rs; no relay on Workers) ----
+
+	// Every pair of devices among the players gets CONNECTION_CHECK_MS from when it appears; a PeerMeasured either way settles
+	// it, otherwise it fails (and, with no relay, TF.EX tries it directly anyway).
+	updateDirect(room, now) {
+		const peers = this.playerPeers(room.lobby);
+		const current = new Set();
+		for (let i = 0; i < peers.length; i++) for (let j = i + 1; j < peers.length; j++) current.add(pairKey(peers[i], peers[j]));
+		for (const key of Object.keys(room.connectivity)) if (!current.has(key)) delete room.connectivity[key];
+		for (const key of current) {
+			const link = (room.connectivity[key] ??= { since: now });
+			if (link.since !== undefined && now - link.since >= CONNECTION_CHECK_MS) {
+				room.connectivity[key] = { failed: true };
+				this.log(`[lobby] ${room.lobby.RoomId}: ${key} could not connect`);
+			}
 		}
 	}
 
-	newSeed() {
-		return Math.floor(this.random() * 0x7fffffff);
+	isCheckingConnections(room) {
+		const peers = this.playerPeers(room.lobby);
+		for (let i = 0; i < peers.length; i++)
+			for (let j = i + 1; j < peers.length; j++) {
+				const link = room.connectivity[pairKey(peers[i], peers[j])];
+				if (!link || link.since !== undefined) return true;
+			}
+		return false;
 	}
 
-	freeSeat(lobby) {
-		for (let seat = 0; seat < lobby.MaxPlayers; seat++) if (!lobby.Players.some((p) => p.Seat === seat)) return seat;
-		return -1;
+	// Returns whether IsCheckingConnections flipped.
+	refreshCheckingConnections(room) {
+		const checking = this.isCheckingConnections(room);
+		const changed = checking !== room.lobby.IsCheckingConnections;
+		room.lobby.IsCheckingConnections = checking;
+		return changed;
 	}
 
-	seriesInProgress(lobby) {
-		return lobby.Series?.Status === "InProgress";
+	connectivityTick(room, now) {
+		if (room.lobby.InGame) return;
+		this.updateDirect(room, now);
+		const changed = this.refreshCheckingConnections(room);
+		if (changed && this.allPlayersReady(room.lobby)) this.sendLobbyUpdate(room);
+		if (changed && !room.lobby.IsCheckingConnections && room.lobby.Series) this.tryStartSeriesGame(room, now);
 	}
 
-	// TF.EX's AreAllPlayersReady: two or more, all ready, and in team deathmatch two real teams.
-	allReady(lobby) {
-		// Two devices at least: players on one device (AddLocalPlayer) share its peer id.
-		if (new Set(lobby.Players.map((p) => p.RoomPeerId)).size < 2 || !lobby.Players.every((p) => p.Ready)) return false;
-		if (lobby.GameData.Mode !== TEAM_DEATHMATCH) return true;
-		const blue = lobby.Players.filter((p) => p.Team === 0).length;
-		const red = lobby.Players.filter((p) => p.Team === 1).length;
-		return blue + red === lobby.Players.length && blue > 0 && red > 0;
+	recordPeerMeasured(conn, peer, now) {
+		const room = this.playingRoomOf(conn);
+		const own = conn.state.peer;
+		if (!room || room.lobby.InGame || own === peer || !room.lobby.Players.some((p) => p.RoomPeerId === peer)) return;
+		const key = pairKey(own, peer);
+		if (!room.connectivity[key]?.failed) room.connectivity[key] = { reached: true };
+		if (!this.refreshCheckingConnections(room)) return;
+		if (this.allPlayersReady(room.lobby)) this.sendLobbyUpdate(room);
+		if (room.lobby.Series) this.tryStartSeriesGame(room, now);
 	}
 
-	// ---- joining ----
+	// ---- starting (start_lobby) ----
 
-	joinRefusal(room, asPlayer) {
-		if (!room) return "LOBBY NOT FOUND";
-		if (!asPlayer) return room.lobby.Spectators.length >= MAX_SPECTATORS ? "LOBBY FULL" : null;
+	// Returns why it was refused, or null.
+	startLobby(conn, now) {
+		const room = this.playingRoomOf(conn);
+		if (!room) return "Lobby not found";
 		const lobby = room.lobby;
-		if (lobby.InGame || this.seriesInProgress(lobby)) return "MATCH ALREADY STARTED";
-		if (lobby.Players.length >= lobby.MaxPlayers) return "LOBBY FULL";
+		if (lobby.Kind === "Ranked") return "Ranked matches start automatically";
+		if (!this.isHost(room, conn)) return "Only the host can start the lobby";
+		if (lobby.InGame) return "Lobby already started";
+		if (lobby.IsCheckingConnections) return "Connections are still being checked";
+		let seriesStarted = false;
+		if (lobby.GameData.BestOf > 0) {
+			if (this.seriesInProgress(lobby)) return "Series already running";
+			const error = this.startSeries(room);
+			if (error) return error;
+			if (!this.beginSeriesGame(room)) return "No tower available for the series";
+			seriesStarted = true;
+		}
+		lobby.EndGameChoice ??= [];
+		this.setInGame(room, true, now);
+		this.log(`[lobby] ${lobby.RoomId} started (${lobby.Players.map((p) => p.Name).join(" vs ")})`);
+		if (seriesStarted) this.sendLobbyUpdate(room);
+		else this.persist?.save(room);
+		this.sendToLobby(room, "StartLobby", {});
 		return null;
 	}
 
-	// Adds the connection; returns its peer id. The caller answers it, then calls joined().
-	join(conn, room, name, asPlayer, now) {
-		this.leave(conn, now);
-		const lobby = room.lobby;
-		const member = this.newMember(name || conn.state.name, false, asPlayer ? this.freeSeat(lobby) : -1);
-		(asPlayer ? lobby.Players : lobby.Spectators).push(member);
-		this.attach(conn, room, member.RoomPeerId);
-		this.log(`[lobby] ${member.Name} joined ${lobby.RoomId} as ${asPlayer ? "player" : "spectator"}`);
-		return member.RoomPeerId;
-	}
+	// ---- match results (match_report.rs) ----
 
-	joined(room, peer) {
-		this.changed(room);
-		// A spectator arriving mid-match: the host adds it to the running GGRS session.
-		if (room.lobby.InGame && room.lobby.Spectators.some((s) => s.RoomPeerId === peer)) {
-			this.sendAll(room, "SpectatorJoined", { room_peer_id: peer });
+	// One report per device; once every device has sent one they are compared, and a series records the result.
+	handleMatchReport(conn, report, now) {
+		const room = this.playingRoomOf(conn);
+		if (!room || room.lobby.Players.length < 2) return;
+		const devices = this.playerPeers(room.lobby).length;
+		room.reports ??= { createdAt: now, byDevice: {} };
+		if (room.reports.byDevice[conn.state.peer]) return;
+		room.reports.byDevice[conn.state.peer] = report;
+		const reports = Object.values(room.reports.byDevice);
+		if (reports.length < devices) return;
+		room.reports = null;
+		const [first, ...others] = reports;
+		const sameChecksum = others.every((o) => !(first.frame !== null && first.frame === o.frame) || first.checksum === null || o.checksum === null || first.checksum === o.checksum);
+		const sameWinner = others.every((o) => o.winner_seat === first.winner_seat);
+		const sameScores = others.every((o) => first.scores === null || o.scores === null || JSON.stringify(first.scores) === JSON.stringify(o.scores));
+		if (!(sameWinner && sameScores) || !sameChecksum) {
+			this.log(`[lobby] ${room.lobby.RoomId}: match reports differ (winner ${sameWinner}, scores ${sameScores}, checksum ${sameChecksum}): ${reports.map((r) => `seat ${r.winner_seat} scores ${JSON.stringify(r.scores)} at frame ${r.frame}`).join(", ")}`);
 		}
+		this.recordSeriesResult(room, sameWinner && sameScores, first.winner_seat, first.scores ?? []);
 	}
 
-	// ---- matches ----
+	// ---- end of match (end_game.rs) ----
 
-	// The player pairs without a measurement in both directions.
-	unmeasuredPairs(room) {
-		// Per device: players on one device (AddLocalPlayer) share its peer id.
-		const ids = [...new Set(room.lobby.Players.map((p) => p.RoomPeerId))];
-		const pairs = [];
-		for (let i = 0; i < ids.length; i++)
-			for (let j = i + 1; j < ids.length; j++)
-				if (!room.measured.has(`${ids[i]}|${ids[j]}`) || !room.measured.has(`${ids[j]}|${ids[i]}`)) pairs.push([ids[i], ids[j]]);
-		return pairs;
+	startEndGameCountdown(room, now) {
+		if (room.timers.endGame !== null) return;
+		room.timers.endGame = now + END_GAME_CHOICE_MS;
+		room.inGameSince = null;
+		this.log(`[lobby] ${room.lobby.RoomId}: end game choice window open (${END_GAME_CHOICE_MS / 1000} s)`);
 	}
 
-	// Whether a connection's client measures pings and reports them (PeerMeasured): TF.EX 0.20.0+ (by its /ws?version=), or one
-	// that has sent a PeerMeasured. TF.EX 0.19 and the Switch build without ?version= don't: a lobby with one of them starts at once.
-	measures(conn) {
-		if (conn.state.measures) return true;
-		const [major, minor] = String(conn.state.version ?? "").replace(/^v/, "").split(".").map(Number);
-		return major > 0 || (major === 0 && minor >= 20);
-	}
-
-	// IsCheckingConnections while pairs are unmeasured (TF.EX shows "CHECKING CONNECTIONS..."), then the start.
-	startAfterConnectionCheck(room, now) {
+	recordChoice(conn, choice) {
+		const room = this.playingRoomOf(conn);
+		if (!room) return null;
 		const lobby = room.lobby;
-		const players = this.members(room).filter((c) => this.playerOf(room, c));
-		if (players.length < new Set(lobby.Players.map((p) => p.RoomPeerId)).size || !players.every((c) => this.measures(c)) || this.unmeasuredPairs(room).length === 0) {
-			lobby.RelayedPairs = [];
-			return this.start(room, now);
-		}
-		if (lobby.IsCheckingConnections) return;
-		lobby.IsCheckingConnections = true;
-		room.timers.checkConnections = now + CHECK_CONNECTIONS_MS;
-		this.log(`[lobby] ${lobby.RoomId} checking connections (${this.unmeasuredPairs(room).length} pairs unmeasured)`);
-		this.changed(room);
+		if (lobby.EndGameChoice === null) return room; // (the game isn't over, or already over)
+		const vote = lobby.EndGameChoice.find((v) => v.RoomPeerId === conn.state.peer);
+		if (vote) vote.Choice = choice;
+		else lobby.EndGameChoice.push({ RoomPeerId: conn.state.peer, Choice: choice });
+		return room;
 	}
 
-	finishConnectionCheck(room, now) {
-		room.timers.checkConnections = null;
-		// The pairs nobody could measure go through the relay. RELAY: /relay/room/<room>?peer= must exist (see the patch header):
-		// without it, leave RelayedPairs empty and let those pairs try directly.
-		room.lobby.RelayedPairs = RELAY_AVAILABLE ? this.unmeasuredPairs(room) : [];
-		room.lobby.IsCheckingConnections = false;
-		if (this.allReady(room.lobby)) this.start(room, now);
-		else this.changed(room);
-	}
-
-	// Everyone goes into the match: the lobby (InGame, new seed) first, then StartLobby.
-	start(room, now) {
+	// Everyone voted, or the window ran out (force): a rematch if all voted for one, the series in a series lobby, archer select
+	// otherwise; everyone un-ready and a new seed either way.
+	resolveEndGame(room, force, now) {
 		const lobby = room.lobby;
-		lobby.InGame = true;
-		lobby.IsCheckingConnections = false;
-		room.timers.checkConnections = null;
-		// TF.EX 0.21.0 Lobby.SessionPlayers: the match's players, fixed for the match (a joiner or a leaver doesn't move seats)
-		lobby.MatchPlayers = structuredClone(lobby.Players);
-		lobby.EndGameChoice = [];
-		lobby.GameData.Seed = this.newSeed();
-		room.timers.vote = null;
-		room.timers.quickStart = null;
-		room.timers.seriesPick = null;
-		room.reported = false;
-		this.log(`[lobby] ${lobby.RoomId} started (${lobby.Players.map((p) => p.Name).join(" vs ")})`);
-		this.changed(room);
-		this.sendAll(room, "StartLobby", {});
-		void now;
-	}
-
-	vote(conn, choice, now) {
-		const room = this.roomOf(conn);
-		if (!room || !room.lobby.InGame) return;
-		const peer = conn.state.peer;
-		if (!this.playerOf(room, conn)) return;
-		const lobby = room.lobby;
-		lobby.EndGameChoice = lobby.EndGameChoice.filter((v) => v.RoomPeerId !== peer);
-		lobby.EndGameChoice.push({ RoomPeerId: peer, Choice: choice });
-		room.timers.vote ??= now + VOTE_MS;
-		if (this.votesComplete(lobby)) return this.resolveVote(room, now);
-		this.changed(room);
-	}
-
-	votesComplete(lobby) {
-		return lobby.Players.every((p) => lobby.EndGameChoice.some((v) => v.RoomPeerId === p.RoomPeerId));
-	}
-
-	// Everyone voted, or time ran out: a rematch if all asked for one, the series screen in a
-	// series, archer select otherwise. Each with a new seed.
-	resolveVote(room, now) {
-		const lobby = room.lobby;
-		room.timers.vote = null;
-		if (!lobby.InGame) return;
-		const rematch = lobby.Players.length > 1 && lobby.Players.every((p) => lobby.EndGameChoice.some((v) => v.RoomPeerId === p.RoomPeerId && v.Choice === "Rematch"));
-		lobby.EndGameChoice = [];
-		lobby.GameData.Seed = this.newSeed();
-		room.reported = false;
-		if (lobby.Series) {
-			lobby.InGame = false;
-			lobby.MatchPlayers = [];
+		if (force && room.timers.endGame === null) return;
+		if (lobby.EndGameChoice === null) return;
+		const devices = this.playerPeers(lobby);
+		const votes = lobby.EndGameChoice.filter((v) => devices.includes(v.RoomPeerId));
+		const undecided = devices.filter((peer) => !votes.some((v) => v.RoomPeerId === peer));
+		if (undecided.length && !force) return;
+		const rematch = undecided.length === 0 && votes.length > 0 && votes.every((v) => v.Choice === "Rematch");
+		const seriesLobby = lobby.Series !== null;
+		if (lobby.Players.length) {
 			for (const p of lobby.Players) p.Ready = false;
-			if (this.seriesInProgress(lobby)) room.timers.seriesPick = now + SERIES_PICK_MS;
-			this.sendAll(room, "SeriesLobby", {});
-			this.changed(room);
-		} else if (rematch) {
-			// The lobby (new seed) must arrive before RematchLobby starts the next MapScene.
-			this.changed(room);
-			this.sendAll(room, "RematchLobby", {});
-		} else {
-			lobby.InGame = false;
-			lobby.MatchPlayers = [];
-			for (const p of lobby.Players) p.Ready = false;
-			this.sendAll(room, "ArcherSelectLobby", {});
-			this.changed(room);
+			lobby.EndGameChoice = [];
+			lobby.GameData.Seed = this.newSeed();
+			this.refreshReady(room, now);
+			if (seriesLobby) {
+				if (lobby.Series.AwaitingResult) this.abortSeries(room, "MISSING RESULT");
+				this.setInGame(room, false, now);
+			} else this.setInGame(room, rematch, now);
 		}
+		room.timers.endGame = null;
+		room.reports = null;
+		if (!lobby.Players.length) return this.purge(room);
+		if (undecided.length) this.log(`[lobby] ${lobby.RoomId}: end game: ${undecided.length} device(s) undecided -> archer select`);
+		this.sendLobbyUpdate(room);
+		if (seriesLobby) return this.continueSeries(room, now);
+		this.sendToLobby(room, rematch ? "RematchLobby" : "ArcherSelectLobby", {});
+		if (!rematch && lobby.Kind === "QuickPlay") this.drainQueueIntoOpenLobbies(now);
 	}
 
-	// ---- series (GameData.BestOf > 0) ----
+	// ---- series (series.rs) ----
 
-	newSeries(room) {
-		const lobby = room.lobby;
+	seriesSides(lobby) {
 		const seats = lobby.Players.map((p) => p.Seat).sort((a, b) => a - b);
-		const sides = lobby.GameData.Mode === TEAM_DEATHMATCH ? [0, 1].map((team) => lobby.Players.filter((p) => p.Team === team).map((p) => p.Seat).sort((a, b) => a - b)) : seats.map((s) => [s]);
-		lobby.Series = { BestOf: lobby.GameData.BestOf, Sides: sides, Games: [], Status: "InProgress", WinnerSide: null, PickerSide: null, NextMapId: null, AbortReason: null, AwaitingResult: true, Picks: [] };
-		lobby.GameData.MapId = Math.floor(this.random() * TOWERS);
+		if (seats.length === 2) return { sides: seats.map((s) => [s]) };
+		if (lobby.GameData.Mode !== TEAM_DEATHMATCH || seats.length !== 2 * SERIES_TEAM_SIZE) return { error: "A series needs a 1v1 or a 2v2 team deathmatch" };
+		const sides = [0, 1].map((team) => lobby.Players.filter((p) => p.Team === team).map((p) => p.Seat).sort((a, b) => a - b));
+		if (sides.some((side) => side.length !== SERIES_TEAM_SIZE)) return { error: "A 2v2 series needs two full teams" };
+		return { sides };
 	}
 
-	sideOf(series, seat) {
+	// Returns why it can't start, or null.
+	startSeries(room) {
+		const { sides, error } = this.seriesSides(room.lobby);
+		if (error) return error;
+		const series = { BestOf: room.lobby.GameData.BestOf, Sides: sides, Games: [], Status: "InProgress", WinnerSide: null, PickerSide: null, NextMapId: null, AbortReason: null, AwaitingResult: false, Picks: [], ForfeitSide: null };
+		series.NextMapId = this.randomUnplayedMap(series);
+		room.lobby.Series = series;
+		return null;
+	}
+
+	randomUnplayedMap(series) {
+		const open = [...Array(SERIES_TOWER_COUNT).keys()].filter((m) => this.isMapAvailable(series, m));
+		return open.length ? open[Math.floor(this.random() * open.length)] : null;
+	}
+
+	isMapAvailable(series, map) {
+		return Number.isInteger(map) && map >= 0 && map < SERIES_TOWER_COUNT && !series.Games.some((g) => g.MapId === map);
+	}
+
+	sideOfSeat(series, seat) {
 		const side = series.Sides.findIndex((seats) => seats.includes(seat));
 		return side >= 0 ? side : null;
 	}
 
-	seriesResult(room, report) {
-		const lobby = room.lobby;
-		const series = lobby.Series;
-		if (!series || series.Status !== "InProgress" || !series.AwaitingResult) return;
-		// winner_seat is a GGRS handle: the index among the players ordered by seat.
-		const bySeat = [...lobby.Players].sort((a, b) => a.Seat - b.Seat);
-		const winner = bySeat[report.winner_seat];
-		const side = winner ? this.sideOf(series, winner.Seat) : null;
-		const scores = [];
-		for (const [handle, p] of bySeat.entries()) scores[p.Seat] = int(report.scores?.[handle]);
-		for (let i = 0; i < scores.length; i++) scores[i] ??= 0;
-		series.Games.push({ MapId: lobby.GameData.MapId, WinnerSide: side ?? -1, Scores: scores });
-		series.AwaitingResult = false;
-		series.Picks = [];
+	beginSeriesGame(room) {
+		const series = room.lobby.Series;
+		if (!series || series.NextMapId === null) return false;
+		room.lobby.GameData.MapId = series.NextMapId;
 		series.NextMapId = null;
-		const needed = Math.floor(series.BestOf / 2) + 1;
-		if (side !== null && series.Games.filter((g) => g.WinnerSide === side).length >= needed) {
-			series.Status = "Finished";
-			series.WinnerSide = side;
-			series.PickerSide = null;
-		} else {
-			// The side that lost picks the next tower (after a draw, the same side as before).
-			series.PickerSide = side === null ? series.PickerSide ?? 0 : series.Sides.length === 2 ? 1 - side : null;
-		}
+		series.AwaitingResult = true;
+		series.Picks = [];
+		return true;
 	}
 
 	abortSeries(room, reason) {
 		const series = room.lobby.Series;
-		series.Status = "Aborted";
-		series.AbortReason = reason;
+		if (!series || series.Status !== "InProgress") return;
+		Object.assign(series, { Status: "Aborted", AbortReason: reason, PickerSide: null, NextMapId: null, Picks: [], AwaitingResult: false });
+		room.timers.seriesReady = null;
+		this.log(`[lobby] ${room.lobby.RoomId}: series aborted (${reason})`);
+	}
+
+	// winner_seat is a lobby seat (TF.EX's game player index is the seat).
+	recordSeriesResult(room, agreed, winnerSeat, scores) {
+		const series = room.lobby.Series;
+		if (!series || series.Status !== "InProgress") return;
+		if (!agreed) return this.abortSeries(room, "RESULT MISMATCH");
+		if (!Number.isInteger(winnerSeat) || winnerSeat < 0) return this.abortSeries(room, "NO WINNER");
+		const side = this.sideOfSeat(series, winnerSeat);
+		if (side === null) return this.abortSeries(room, "BAD RESULT");
+		series.Games.push({ MapId: room.lobby.GameData.MapId, WinnerSide: side, Scores: scores.map((s) => int(s)) });
 		series.AwaitingResult = false;
-		room.timers.seriesPick = null;
-	}
-
-	pickerSeats(series, lobby) {
-		return series.PickerSide === null ? [] : (series.Sides[series.PickerSide] ?? []).filter((s) => lobby.Players.some((p) => p.Seat === s));
-	}
-
-	settlePicks(series, lobby) {
-		const seats = this.pickerSeats(series, lobby);
-		if (seats.length && seats.every((s) => series.Picks.some((p) => p.Seat === s))) {
-			const picks = series.Picks.map((p) => p.MapId);
-			series.NextMapId = picks[Math.floor(this.random() * picks.length)];
+		series.NextMapId = null;
+		series.Picks = [];
+		if (series.Games.filter((g) => g.WinnerSide === side).length >= Math.floor(series.BestOf / 2) + 1) {
+			Object.assign(series, { Status: "Finished", WinnerSide: side, PickerSide: null });
+		} else {
+			series.PickerSide = series.Sides.findIndex((_, i) => i !== side);
 		}
 	}
 
-	// On the series screen the match starts by itself once everyone is ready and the tower is
-	// known (TF.EX never sends StartLobbyChoice there). A finished series restarts the same way.
-	maybeStartSeries(room, now) {
-		const lobby = room.lobby;
-		const series = lobby.Series;
-		if (!series || lobby.InGame || !this.allReady(lobby)) return false;
-		if (series.Status === "Finished") {
-			if (lobby.Players.length !== lobby.MaxPlayers) return false;
-			this.newSeries(room);
-		} else if (series.Status === "InProgress" && series.NextMapId !== null) {
-			lobby.GameData.MapId = series.NextMapId;
-			series.AwaitingResult = true;
-		} else return false;
-		this.start(room, now);
-		return true;
+	// Returns why the pick was refused, or null.
+	pickSeriesMap(room, seat, map) {
+		const series = room.lobby.Series;
+		if (!series) return "No series in this lobby";
+		if (series.Status !== "InProgress") return "Series is not in progress";
+		if (series.AwaitingResult) return "A game is still running";
+		if (this.sideOfSeat(series, seat) !== series.PickerSide) return "Not your pick";
+		if (!this.isMapAvailable(series, map)) return `Tower ${map} already played or unknown`;
+		const pick = series.Picks.find((p) => p.Seat === seat);
+		if (pick) pick.MapId = map;
+		else series.Picks.push({ Seat: seat, MapId: map });
+		// Every seat of the picker side has picked: their tower if they agree, a draw between their picks otherwise.
+		series.NextMapId = series.Picks.length < series.Sides[series.PickerSide].length ? null : this.drawAmongPicks(series);
+		return null;
 	}
 
-	forceSeriesStart(room, now) {
-		room.timers.seriesPick = null;
+	drawAmongPicks(series) {
+		const choices = unique(series.Picks.map((p) => p.MapId)).sort((a, b) => a - b);
+		return choices.length ? choices[Math.floor(this.random() * choices.length)] : null;
+	}
+
+	continueSeries(room, now) {
+		const series = room.lobby.Series;
+		if (series.Status === "Aborted") return this.sendToLobby(room, room.lobby.Kind === "Ranked" ? "SeriesLobby" : "ArcherSelectLobby", {});
+		this.sendToLobby(room, "SeriesLobby", {});
+		if (series.Status === "InProgress") room.timers.seriesReady = now + SERIES_READY_MS;
+	}
+
+	tryStartSeriesGame(room, now) {
 		const lobby = room.lobby;
 		const series = lobby.Series;
-		if (!series || series.Status !== "InProgress" || lobby.InGame) return;
-		if (series.NextMapId === null) {
-			const played = new Set(series.Games.map((g) => g.MapId));
-			const open = [...Array(TOWERS).keys()].filter((m) => !played.has(m));
-			series.NextMapId = open[Math.floor(this.random() * open.length)] ?? 0;
-		}
+		if (!series || lobby.InGame || !this.allPlayersReady(lobby) || lobby.IsCheckingConnections) return;
+		if (series.Status === "InProgress") {
+			if (series.AwaitingResult || series.NextMapId === null) return;
+		} else if (series.Status === "Finished") {
+			if (lobby.Kind === "Ranked" || this.startSeries(room)) return;
+		} else return;
+		if (!this.beginSeriesGame(room)) return;
+		lobby.EndGameChoice ??= [];
+		this.setInGame(room, true, now);
+		room.timers.seriesReady = null;
+		this.log(`[lobby] ${lobby.RoomId} started (${lobby.Players.map((p) => p.Name).join(" vs ")}), series game ${series.Games.length + 1} on tower ${lobby.GameData.MapId}`);
+		this.sendLobbyUpdate(room);
+		this.sendToLobby(room, "StartLobby", {});
+	}
+
+	expireSeriesWait(room, now) {
+		room.timers.seriesReady = null;
+		const lobby = room.lobby;
+		if (lobby.InGame || !this.seriesInProgress(lobby)) return;
+		const series = lobby.Series;
+		if (series.NextMapId === null) series.NextMapId = this.drawAmongPicks(series) ?? this.randomUnplayedMap(series);
+		const forced = lobby.Players.filter((p) => !p.Ready).length;
 		for (const p of lobby.Players) p.Ready = true;
-		if (!this.maybeStartSeries(room, now)) this.changed(room);
+		this.refreshReady(room, now);
+		if (forced) this.log(`[lobby] ${lobby.RoomId}: series ready window over, ${forced} player(s) readied`);
+		this.sendLobbyUpdate(room);
+		this.tryStartSeriesGame(room, now);
 	}
 
-	// Counts only (no names or ids), for checking that nobody is mid-match before a redeploy, which
-	// disconnects everyone (tools/deploy-tfex-server.sh).
+	// ---- quick play (quickplay.rs) ----
+
+	queued() {
+		return [...this.conns.values()].filter((c) => c.state.quickPlay).sort((a, b) => a.state.quickPlay.since - b.state.quickPlay.since);
+	}
+
+	queueCounts() {
+		const queue = this.queued();
+		const wide = queue.filter((c) => c.state.quickPlay.wide).length;
+		return { standard: queue.length - wide, wide };
+	}
+
+	exitQuickPlay(conn) {
+		if (!conn.state.quickPlay) return;
+		conn.state.quickPlay = null;
+		conn.save?.();
+		this.pushQueueStatus();
+	}
+
+	pushQueueStatus() {
+		const counts = this.queueCounts();
+		for (const conn of this.queued()) this.send(conn, "QuickPlayStatus", { queued: true, searching_standard: counts.standard, searching_wide: counts.wide, message: "" });
+	}
+
+	nearestOpenQuickPlay(wide) {
+		for (const room of this.rooms.values()) {
+			const l = room.lobby;
+			if (l.Kind === "QuickPlay" && !l.InGame && !this.isFull(l) && this.lobbyIsWide(l) === wide && l.Players.some((p) => p.IsHost)) return room;
+		}
+		return null;
+	}
+
+	// A seat in an open quick play lobby, else a new lobby with the oldest searcher of the same width, else the queue.
+	enterQuickPlay(conn, name, wide, now) {
+		conn.state.quickPlay = null;
+		const open = this.nearestOpenQuickPlay(wide);
+		if (open) {
+			const seated = this.seatMember(conn, open, name, true, now);
+			if (seated.error) return this.send(conn, "QuickPlayStatus", { queued: false, searching_standard: 0, searching_wide: 0, message: seated.error });
+			this.send(conn, "QuickPlayMatchFound", { lobby: open.lobby, room_peer_id: seated.peer });
+			this.sendLobbyUpdate(open);
+			this.pushQueueStatus();
+			return;
+		}
+		const partner = this.queued().find((c) => c !== conn && c.state.quickPlay.wide === wide);
+		if (partner) {
+			const partnerName = partner.state.quickPlay.name;
+			partner.state.quickPlay = null;
+			const partnerPeer = crypto.randomUUID();
+			const callerPeer = crypto.randomUUID();
+			const host = this.newMember(partnerName, partnerPeer, true, 0);
+			const lobby = this.newLobby({
+				name: "QUICK PLAY",
+				roomId: crypto.randomUUID(),
+				maxPlayers: MAX_PLAYERS,
+				players: [host],
+				gameData: { MapId: -1, Mode: 3, MatchLength: 2, Variants: [], Seed: this.newSeed(), BestOf: 0 },
+				mods: wide ? [{ Name: WIDER_SET_MOD_NAME, Data: { IsWide: "True" } }] : [],
+				kind: "QuickPlay",
+				joinCode: null,
+			});
+			const room = this.newRoom(lobby, now);
+			this.rooms.set(lobby.RoomId, room);
+			partner.state.name = host.Name;
+			this.attach(partner, room, partnerPeer);
+			const caller = this.newMember(name || conn.state.name, callerPeer, false, this.firstFreeSeat(lobby));
+			conn.state.name = caller.Name;
+			lobby.Players.push(caller);
+			this.attach(conn, room, callerPeer);
+			this.membershipChanged(room, now);
+			this.persist?.save(room);
+			this.log(`[quickplay] matched ${lobby.Players.map((p) => p.Name).join(" vs ")}`);
+			this.send(conn, "QuickPlayMatchFound", { lobby, room_peer_id: callerPeer });
+			this.send(partner, "QuickPlayMatchFound", { lobby, room_peer_id: partnerPeer });
+			this.pushQueueStatus();
+			return;
+		}
+		conn.state.quickPlay = { wide, name: name || conn.state.name || "PLAYER", since: now };
+		conn.save?.();
+		this.pushQueueStatus();
+	}
+
+	// Waiting players into quick play lobbies that have a seat open (drain_queue_into_open_lobbies).
+	drainQueueIntoOpenLobbies(now) {
+		let seatedAny = false;
+		for (const conn of this.queued()) {
+			const room = this.nearestOpenQuickPlay(conn.state.quickPlay.wide);
+			if (!room) continue;
+			const name = conn.state.quickPlay.name;
+			conn.state.quickPlay = null;
+			const seated = this.seatMember(conn, room, name, true, now);
+			if (seated.error) continue;
+			seatedAny = true;
+			this.send(conn, "QuickPlayMatchFound", { lobby: room.lobby, room_peer_id: seated.peer });
+			this.sendLobbyUpdate(room);
+		}
+		if (seatedAny) this.pushQueueStatus();
+	}
+
+	// When a quick play lobby may start by itself (should_auto_start), or null: two or more players, all ready, connections
+	// checked, and full, or nobody joined, left or un-readied for the grace time.
+	autoStartAt(room) {
+		const l = room.lobby;
+		if (l.Kind !== "QuickPlay" || l.InGame || l.IsCheckingConnections || room.allReadySince === null || l.Players.length < 2) return null;
+		if (this.isFull(l)) return room.allReadySince;
+		return Math.max(room.allReadySince, room.membershipChangedAt) + QUICK_PLAY_AUTO_START_GRACE_MS;
+	}
+
+	autoStartQuickPlayLobbies(now) {
+		for (const room of [...this.rooms.values()]) {
+			const at = this.autoStartAt(room);
+			if (at === null || now < at) continue;
+			room.lobby.EndGameChoice ??= [];
+			this.setInGame(room, true, now);
+			this.log(`[lobby] ${room.lobby.RoomId} started (${room.lobby.Players.map((p) => p.Name).join(" vs ")}), quick play`);
+			this.persist?.save(room);
+			this.sendToLobby(room, "StartLobby", {});
+		}
+	}
+
+	// ---- the lobby list (get_lobbies) ----
+
+	listedLobbies() {
+		const hide = (m) => ({ ...m, RoomPeerId: "" });
+		return [...this.rooms.values()]
+			.map((r) => r.lobby)
+			.filter((l) => l.Players.some((p) => p.IsHost))
+			.filter((l) => (l.Kind === "Standard" ? !this.isFull(l) || l.InGame || this.seriesInProgress(l) : l.Kind === "QuickPlay" ? l.InGame : false))
+			.sort((a, b) => Number(a.InGame) - Number(b.InGame))
+			.map((l) => ({ ...l, Players: l.Players.map(hide), Spectators: l.Spectators.map(hide), MatchPlayers: l.MatchPlayers.map(hide), EndGameChoice: l.EndGameChoice && l.EndGameChoice.map(hide) }));
+	}
+
+	// ---- for the platform ----
+
+	// Counts only (no names or ids), for checking that nobody is mid-match before a redeploy, which disconnects everyone.
 	stats() {
 		const lobbies = [...this.rooms.values()].map((r) => r.lobby);
 		const matches = lobbies.filter((l) => l.InGame);
@@ -581,362 +894,269 @@ export class Matchmaker {
 		};
 	}
 
-	// Whether `peer` is a player or spectator in lobby `roomId` (for handing out TURN credentials).
+	// Whether `peer` is a player or spectator in lobby `roomId` (signaling rooms, TURN credentials).
 	isMember(roomId, peer) {
 		const lobby = this.rooms.get(roomId)?.lobby;
 		return !!lobby && !!peer && [...lobby.Players, ...lobby.Spectators].some((m) => m.RoomPeerId === peer);
 	}
 
-	// Whether `peer` is a player (not a spectator) of lobby `roomId` and its match is on (for the
-	// match relay, relay.js).
+	// Whether `peer` is a player (not a spectator) of lobby `roomId` and its match is on (the Switch match relay, relay.js).
 	isPlayingIn(roomId, peer) {
 		const lobby = this.rooms.get(roomId)?.lobby;
 		return !!lobby && lobby.InGame && !!peer && lobby.Players.some((m) => m.RoomPeerId === peer);
 	}
+}
 
-	tooBig(lobby) {
-		return JSON.stringify(lobby).length > MAX_LOBBY_JSON;
-	}
+// Votes, as they show in EndGameChoice.
+const CHOICES = { RematchLobbyChoice: "Rematch", ArcherSelectChoice: "Archer", SeriesContinueChoice: "Continue" };
 
-	// Wrong join codes from one address: true once it has used up its tries for a while.
-	codeLocked(conn, now, missed) {
-		const ip = conn.state.ip;
-		if (!ip) return false;
-		let m = this.codeMisses.get(ip);
-		if (m && now >= m.until) m = null;
-		if (missed) {
-			m ??= { n: 0, until: now + CODE_MISS_WINDOW_MS };
-			m.n++;
-			this.codeMisses.set(ip, m);
-			for (const [k, v] of this.codeMisses) if (now >= v.until) this.codeMisses.delete(k);
-		}
-		return !!m && m.n >= CODE_MISSES;
-	}
-
-	// ---- quick play ----
-
-	leaveQuickPlay(conn) {
-		if (!conn.state.quickPlay) return;
-		conn.state.quickPlay = null;
-		conn.save?.();
-		this.quickPlayStatus();
-	}
-
-	queued() {
-		return [...this.conns.values()].filter((c) => c.state.quickPlay).sort((a, b) => a.state.quickPlay.since - b.state.quickPlay.since);
-	}
-
-	quickPlayStatus() {
-		const queue = this.queued();
-		const standard = queue.filter((c) => !c.state.quickPlay.wide).length;
-		const wide = queue.length - standard;
-		// local_players: the players searching on that device, which also tells TF.EX this server seats several per device.
-		for (const conn of queue) this.send(conn, "QuickPlayStatus", { queued: true, searching_standard: standard, searching_wide: wide, message: "", local_players: conn.state.quickPlay.seats ?? 1 });
-	}
-
-	// Two devices searching with the same screen width (WiderSet) make a match, if their players (local_players) fit.
-	matchQuickPlay(now) {
-		for (const wide of [false, true]) {
-			const queue = this.queued().filter((c) => c.state.quickPlay.wide === wide);
-			const max = wide ? MAX_WIDE_PLAYERS : MAX_PLAYERS;
-			const seatsOf = (c) => c.state.quickPlay.seats ?? 1;
-			for (;;) {
-				const first = queue.findIndex((a, i) => queue.some((b, j) => j > i && seatsOf(a) + seatsOf(b) <= max));
-				if (first < 0) break;
-				const second = queue.findIndex((b, j) => j > first && seatsOf(queue[first]) + seatsOf(b) <= max);
-				const conns = [queue[first], queue[second]];
-				queue.splice(second, 1);
-				queue.splice(first, 1);
-				const players = [];
-				const peers = [];
-				for (const c of conns) {
-					const main = this.newMember(c.state.quickPlay.name, players.length === 0, players.length);
-					players.push(main);
-					peers.push(main.RoomPeerId);
-					for (let n = 2; n <= seatsOf(c); n++) players.push(this.player({}, { Name: clean(`${main.Name} ${n}`, MAX_NAME), RoomPeerId: main.RoomPeerId, IsHost: false, Seat: players.length, Team: -1 }));
-				}
-				const lobby = {
-					Name: clean(conns[0].state.quickPlay.name, MAX_NAME) || "QUICK PLAY",
-					RoomId: crypto.randomUUID(),
-					MaxPlayers: players.length,
-					Players: players,
-					Spectators: [],
-					GameData: { MapId: -1, Mode: 3, MatchLength: 2, Variants: [], Seed: this.newSeed(), BestOf: 0 },
-					EndGameChoice: [],
-					Mods: [],
-					InGame: false,
-					Kind: "QuickPlay",
-					JoinCode: "",
-					Series: null,
-					RelayedPairs: [],
-					IsCheckingConnections: false,
-					IsReportEnabled: true,
-					MatchPlayers: [],
-					MissingVariants: [],
-				};
-				const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null, checkConnections: null }, measured: new Set() };
-				this.rooms.set(lobby.RoomId, room);
-				this.persist?.save(room);
-				for (const [i, conn] of conns.entries()) {
-					conn.state.quickPlay = null;
-					this.attach(conn, room, peers[i]);
-					this.send(conn, "QuickPlayMatchFound", { lobby, room_peer_id: peers[i] });
-				}
-				this.log(`[quickplay] matched ${lobby.Players.map((p) => p.Name).join(" vs ")}`);
-			}
-		}
-		void now;
-	}
+function vote(conn, choice, now) {
+	const room = this.recordChoice(conn, choice);
+	if (!room) return;
+	this.resolveEndGame(room, false, now);
+	if (this.rooms.has(room.lobby.RoomId)) this.sendLobbyUpdate(room);
 }
 
 const handlers = {
 	KeepAlive() {},
 
 	Identify(conn, body) {
-		conn.state.playerId = clean(body.player_id, 128);
+		const id = String(body.player_id ?? "");
+		if (!(id.startsWith("steam:") || id.startsWith("local:")) || id.length > 64) return this.log(`[identify] invalid player id ${id.slice(0, 80)}`);
+		conn.state.playerId = id;
 		conn.state.name = clean(body.name, MAX_NAME);
 	},
 
-	// Without peer ids: they're what a match's signaling knows its players by, and TF.EX's lobby list
-	// doesn't use them (joining hands out the lobby with them).
 	GetLobbies(conn) {
-		const hide = (m) => ({ ...m, RoomPeerId: "" });
-		const lobbies = [...this.rooms.values()]
-			.map((r) => r.lobby)
-			.filter((l) => l.Kind === "Standard")
-			.map((l) => ({ ...l, Players: l.Players.map(hide), Spectators: l.Spectators.map(hide), EndGameChoice: l.EndGameChoice.map(hide) }));
-		this.send(conn, "GetLobbiesResponse", { lobbies });
+		this.send(conn, "GetLobbiesResponse", { lobbies: this.listedLobbies() });
+	},
+
+	GetLeaderboard(conn, body, now) {
+		if (now - (conn.state.lastLeaderboard ?? -Infinity) < LEADERBOARD_COOLDOWN_MS) return;
+		conn.state.lastLeaderboard = now;
+		this.send(conn, "Leaderboard", { entries: [], own: null, around: [], total: 0 });
+	},
+
+	GetPlayerProfile(conn, body, now) {
+		if (now - (conn.state.lastProfile ?? -Infinity) < PROFILE_COOLDOWN_MS) return;
+		conn.state.lastProfile = now;
+		this.send(conn, "PlayerProfile", { rank: Number.isInteger(body.rank) ? body.rank : null, profile: null });
 	},
 
 	CreateLobby(conn, body, now) {
 		const fail = (message) => this.send(conn, "CreateLobbyResponse", { success: false, message, lobby: null });
-		const sent = body.lobby;
-		if (!sent || typeof sent !== "object") return fail("NO LOBBY");
-		// TF.EX picks the room id (a GUID) and uses it for its own room URL straight away.
-		const roomId = String(sent.RoomId ?? "");
-		// (xnet-* names are the lobby-free relay rooms', routes.js.)
-		if (!/^[A-Za-z0-9_-]{1,64}$/.test(roomId) || /^xnet-/i.test(roomId)) return fail("BAD ROOM ID");
-		if (this.rooms.has(roomId)) return fail("ROOM ID IN USE");
+		this.exitQuickPlay(conn);
 		this.leave(conn, now);
-		const kind = sent.Kind === "Private" ? "Private" : "Standard";
+		const sent = body.lobby && typeof body.lobby === "object" ? body.lobby : {};
+		if (sent.Kind === "Ranked") return fail("Ranked lobbies are automated");
+		// TF.EX picks the room id (a GUID) and uses it for its own room URL straight away. (xnet-* names are the lobby-free relay
+		// rooms', routes.js.)
+		const roomId = String(sent.RoomId ?? "");
+		if (!/^[A-Za-z0-9_-]{1,64}$/.test(roomId) || /^xnet-/i.test(roomId)) return fail("Bad room id");
+		if (this.rooms.has(roomId)) return fail("Lobby with that room id already exists");
 		const players = Array.isArray(sent.Players) ? sent.Players : [];
-		const sentHost = players.find((p) => p?.IsHost) ?? players[0];
-		const name = clean(sentHost?.Name, MAX_NAME) || conn.state.name || "PLAYER";
-		const host = this.player(sentHost, { Name: name, RoomPeerId: crypto.randomUUID(), IsHost: true, Seat: 0, Team: -1 });
-		const gameData = this.gameData(sent.GameData);
-		const minPlayers = gameData.Mode === TEAM_DEATHMATCH ? 3 : 2;
-		const lobby = {
-			Name: clean(sent.Name, MAX_NAME) || name,
-			RoomId: roomId,
-			MaxPlayers: Math.min(MAX_PLAYERS, Math.max(minPlayers, int(sent.MaxPlayers, 2))),
-			Players: [host],
-			Spectators: [],
-			GameData: gameData,
-			EndGameChoice: [],
-			Mods: this.mods(sent.Mods),
-			InGame: false,
-			Kind: kind,
-			JoinCode: kind === "Private" ? this.newCode() : "",
-			Series: null,
-			RelayedPairs: [],
-			IsCheckingConnections: false,
-			IsReportEnabled: true, // TF.EX's MatchReport: desync / disconnect / crash zips (match-reports.js)
-			MatchPlayers: [],
-			MissingVariants: [],
-		};
-		if (this.tooBig(lobby)) return fail("LOBBY TOO BIG");
-		const room = { lobby, timers: { vote: null, seriesPick: null, quickStart: null, checkConnections: null }, measured: new Set() };
+		if (!players.length) return fail("Host not found");
+		const peer = crypto.randomUUID();
+		const host = this.player(players[0], { Name: conn.state.name || "PLAYER", RoomPeerId: peer, IsHost: true, Seat: 0 });
+		conn.state.name = host.Name;
+		const kind = ["Standard", "Private", "QuickPlay"].includes(sent.Kind) ? sent.Kind : "Standard";
+		const lobby = this.newLobby({
+			name: clean(sent.Name, 64) || host.Name,
+			roomId,
+			maxPlayers: int(sent.MaxPlayers, MAX_PLAYERS),
+			players: [host],
+			gameData: this.gameData(sent.GameData, this.newSeed()),
+			mods: this.mods(sent.Mods),
+			kind,
+			joinCode: kind === "Private" ? this.newCode() : null,
+		});
+		if (this.tooBig(lobby)) return fail("Lobby too big");
+		const room = this.newRoom(lobby, now);
 		this.rooms.set(roomId, room);
-		this.attach(conn, room, host.RoomPeerId);
+		this.attach(conn, room, peer);
 		this.persist?.save(room);
-		this.log(`[lobby] ${name} created ${kind} lobby ${roomId}${lobby.JoinCode ? ` (code ${lobby.JoinCode})` : ""}`);
+		this.log(`[lobby] ${host.Name} created ${kind} lobby ${roomId}${lobby.JoinCode ? ` (code ${lobby.JoinCode})` : ""}`);
 		this.send(conn, "CreateLobbyResponse", { success: true, message: "", lobby });
 	},
 
 	JoinLobby(conn, body, now) {
-		const room = this.rooms.get(String(body.room_id ?? ""));
-		const asPlayer = body.is_player !== false;
-		const refusal = room?.lobby.Kind === "Standard" ? this.joinRefusal(room, asPlayer) : "LOBBY NOT FOUND";
-		if (refusal) return this.send(conn, "JoinLobbyResponse", { success: false, message: refusal, room_peer_id: "", lobby: null });
-		const peer = this.join(conn, room, clean(body.name, MAX_NAME), asPlayer, now);
-		this.send(conn, "JoinLobbyResponse", { success: true, message: "", room_peer_id: peer, lobby: room.lobby });
-		this.joined(room, peer);
+		const roomId = String(body.room_id ?? "");
+		const fail = (message) => this.send(conn, "JoinLobbyResponse", { success: false, message, room_peer_id: "", lobby: null });
+		this.exitQuickPlay(conn);
+		if (this.roomOf(conn) && this.roomOf(conn).lobby.RoomId !== roomId) this.leave(conn, now);
+		if (this.playingRoomOf(conn)) return fail("Player already in a lobby");
+		const room = this.rooms.get(roomId);
+		if (!room) return fail(`Lobby ${roomId} not found`);
+		if (room.lobby.Kind === "Ranked") return fail("Ranked matches can't be joined");
+		if (this.roomOf(conn)) this.leave(conn, now); // (a spectator of this lobby joining again)
+		const isPlayer = body.is_player !== false;
+		const seated = this.seatMember(conn, room, clean(body.name, MAX_NAME), isPlayer, now);
+		if (seated.error) return fail(seated.error);
+		this.send(conn, "JoinLobbyResponse", { success: true, message: "", room_peer_id: seated.peer, lobby: room.lobby });
+		this.sendLobbyUpdate(room);
+		if (!isPlayer) this.notifyHostOfLateSpectator(room, seated.peer);
 	},
 
 	JoinPrivate(conn, body, now) {
-		if (this.codeLocked(conn, now, false)) return this.send(conn, "PrivateJoinResult", { success: false, message: "TOO MANY TRIES", room_peer_id: "", lobby: null });
+		const fail = (message) => this.send(conn, "PrivateJoinResult", { success: false, message, room_peer_id: "", lobby: null });
+		this.exitQuickPlay(conn);
+		this.leave(conn, now);
+		if (now - (conn.state.lastPrivateJoin ?? -Infinity) < PRIVATE_JOIN_COOLDOWN_MS) return fail("Too many attempts, wait a moment");
+		conn.state.lastPrivateJoin = now;
 		const code = String(body.code ?? "").trim().toUpperCase();
-		const room = code.length === CODE_LENGTH ? [...this.rooms.values()].find((r) => r.lobby.JoinCode === code) : undefined;
-		if (!room) this.codeLocked(conn, now, true);
-		const asPlayer = body.is_player !== false;
-		const refusal = this.joinRefusal(room, asPlayer);
-		if (refusal) return this.send(conn, "PrivateJoinResult", { success: false, message: refusal, room_peer_id: "", lobby: null });
-		const peer = this.join(conn, room, clean(body.name, MAX_NAME), asPlayer, now);
-		this.send(conn, "PrivateJoinResult", { success: true, message: "", room_peer_id: peer, lobby: room.lobby });
-		this.joined(room, peer);
+		const room = [...this.rooms.values()].find((r) => r.lobby.JoinCode === code);
+		if (!room) return fail("Invalid or expired code");
+		const isPlayer = body.is_player !== false;
+		const seated = this.seatMember(conn, room, clean(body.name, MAX_NAME), isPlayer, now);
+		if (seated.error) return fail(seated.error);
+		this.send(conn, "PrivateJoinResult", { success: true, message: "", room_peer_id: seated.peer, lobby: room.lobby });
+		this.sendLobbyUpdate(room);
+		if (!isPlayer) this.notifyHostOfLateSpectator(room, seated.peer);
 	},
 
 	LeaveLobby(conn, body, now) {
 		const left = this.leave(conn, now);
-		this.send(conn, "LeaveLobbyResponse", { success: true, message: left ? "" : "NOT IN A LOBBY" });
+		this.send(conn, "LeaveLobbyResponse", left ? { success: true, message: "" } : { success: false, message: "Lobby not found" });
 	},
 
-	// TF.EX waits for a LobbyUpdate after UpdatePlayer (its controllers stay locked until then).
+	// The device's Player at the sent seat (a local player), else its first one; the server keeps peer id, host and seat.
 	UpdatePlayer(conn, body, now) {
-		const room = this.roomOf(conn);
+		const room = this.playingRoomOf(conn);
 		if (!room) return;
 		const lobby = room.lobby;
-		// The Player at the sent seat if it's one of this connection's (AddLocalPlayer), else its first one.
 		const own = (p) => p.RoomPeerId === conn.state.peer;
 		let index = lobby.Players.findIndex((p) => own(p) && p.Seat === body.player?.Seat);
 		if (index < 0) index = lobby.Players.findIndex(own);
-		if (index < 0) return this.send(conn, "LobbyUpdate", { lobby });
 		const before = lobby.Players[index];
-		lobby.Players[index] = this.player(body.player, before);
-		if (this.tooBig(lobby)) {
-			lobby.Players[index] = before;
-			return this.send(conn, "LobbyUpdate", { lobby });
-		}
-		if (lobby.Kind === "QuickPlay" && !lobby.InGame) room.timers.quickStart = this.allReady(lobby) ? now + QUICK_START_MS : null;
-		if (this.maybeStartSeries(room, now)) return;
-		this.changed(room);
+		const updated = this.player(body.player, before);
+		if (!updated.CustomVariants.length) updated.CustomVariants = before.CustomVariants;
+		lobby.Players[index] = updated;
+		if (this.tooBig(lobby)) lobby.Players[index] = before;
+		if (this.isFull(lobby) && lobby.EndGameChoice === null) lobby.EndGameChoice = [];
+		this.refreshReady(room, now);
+		this.sendLobbyUpdate(room);
+		this.tryStartSeriesGame(room, now);
 	},
 
-	// Another player on the connection's device (TF.EX local players): a Player with the connection's peer id, at any free
-	// seat. The device's first Player in the list stays its main one. One device leaving removes all its players
-	// (removeMember filters by peer).
-	AddLocalPlayer(conn, body) {
-		const room = this.roomOf(conn);
+	// Another player on the sender's device (Fcornaire/TF.EX#283): a Player with its room peer id at the first free seat. A
+	// refused one still gets the lobby back (TF.EX waits for a lobby update).
+	AddLocalPlayer(conn, body, now) {
+		const room = this.playingRoomOf(conn);
 		if (!room) return;
 		const lobby = room.lobby;
 		const first = this.playerOf(room, conn);
-		const seat = this.freeSeat(lobby);
-		if (!first || seat < 0 || lobby.InGame || lobby.Kind === "QuickPlay" || this.seriesInProgress(lobby)) return this.send(conn, "LobbyUpdate", { lobby });
-		const name = clean(body.player?.Name, MAX_NAME) || first.Name;
-		lobby.Players.push(this.player(body.player, { Name: name, RoomPeerId: first.RoomPeerId, IsHost: false, Seat: seat, Team: -1 }));
-		this.log(`[lobby] ${name} joined ${lobby.RoomId} on ${first.Name}'s device`);
-		this.changed(room);
+		if (lobby.InGame || ["QuickPlay", "Ranked"].includes(lobby.Kind) || this.seriesInProgress(lobby) || this.isFull(lobby)) return this.send(conn, "LobbyUpdate", { lobby });
+		const player = this.player(body.player, { Name: first.Name, RoomPeerId: first.RoomPeerId, IsHost: false, Seat: this.firstFreeSeat(lobby) });
+		player.Ready = false;
+		lobby.Players.push(player);
+		this.membershipChanged(room, now);
+		this.log(`[lobby] ${player.Name} joined ${lobby.RoomId} on ${first.Name}'s device`);
+		this.sendLobbyUpdate(room);
 	},
 
-	// Removes one of the connection's other players (never its first: LeaveLobby does that).
-	RemoveLocalPlayer(conn, body) {
-		const room = this.roomOf(conn);
+	// Removes one of the sender's other players (never its first one: LeaveLobby does that).
+	RemoveLocalPlayer(conn, body, now) {
+		const room = this.playingRoomOf(conn);
 		if (!room) return;
 		const lobby = room.lobby;
 		const first = this.playerOf(room, conn);
 		const index = lobby.Players.findIndex((p) => p !== first && p.RoomPeerId === conn.state.peer && p.Seat === body.seat);
 		if (index < 0 || lobby.InGame) return this.send(conn, "LobbyUpdate", { lobby });
-		this.log(`[lobby] ${lobby.Players[index].Name} left ${lobby.RoomId} (local player)`);
+		this.log(`[lobby] seat ${body.seat} left ${lobby.RoomId} (local player)`);
 		lobby.Players.splice(index, 1);
-		this.changed(room);
+		this.membershipChanged(room, now);
+		this.sendLobbyUpdate(room);
 	},
 
-	UpdateLobbySettings(conn, body) {
-		const room = this.roomOf(conn);
-		if (!room || !this.isHost(room, conn)) return;
+	UpdateLobbySettings(conn, body, now) {
+		const room = this.playingRoomOf(conn);
+		if (!room) return;
 		const lobby = room.lobby;
-		if (lobby.InGame || lobby.Kind === "QuickPlay" || this.seriesInProgress(lobby)) return;
-		const before = { GameData: lobby.GameData, MaxPlayers: lobby.MaxPlayers, Mods: lobby.Mods };
-		lobby.GameData = this.gameData(body.game_data, lobby.GameData);
-		const minPlayers = Math.max(lobby.Players.length, lobby.GameData.Mode === TEAM_DEATHMATCH ? 3 : 2);
-		lobby.MaxPlayers = Math.min(MAX_PLAYERS, Math.max(minPlayers, int(body.max_players, lobby.MaxPlayers)));
-		if (Array.isArray(body.mods)) lobby.Mods = this.mods(body.mods);
-		if (this.tooBig(lobby)) {
-			Object.assign(lobby, before);
-			return this.send(conn, "LobbyUpdate", { lobby });
-		}
-		// New settings: everyone picks again (TF.EX un-joins a player the server un-readies).
+		if (lobby.Kind === "Ranked" || !this.isHost(room, conn) || lobby.InGame || this.seriesInProgress(lobby)) return;
+		const before = { GameData: lobby.GameData, MaxPlayers: lobby.MaxPlayers, Mods: lobby.Mods, Series: lobby.Series };
+		lobby.MaxPlayers = Math.min(MAX_PLAYERS, Math.max(Math.max(lobby.Players.length, 2), int(body.max_players, lobby.MaxPlayers)));
+		lobby.GameData = this.gameData(body.game_data, lobby.GameData.Seed);
+		lobby.Mods = this.mods(body.mods);
+		lobby.Series = null;
+		if (this.tooBig(lobby)) return void Object.assign(lobby, before);
 		for (const p of lobby.Players) p.Ready = false;
-		this.changed(room);
+		room.membershipChangedAt = now;
+		this.refreshReady(room, now);
+		this.sendLobbyUpdate(room);
 	},
 
 	StartLobbyChoice(conn, body, now) {
-		const room = this.roomOf(conn);
-		if (!room || !this.isHost(room, conn)) return;
-		const lobby = room.lobby;
-		if (lobby.InGame || lobby.Kind === "QuickPlay" || this.seriesInProgress(lobby) || !this.allReady(lobby)) return;
-		if (lobby.GameData.BestOf > 0) {
-			if (lobby.Players.length !== lobby.MaxPlayers) return;
-			this.newSeries(room);
-		}
-		this.startAfterConnectionCheck(room, now);
+		const error = this.startLobby(conn, now);
+		if (error) this.log(`[lobby] start refused: ${error}`);
 	},
 
-	// TF.EX 0.20.0 PeerMeasured {room_peer_id}: the sender measured an RTT to that peer (ping measurement, /ping_measurement/<room>).
 	PeerMeasured(conn, body, now) {
-		const room = this.roomOf(conn);
-		const peer = String(body.room_peer_id ?? "");
-		if (!room || !this.playerOf(room, conn) || !room.lobby.Players.some((p) => p.RoomPeerId === peer)) return;
-		conn.state.measures = true;
-		if (!room.measured.has(`${conn.state.peer}|${peer}`)) this.log(`[lobby] ${room.lobby.RoomId}: ${conn.state.peer} measured ${peer}`);
-		room.measured.add(`${conn.state.peer}|${peer}`);
-		if (room.lobby.IsCheckingConnections && this.unmeasuredPairs(room).length === 0) this.finishConnectionCheck(room, now);
+		this.recordPeerMeasured(conn, String(body.room_peer_id ?? ""), now);
 	},
 
 	MatchEnded(conn, body, now) {
-		const room = this.roomOf(conn);
-		if (!room || !room.lobby.InGame || !this.playerOf(room, conn)) return;
-		room.timers.vote ??= now + VOTE_MS;
-		if (!room.reported) {
-			room.reported = true;
-			this.seriesResult(room, { winner_seat: int(body.winner_seat, -1), scores: Array.isArray(body.scores) ? body.scores : [] });
-			this.changed(room);
+		if (Number.isInteger(body.winner_seat)) {
+			this.handleMatchReport(conn, {
+				winner_seat: body.winner_seat,
+				frame: Number.isInteger(body.frame) ? body.frame : null,
+				checksum: typeof body.checksum === "string" ? body.checksum : null,
+				scores: Array.isArray(body.scores) ? body.scores.map((s) => int(s)) : null,
+			}, now);
 		}
+		const room = this.playingRoomOf(conn);
+		if (room) this.startEndGameCountdown(room, now);
 	},
 
 	RematchLobbyChoice(conn, body, now) {
-		if (this.roomOf(conn)?.lobby.Series) return;
-		this.vote(conn, "Rematch", now);
+		vote.call(this, conn, CHOICES.RematchLobbyChoice, now);
 	},
 
 	ArcherSelectChoice(conn, body, now) {
-		this.vote(conn, "ArcherSelect", now);
+		vote.call(this, conn, CHOICES.ArcherSelectChoice, now);
 	},
 
 	SeriesContinueChoice(conn, body, now) {
-		this.vote(conn, "Continue", now);
+		vote.call(this, conn, CHOICES.SeriesContinueChoice, now);
 	},
 
 	SeriesPickMap(conn, body, now) {
-		const room = this.roomOf(conn);
-		const player = room && this.playerOf(room, conn);
-		const series = room?.lobby.Series;
-		if (!player) return;
-		// A refused pick gets the lobby back unchanged (TF.EX waits to see its pick in one).
-		const refuse = () => this.send(conn, "LobbyUpdate", { lobby: room.lobby });
-		if (!series || series.Status !== "InProgress" || series.AwaitingResult || room.lobby.InGame) return refuse();
-		const map = int(body.map_id, -1);
-		if (map < 0 || map >= TOWERS || series.Games.some((g) => g.MapId === map)) return refuse();
-		if (!this.pickerSeats(series, room.lobby).includes(player.Seat)) return refuse();
-		series.Picks = series.Picks.filter((p) => p.Seat !== player.Seat);
-		series.Picks.push({ Seat: player.Seat, MapId: map });
-		series.NextMapId = null;
-		this.settlePicks(series, room.lobby);
-		if (this.maybeStartSeries(room, now)) return;
-		this.changed(room);
+		const room = this.playingRoomOf(conn);
+		if (!room) return;
+		const error = this.pickSeriesMap(room, this.playerOf(room, conn).Seat, body.map_id);
+		if (error) return this.log(`[lobby] series pick refused: ${error}`);
+		this.sendLobbyUpdate(room);
+		this.tryStartSeriesGame(room, now);
 	},
 
 	EnterQuickPlay(conn, body, now) {
-		const since = conn.state.quickPlay?.since ?? now;
 		this.leave(conn, now);
-		const wide = body.is_wide === true;
-		// TF.EX local players: how many search on this device (sent again when one more joins; the place in the queue is kept).
-		const seats = Math.min(Math.max(int(body.local_players, 1), 1), (wide ? MAX_WIDE_PLAYERS : MAX_PLAYERS) - 1);
-		conn.state.quickPlay = { wide, seats, name: clean(body.name, MAX_NAME) || conn.state.name || "PLAYER", since };
-		conn.save?.();
-		this.matchQuickPlay(now);
-		this.quickPlayStatus();
+		this.enterQuickPlay(conn, clean(body.name, MAX_NAME), body.is_wide === true, now);
 	},
 
 	ExitQuickPlay(conn) {
-		this.leaveQuickPlay(conn);
+		this.exitQuickPlay(conn);
+		const counts = this.queueCounts();
+		this.send(conn, "QuickPlayStatus", { queued: false, searching_standard: counts.standard, searching_wide: counts.wide, message: "" });
 	},
 
+	EnterRanked(conn, body, now) {
+		this.leave(conn, now);
+		this.send(conn, "RankedStatus", { queued: false, searching_standard: 0, searching_wide: 0, message: RANKED_UNAVAILABLE_MESSAGE });
+	},
+
+	ExitRanked(conn) {
+		this.send(conn, "RankedStatus", { queued: false, searching_standard: 0, searching_wide: 0, message: "" });
+	},
+
+	// Relayed to the whole lobby, the sender included.
 	SkinChunk(conn, body) {
-		const room = this.roomOf(conn);
-		if (!room || !this.playerOf(room, conn) || !body.chunk || typeof body.chunk !== "object") return;
-		const text = `{"SkinChunk":${JSON.stringify({ chunk: body.chunk, from: conn.state.peer })}}`;
-		if (text.length > MAX_SKIN_CHUNK) return;
-		for (const member of this.members(room)) if (member !== conn) member.send(text);
+		const room = this.playingRoomOf(conn);
+		const c = body.chunk;
+		if (!room || !c || typeof c !== "object") return;
+		const ok = Number.isInteger(c.chunk_count) && Number.isInteger(c.chunk_index) && c.chunk_count > 0 && c.chunk_count <= MAX_SKIN_CHUNKS && c.chunk_index >= 0 && c.chunk_index < c.chunk_count
+			&& typeof c.data === "string" && c.data.length <= MAX_SKIN_CHUNK_DATA && String(c.bundle_id ?? "").length <= 128 && String(c.custom_archer_id ?? "").length <= 256;
+		if (!ok) return this.log("[skin] chunk rejected by size limits");
+		const chunk = { bundle_id: String(c.bundle_id ?? ""), custom_archer_id: String(c.custom_archer_id ?? ""), chunk_index: c.chunk_index, chunk_count: c.chunk_count, data: c.data };
+		this.sendToLobby(room, "SkinChunk", { chunk, from: conn.state.peer });
 	},
 };

@@ -8,8 +8,8 @@
 // local.mjs, and read with GET /reports/match (tools/match-reports.sh).
 
 export const MATCH_KINDS = ["desync", "disconnect", "crash"];
-// A replay, up to 4 MB of log (MatchReport.MaxLogBytes) and an exception, zipped.
-export const MAX_MATCH_REPORT = 16 << 20;
+// A replay, up to 4 MB of log (MatchReport.MaxLogBytes) and an exception, zipped; TF.EX's server takes up to 32 MB.
+export const MAX_MATCH_REPORT = 32 << 20; // MAX_REPORT_BYTES
 export const MATCH_PER_ADDRESS_PER_HOUR = 30;
 export const MATCH_LIST_LIMIT = 200;
 
