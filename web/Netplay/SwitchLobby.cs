@@ -31,6 +31,9 @@ public static class SwitchLobby
 	// OperatingSystem.IsBrowser(), so the page says so, the way TF.EX names the others.
 	public const string BrowserPlatform = "Browser";
 	public const int SessionFps = 60;
+	// ?hz=240 (Switch harness, tests only: the Switch's hw.txt "hz 240" on the other side): a Switch lobby at TF.EX's 240 Hz, with its
+	// spectators (only the 60 Hz session can't serve them). Browser-only lobbies keep their rule (docs/BROWSER-60HZ.md).
+	private static readonly int testHz = int.TryParse(Environment.GetEnvironmentVariable("TOWERFALL_SWITCHLOBBY_HZ"), out int hz) && hz is 60 or 240 ? hz : 0;
 
 	private static bool lowRate; // this session runs at SessionFps (a Switch lobby, or browsers only)
 	private static object manager; // TF.EX's NetplayManager
@@ -116,9 +119,15 @@ public static class SwitchLobby
 				Stop();
 				return;
 			}
+			if (switchLobby && testHz == 240)
+			{
+				Stop();
+				Console.WriteLine($"[netplay] Switch lobby: this match ({players.Count} players) runs at TF.EX's 240 Hz (?hz=240, test), spectators as TF.EX has them");
+				return;
+			}
 			spectators.SetValue(netplay, new List<string>()); // the Switch can't serve spectators at 60 Hz yet
 			lowRate = true;
-			TfexFps.SetSessionRate(SessionFps); // the Switch runs 60 Hz (not yet TF.EX's 240); GGRS peers must agree
+			TfexFps.SetSessionRate(SessionFps); // a Switch lobby runs 60 Hz unless the Switch's tester says otherwise (?hz=240); GGRS peers must agree
 			Console.WriteLine($"[netplay] {(switchLobby ? "Switch" : "Browser")} lobby: this match ({players.Count} players) runs at {SessionFps} Hz over TF.EX's room, no spectators");
 		}
 		catch (Exception e)
