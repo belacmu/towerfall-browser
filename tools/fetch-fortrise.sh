@@ -9,8 +9,8 @@
 # tools/build-monomod.sh then replaces its MonoMod with our WebAssembly-capable build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-FORTRISE_VERSION=5.5.0-beta.3
-FORTRISE_SHA256=e7fa8b534cf3ebe2ce6bdb5e25933a531461f817a184b7cbb37c64b9c6e0d681
+FORTRISE_VERSION=5.5.0-beta.4
+FORTRISE_SHA256=ceb6eb6376d2fb694a069a9448ec757b339725d10136f5622f8438bcb8e8b800
 
 OUT=vendor/fortrise
 want="$FORTRISE_VERSION $(cat tools/fetch-fortrise.sh tools/AnyCpu/*.cs* | shasum -a 256 | cut -c1-16)"

@@ -817,6 +817,9 @@ async function startDotnet() {
 	// ?tfexfps=60 (experiment): TF.EX runs its sessions at that tick rate instead of 240 (web/Netplay/TfexFps.cs).
 	const tfexFps = new URLSearchParams(location.search).get("tfexfps");
 	if (tfexFps) builder = builder.withEnvironmentVariable("TOWERFALL_TFEX_FPS", tfexFps);
+	// ?hz=240 (Switch harness, tests): a Switch lobby at TF.EX's 240 Hz instead of 60 (web/Netplay/SwitchLobby.cs; the Switch's hw.txt "hz 240").
+	const switchHz = new URLSearchParams(location.search).get("hz");
+	if (switchHz) builder = builder.withEnvironmentVariable("TOWERFALL_SWITCHLOBBY_HZ", switchHz);
 	// ?tfexplatform=Switch (debug): this page tells TF.EX's lobby it plays on that platform, so two browsers can
 	// rehearse a lobby match against the Switch (relay, 60 Hz; web/Netplay/SwitchLobby.cs).
 	const tfexPlatform = new URLSearchParams(location.search).get("tfexplatform");
@@ -979,6 +982,9 @@ async function main() {
 	self.towerfallSlowCpu = (factor) => exports.BrowserHost.SetSlowCpu(factor);
 	const slowCpu = Number(new URLSearchParams(location.search).get("slowcpu"));
 	if (slowCpu > 1) await exports.BrowserHost.SetSlowCpu(slowCpu);
+	// ?statedump=N (Switch harness, local only): every Nth GGRS save's TF.State bytes (web/Netplay/StateDump.cs).
+	const stateDump = new URLSearchParams(location.search).get("statedump");
+	if (stateDump != null) await exports.BrowserHost.RunCommand(`statedump ${Number(stateDump) || 60}`);
 	for (const line of (new URLSearchParams(location.search).get("command") ?? "").split(";").filter(Boolean)) {
 		await exports.BrowserHost.RunCommand(line);
 	}
