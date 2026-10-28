@@ -48,6 +48,7 @@ public static class TfexPatches
 		RenderKeepsState.Patch(harmony); // drawing doesn't change the saved state (the Switch does the same)
 		TfexFps.Patch(harmony); // TF.EX's session rate: ?tfexfps=N (experiment), or per session (SwitchLobby)
 		SwitchLobby.Patch(harmony); // lobby matches against the Switch: 60 Hz, gameplay digest
+		InitWindow.Patch(harmony); // a session's level held from Init on, as on a PC (Connect's worker is slower here)
 		PatchServer(harmony);
 		PatchCoOpButtons(harmony);
 		Console.WriteLine("[netplay] TF.EX patched for the browser (update check via the GitHub API, no self-update).");
