@@ -1,5 +1,5 @@
 // Match relay: /relay/<roomId>?peer=<peerId>, for matches with a peer that has no WebRTC (the Nintendo
-// Switch build; see the browser's netplay/tfnet.js TFNet.openRelay and web/Netplay/SwitchLobby.cs).
+// Switch build; see the browser's netplay/tfnet.js TFNet.openRelay and web/Netplay/PagePlatform.cs).
 // A plain WebSocket room of two peers: every binary message one peer sends goes to the other one,
 // unchanged (one bincode'd ggrs::Message per message, no framing, no sender id: each side knows who
 // the other is from the lobby). Text messages are dropped. Nothing is sent by the server itself.

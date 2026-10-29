@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BASE=${1:-http://localhost:8080/}
-# ?tfexplatform=Switch also checks SwitchLobby's platform claim.
+# ?tfexplatform=Switch also checks PagePlatform's platform claim.
 URL="${BASE%/}/?mute&nointro&autoplay&mods=TF.EX&tfexplatform=Switch"
 log=$(mktemp)
 trap 'rm -rf "$log" "$HOME/.towerfall-browser/tfexcheck-profile"' EXIT
@@ -19,12 +19,11 @@ expect=(
 	"Dark World: True"                                  # TF.EX 0.21+ refuses online play without it
 	"Direct field access at [0-9]+ places"              # DirectFields (TF.State)
 	"Optimized TF.State's entity lookups"               # StateSpeedups
-	"TF.EX session rate patches: 3 of 3"                # TfexFps
 	"TF.EX patched for the browser"                     # TfexPatches
 	"rollbacks drop recorded ticks from the end"        # ReplayRecordFix
 	"slowing down from [0-9]+ ticks ahead"              # AheadThreshold
 	"Online catch-up capped"                            # TickCatchUp
-	"this page says it plays on \"Switch\""             # SwitchLobby.ClaimPlatform
+	"this page says it plays on \"Switch\""             # PagePlatform.ClaimPlatform
 )
 # Lines a patch logs when TF.EX isn't as it expects.
 refuse="MISSING|isn't as expected|members missing|changed \(|not found|couldn't|stays as it is|Unhandled|Exception"

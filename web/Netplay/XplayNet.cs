@@ -40,7 +40,7 @@ namespace TowerFallBrowser;
 //
 // Logging. With rollbacks, the first time the game reaches frame G is usually with a *predicted* remote input; only the last simulation of G
 // (after the confirming inputs arrived) is the real one. So every Level.Update's state is kept per G (a later simulation replaces it) and printed
-// once G is `margin` (24) frames behind the newest one, which is past the prediction window (15 at 60 Hz): such a frame can't be rolled back any more.
+// once G is `margin` (24) frames behind the newest one, which is past the prediction window: such a frame can't be rolled back any more.
 public static partial class XplayVersus
 {
 	private const int NetNoOrigin = int.MinValue;
@@ -92,10 +92,9 @@ public static partial class XplayVersus
 	public static string StartNet(Assembly towerFall, Game theGame, string[] words)
 	{
 		game = theGame;
-		if (TfexFps.Fps != 60) return "needs the page opened with ?fortrise&tfexfps=60 (TF.EX's session at 60 ticks/s)";
 		Type commands = Find("TF.EX.Core.TFCommands");
 		if (commands == null) return "TF.EX isn't loaded (?mods=TF.EX)";
-		if (words.Length < 5) return "usage: xnet <roomUrl> <seat 0|1> <localPeerUuid> <remotePeerUuid> [script=..] [seed=42] [maxticks=N] [fps=60] [delay=D] [origin=266] [host=1] [hello=1]";
+		if (words.Length < 5) return "usage: xnet <roomUrl> <seat 0|1> <localPeerUuid> <remotePeerUuid> [script=..] [seed=42] [maxticks=N] [delay=D] [origin=266] [host=1] [hello=1]";
 		string roomUrl = words[1];
 		if (!int.TryParse(words[2], out netSeat) || netSeat < 0 || netSeat > 1) return "seat must be 0 or 1";
 		string local = words[3].ToLowerInvariant(), remote = words[4].ToLowerInvariant();
@@ -108,7 +107,6 @@ public static partial class XplayVersus
 		netInputOrigin = Opt("origin", 266);
 		netMargin = Opt("margin", 24);
 		netSyncTimeoutMs = Opt("synctimeout", 120) * 1000;
-		if (Opt("fps", 60) != 60) return "fps must be 60 (the Switch's rate; the page needs tfexfps=60)";
 		bool host = Opt("host", 0) == 1;
 		bool replayOff = options.TryGetValue("replay", out string rp) && rp == "off";
 		string scriptArg = options.TryGetValue("script", out string sc) ? sc : "-";
@@ -171,7 +169,7 @@ public static partial class XplayVersus
 		Type keyboard = towerFall.GetType("TowerFall.KeyboardInput", true);
 		for (int i = 0; i < 2; i++)
 			if (playerInputs.GetValue(i) == null) playerInputs.SetValue(Activator.CreateInstance(keyboard), i);
-		Console.WriteLine($"[xnet] cfg room={roomUrl.Replace(local, "<local>").Replace(remote, "<remote>")} seat={netSeat} seed={seed} maxticks={maxTicks} fps=60 delay={(netDelay >= 0 ? netDelay.ToString() : "TF.EX default")} origin={netInputOrigin} host={host} margin={netMargin} script_steps={scripts[netSeat].Count}");
+		Console.WriteLine($"[xnet] cfg room={roomUrl.Replace(local, "<local>").Replace(remote, "<remote>")} seat={netSeat} seed={seed} maxticks={maxTicks} delay={(netDelay >= 0 ? netDelay.ToString() : "TF.EX default")} origin={netInputOrigin} host={host} margin={netMargin} script_steps={scripts[netSeat].Count}");
 		// 3. TF.EX's own start of a match (settings, level order, Session, NetplayManager.Init -> native init_p2p in a task); our Session.StartGame prefix
 		// holds the Session back (netSession) until the GGRS session is synchronised.
 		MethodInfo start = commands.GetMethod("StartGame", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
