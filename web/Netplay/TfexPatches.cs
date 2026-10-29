@@ -14,6 +14,7 @@ namespace TowerFallBrowser;
 //  - It can't update itself in the browser: the site pins TF.EX and ships updates
 //    (tools/fetch-tfex.sh), so applying an update fails with a note saying so.
 //  - Lobby codes it copies also go on the system clipboard (SDL's is internal to the page).
+//  - Pages it opens (SUPPORT) open from the page: SDL_OpenURL would run window.open on the game's worker.
 //  - Its server: the official one turns browsers away, so the page names ours (TFEX_SERVER, see
 //    main.js) and TF.EX's OFFICIAL setting (its default, and RESET in its options) means that one
 //    here, shown as BROWSER. LOCAL and CUSTOM choices stand. ?tfexserver= (TFEX_SERVER_FORCE) picks
@@ -42,6 +43,13 @@ public static class TfexPatches
 		{
 			harmony.Patch(clipboard.GetMethod("SetText", all),
 				postfix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(ClipboardSet), all)));
+		}
+		Type url = updater.Assembly.GetType("TF.EX.Domain.Services.UrlService")
+			?? AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("TF.EX.Domain.Services.UrlService")).FirstOrDefault(t => t != null);
+		if (url != null)
+		{
+			harmony.Patch(url.GetMethod("Open", all),
+				prefix: new HarmonyMethod(typeof(TfexPatches).GetMethod(nameof(UrlOpen), all)));
 		}
 		StateSpeedups.Patch(harmony);
 		WideMapSet.Patch(harmony); // a wide rematch opens WiderSet's towers, as the lobby start does
@@ -187,6 +195,19 @@ public static class TfexPatches
 
 	[System.Runtime.InteropServices.DllImport("Emscripten")]
 	private static extern void tfclip_write(string text);
+
+	[System.Runtime.InteropServices.DllImport("Emscripten")]
+	private static extern int tfurl_open(string url);
+
+	// TF.EX's UrlService.Open (its SUPPORT button) calls SDL_OpenURL, which runs window.open on the game's worker: no window there,
+	// so the game crashed. The page opens it instead; a refusal (a popup blocker) throws as SDL_OpenURL's failure does, and TF.EX
+	// then shows the address in a notification.
+	private static bool UrlOpen(string url)
+	{
+		if (tfurl_open(url ?? "") == 0) throw new InvalidOperationException("the browser didn't open " + url);
+		Console.WriteLine($"[netplay] opened {url}");
+		return false;
+	}
 
 	private static void ClipboardSet(string text)
 	{
