@@ -814,14 +814,8 @@ async function startDotnet() {
 	if (new URLSearchParams(location.search).has("debug")) builder = builder.withEnvironmentVariable("TOWERFALL_LOG", "debug");
 	const server = tfexServer();
 	if (server.url) builder = builder.withEnvironmentVariable("TFEX_SERVER", server.url).withEnvironmentVariable("TFEX_SERVER_FORCE", server.force ? "1" : "0");
-	// ?tfexfps=60 (experiment): TF.EX runs its sessions at that tick rate instead of 240 (web/Netplay/TfexFps.cs).
-	const tfexFps = new URLSearchParams(location.search).get("tfexfps");
-	if (tfexFps) builder = builder.withEnvironmentVariable("TOWERFALL_TFEX_FPS", tfexFps);
-	// ?hz=240 (Switch harness, tests): a Switch lobby at TF.EX's 240 Hz instead of 60 (web/Netplay/SwitchLobby.cs; the Switch's hw.txt "hz 240").
-	const switchHz = new URLSearchParams(location.search).get("hz");
-	if (switchHz) builder = builder.withEnvironmentVariable("TOWERFALL_SWITCHLOBBY_HZ", switchHz);
 	// ?tfexplatform=Switch (debug): this page tells TF.EX's lobby it plays on that platform, so two browsers can
-	// rehearse a lobby match against the Switch (relay, 60 Hz; web/Netplay/SwitchLobby.cs).
+	// rehearse a lobby match against the Switch (web/Netplay/PagePlatform.cs).
 	const tfexPlatform = new URLSearchParams(location.search).get("tfexplatform");
 	if (tfexPlatform) builder = builder.withEnvironmentVariable("TOWERFALL_TFEX_PLATFORM", tfexPlatform);
 	// ?fullchecksum=1: GGRS computes a desync checksum on every state save, as TF.EX does, instead of only on the

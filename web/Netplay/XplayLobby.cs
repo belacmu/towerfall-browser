@@ -11,7 +11,7 @@ using Microsoft.Xna.Framework;
 namespace TowerFallBrowser;
 
 // `xlobby`: the xnet log and scripted input (XplayNet.cs) for a match started from a real TF.EX lobby (create / join, archer
-// select, ready, start), e.g. a rehearsal of a lobby match against the Switch (?tfexplatform=Switch on one page; SwitchLobby.cs).
+// select, ready, start), e.g. a rehearsal of a lobby match against the Switch (?tfexplatform=Switch on one page; PagePlatform.cs).
 //
 //   xlobby [script0=<path or inline>] [script1=..] [maxticks=N] [origin=266] [margin=24]
 //

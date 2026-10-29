@@ -104,6 +104,6 @@ That build hasn't been booted in the page.
   - Quick play then matches the two pages. Press `c` on both to pick archers.
   - Send random keys (arrows, `c`, `x`) to both pages for a minute. The STATS panel should show rollbacks, and no
     "DESYNC" line should appear.
-  - A private lobby, with `?mode=online` and `&tfexplatform=Switch` on one page, plays the Switch's part. The log then says
-    "Switch lobby: this match runs at 60 Hz over the server's relay".
+  - A private lobby, with `?mode=online` and `&tfexplatform=Switch` on one page, plays the Switch's part. That page's log
+    says `this page says it plays on "Switch"`, and the match runs as any other (TF.EX's 240 Hz).
 - After the merge, the site deploys and every player gets the new TF.EX.

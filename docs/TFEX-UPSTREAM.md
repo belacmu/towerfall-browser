@@ -82,4 +82,4 @@ noted; desktop .NET is faster, but the costs grow the same way.
 - **What happens:** `TF.EX.Domain.Utils.Platform.Current` names Windows, Linux and macOS (`OperatingSystem.Is*`), and
   everything else "Unknown". So every other player sees "<name> IS PLAYING ON UNKNOWN - NETPLAY MAY DESYNC".
 - **Fix:** `OperatingSystem.IsBrowser() ? "Browser"` before the "Unknown" fallback.
-- **Ours:** `SwitchLobby.ClaimPlatform` (`web/Netplay/SwitchLobby.cs`) says "Browser" (from TF.EX v0.21.1 here).
+- **Ours:** `PagePlatform.ClaimPlatform` (`web/Netplay/PagePlatform.cs`) says "Browser" (from TF.EX v0.21.1 here).
