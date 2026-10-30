@@ -11,15 +11,14 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.27.0 (2026-10-27, with the Switch's switch-online): its release bundles the same ggrs-ffi as v0.22.2 (v2.2.0), which
-# tools/build-netplay.sh builds (the Switch's ggrs-ffi-switch has the same change).
-TFEX_VERSION=v0.27.0
-# Our fork (docs/TFEX-UPDATE.md "TF.EX from a fork"): v0.27.0 + Fcornaire/TF.EX#283 (several local players on one device online),
-# branch belacmu/TF.EX lmp-v0.27.0. Identical to v0.27.0 until a second local player joins; back to a release when #283 is in one.
-TFEX_SOURCE=${TFEX_SOURCE-belacmu/TF.EX@fbeec67d9a83aa3180551cdd26f9fef23bb08035}
+# v0.28.0 (2026-10-29): TF.EX's own several-local-players support (it replaces our fork's #283); its release bundles a ggrs-ffi with
+# the same entry points (netplay_set_local_inputs, the local / remote handle lists) as tools/build-netplay.sh's.
+TFEX_VERSION=v0.28.0
+# A fork or branch with a change of ours (docs/TFEX-UPDATE.md "TF.EX from a fork"): none, the release itself.
+TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:bedfa8496a1cf19093793f02ec27cdd92f83c260feeb991f43bc823d249c4280
+DShad.TF.EX:edb72c1b80de800a1476376c3e74fc869fffe134fa19b9d4b227a57e198b634b
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
