@@ -732,38 +732,59 @@ test("core: settings changes un-ready everyone, clear the series, keep the seed;
 	eq(new Set(l.Players.map((p) => p.Seat)).size, 3, "seats unique");
 });
 
-test("core: local players (AddLocalPlayer): a seat after the device's first, UpdatePlayer by seat, one device counts once", async () => {
+test("core: guests (local_players, TF.EX v0.28.0): seated after their device, UpdatePlayer by seat, one device counts once", async () => {
 	const mm = await core();
 	const A = new FakeConn(mm, "ALICE");
 	const sent = builtLobby("ALICE");
 	sent.MaxPlayers = 4;
-	A.do({ CreateLobby: { lobby: sent } });
-	const { JoinCode } = A.last("CreateLobbyResponse").lobby;
-	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2", Platform: "Switch" } } });
-	let l = A.last("LobbyUpdate").lobby;
-	eq(l.Players.map((p) => [p.Name, p.Seat, p.IsHost, p.RoomPeerId === A.state.peer]), [["ALICE", 0, true, true], ["ALICE 2", 1, false, true]], "seated on A's device");
-	assert(!l.IsCheckingConnections, "one device: nothing to check");
+	A.do({ CreateLobby: { lobby: { ...sent, RoomId: "r4" }, local_players: 4 } });
+	eq(A.last("CreateLobbyResponse").message, "Invalid local player count", "at most 3 per device");
+	A.do({ CreateLobby: { lobby: { ...sent, RoomId: "r2", MaxPlayers: 2 }, local_players: 2 } });
+	eq(A.last("CreateLobbyResponse").message, "No room left for another player", "room for another device");
+	A.do({ CreateLobby: { lobby: sent, local_players: 2 } });
+	let l = A.last("CreateLobbyResponse").lobby;
+	const { JoinCode } = l;
+	eq(l.Players.map((p) => [p.Name, p.Seat, p.IsHost, p.LocalIndex, p.RoomPeerId === A.state.peer]), [["ALICE", 0, true, 0, true], ["ALICE 2", 1, false, 1, true]], "the guest on A's device");
+	A.do({ StartLobbyChoice: {} });
+	assert(!roomOf(mm).lobby.InGame, "one device can't start");
+	A.do({ UpdateLobbySettings: { max_players: 2, game_data: l.GameData, mods: [] } });
+	eq(roomOf(mm).lobby.MaxPlayers, 3, "room for another device kept");
+	const C = new FakeConn(mm, "CARL");
+	C.do({ JoinPrivate: { code: JoinCode, name: "CARL", is_player: true, local_players: 2 } });
+	eq(C.last("PrivateJoinResult").message, `Lobby ${roomOf(mm).lobby.RoomId} is full`, "a seat per local player");
+	A.do({ UpdateLobbySettings: { max_players: 4, game_data: l.GameData, mods: [] } });
 	const B = new FakeConn(mm, "BOB");
+	clock += 3_000;
 	B.do({ JoinPrivate: { code: JoinCode, name: "BOB", is_player: true } });
 	eq(B.last("PrivateJoinResult").lobby.Players.at(-1).Seat, 2, "B after them");
 	A.do({ PeerMeasured: { room_peer_id: B.state.peer } });
 	assert(!roomOf(mm).lobby.IsCheckingConnections, "one measurement between the two devices settles it");
-	A.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players[1], ArcherIndex: 4, Ready: true } } });
+	A.do({ UpdatePlayer: { player: { ...roomOf(mm).lobby.Players[1], Name: "SPOOF", IsHost: true, ArcherIndex: 4, Ready: true } } });
 	l = A.last("LobbyUpdate").lobby;
-	eq([l.Players[0].ArcherIndex, l.Players[1].ArcherIndex], [0, 4], "UpdatePlayer goes to the sent seat");
+	eq([l.Players[0].ArcherIndex, l.Players[1].ArcherIndex, l.Players[1].Name, l.Players[1].IsHost, l.Players[1].LocalIndex], [0, 4, "ALICE 2", false, 1], "UpdatePlayer goes to the sent seat; a guest keeps its name");
 	A.do({ StartLobbyChoice: {} });
 	A.do({ MatchEnded: { winner_seat: 2, frame: 1, checksum: null, scores: [0, 0, 5] } });
 	B.do({ MatchEnded: { winner_seat: 2, frame: 1, checksum: null, scores: [0, 0, 5] } });
 	assert(roomOf(mm).reports === null, "two devices, two reports: compared");
 	for (const c of [A, B]) c.do({ ArcherSelectChoice: {} });
-	A.do({ RemoveLocalPlayer: { seat: 0 } });
-	eq(roomOf(mm).lobby.Players.length, 3, "the device's first player isn't removed that way");
-	A.do({ RemoveLocalPlayer: { seat: 1 } });
-	eq(roomOf(mm).lobby.Players.map((p) => p.Name), ["ALICE", "BOB"], "removed");
-	A.do({ AddLocalPlayer: { player: { Name: "ALICE 2" } } });
 	B.do({ LeaveLobby: {} });
 	mm.close(A, clock);
-	eq(mm.rooms.size, 0, "the device leaving takes its players along");
+	eq(mm.rooms.size, 0, "the device leaving takes its guests along");
+});
+
+test("core: quick play pairs devices whose seats fit; the host is never a guest", async () => {
+	const mm = await core();
+	const T = new FakeConn(mm, "TRIO");
+	T.do({ EnterQuickPlay: { name: "TRIO", is_wide: false, local_players: 3 } });
+	const D = new FakeConn(mm, "DUO");
+	D.do({ EnterQuickPlay: { name: "DUO", is_wide: false, local_players: 2 } });
+	assert(!D.take("QuickPlayMatchFound").length, "3 + 2 doesn't fit");
+	const S = new FakeConn(mm, "SOLO");
+	S.do({ EnterQuickPlay: { name: "SOLO", is_wide: false } });
+	const l = S.last("QuickPlayMatchFound").lobby;
+	eq(l.Players.map((p) => [p.Name, p.LocalIndex, p.IsHost]), [["TRIO", 0, true], ["TRIO 2", 1, false], ["TRIO 3", 2, false], ["SOLO", 0, false]], "the trio and the solo");
+	mm.close(T, clock);
+	eq(roomOf(mm).lobby.Players.map((p) => [p.Name, p.IsHost]), [["SOLO", true], ["DUO", false], ["DUO 2", false]], "the trio left with its guests; the waiting duo fits now");
 });
 
 test("core: spectators join mid-match (SpectatorJoined to the host only); host leaving closes the lobby", async () => {
