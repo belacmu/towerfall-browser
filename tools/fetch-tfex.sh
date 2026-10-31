@@ -11,14 +11,16 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.28.0 (2026-10-29): TF.EX's own several-local-players support (it replaces our fork's #283); its release bundles a ggrs-ffi with
-# the same entry points (netplay_set_local_inputs, the local / remote handle lists) as tools/build-netplay.sh's.
-TFEX_VERSION=v0.28.0
+# v0.28.1 (2026-10-30): v0.28.0's C# with new version numbers only. Its release bundles ggrs-ffi v3.0.1 (matchbox_socket 0.12 ->
+# 0.15 on TF.EX's fork of the rtc crate: an SCTP fix in the PC's own WebRTC); the browser keeps tools/build-netplay.sh's ggrs-ffi, as
+# for v0.28.0 (same entry points: netplay_set_local_inputs, the local / remote handle lists), with matchbox replaced by the page's
+# WebRTC (netplay/matchbox-browser). matchbox's signaling messages are unchanged 0.12 -> 0.15 (matchbox_protocol: doc comments only).
+TFEX_VERSION=v0.28.1
 # A fork or branch with a change of ours (docs/TFEX-UPDATE.md "TF.EX from a fork"): none, the release itself.
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:edb72c1b80de800a1476376c3e74fc869fffe134fa19b9d4b227a57e198b634b
+DShad.TF.EX:b8d739f3c2ec229698a352bcbec4adfb0a18e5e647b4d60fb580484f1d59f625
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
