@@ -11,16 +11,16 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.28.1 (2026-10-30): v0.28.0's C# with new version numbers only. Its release bundles ggrs-ffi v3.0.1 (matchbox_socket 0.12 ->
-# 0.15 on TF.EX's fork of the rtc crate: an SCTP fix in the PC's own WebRTC); the browser keeps tools/build-netplay.sh's ggrs-ffi, as
-# for v0.28.0 (same entry points: netplay_set_local_inputs, the local / remote handle lists), with matchbox replaced by the page's
-# WebRTC (netplay/matchbox-browser). matchbox's signaling messages are unchanged 0.12 -> 0.15 (matchbox_protocol: doc comments only).
-TFEX_VERSION=v0.28.1
+# v0.29.0 (2026-11-01): v0.28.1 plus #310 (icicle bolt arrow cannotHit, the replay seed, the ghost's scale) and #315 (spectating ranked
+# matches). Same ggrs-ffi v3.0.1 as v0.28.1: the browser keeps tools/build-netplay.sh's ggrs-ffi (same entry points; matchbox replaced
+# by the page's WebRTC). Its lobby files changed only off the wire (Lobby.BrowserName is [IgnoreMember]; MatchmakingService's spectator
+# checks are client logic): TFEX_PROTOCOL moves to v0.29.0 with no server change.
+TFEX_VERSION=v0.29.0
 # A fork or branch with a change of ours (docs/TFEX-UPDATE.md "TF.EX from a fork"): none, the release itself.
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:b8d739f3c2ec229698a352bcbec4adfb0a18e5e647b4d60fb580484f1d59f625
+DShad.TF.EX:71092459eb2e8a3b64ceb5c364acbd265f8eaee57a34a39fdcd66e0f05514d78
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"

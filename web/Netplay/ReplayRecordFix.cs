@@ -17,9 +17,9 @@ namespace TowerFallBrowser;
 // ?env=TOWERFALL_REPLAYFIX=0 turns it off; =check also verifies the order on each call (slow).
 public static class ReplayRecordFix
 {
-	// TF.Replay's ReplayService.RemovePredictedRecords as of TF.EX 0.19.2 and v0.21.1 (IL bytes, SHA-256; the method's source is
-	// the same in both, its IL's field tokens moved).
-	private static readonly HashSet<string> Known = new() { "C74B397EF4612A8E", "50066867ADC8301E" };
+	// TF.Replay's ReplayService.RemovePredictedRecords as of TF.EX 0.19.2, v0.21.1 and v0.29.0 (IL bytes, SHA-256; the method's source is
+	// the same in all, its IL's field tokens moved).
+	private static readonly HashSet<string> Known = new() { "C74B397EF4612A8E", "50066867ADC8301E", "DB3BB64EB4E6E4F6" };
 
 	private static FieldInfo replayField, lastFrameField;
 	private static PropertyInfo recordProperty, frameProperty;
