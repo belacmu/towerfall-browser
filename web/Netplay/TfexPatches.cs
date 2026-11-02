@@ -45,7 +45,6 @@ public static class TfexPatches
 		}
 		StateSpeedups.Patch(harmony);
 		WideMapSet.Patch(harmony); // a wide rematch opens WiderSet's towers, as the lobby start does
-		RenderKeepsState.Patch(harmony); // drawing doesn't change the saved state (the Switch does the same)
 		PagePlatform.Patch(harmony); // the platform this page says it plays on: Browser (?tfexplatform=Switch to rehearse a Switch)
 		InitWindow.Patch(harmony); // a session's level held from Init on, as on a PC (Connect's worker is slower here)
 		PatchServer(harmony);

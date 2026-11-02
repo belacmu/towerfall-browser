@@ -7,6 +7,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BASE=${1:-http://localhost:8080/}
+BASE=${BASE%%\?*}   # (the page's address only: the query below is this check's)
+# no page there: say so, not nine "missing" lines (2026-11-02, a serve.py that had ended with its session)
+curl -sf -o /dev/null --max-time 5 "$BASE" || { echo "no page at $BASE: start it first (python3 tools/serve.py <port>, on a fresh tools/build.sh)" >&2; exit 2; }
 # ?tfexplatform=Switch also checks PagePlatform's platform claim.
 URL="${BASE%/}/?mute&nointro&autoplay&mods=TF.EX&tfexplatform=Switch"
 log=$(mktemp)
@@ -28,6 +31,8 @@ expect=(
 # Lines a patch logs when TF.EX isn't as it expects.
 refuse="MISSING|isn't as expected|members missing|changed \(|not found|couldn't|stays as it is|Unhandled|Exception"
 
+# the page never got to TF.EX (still loading the game files into a fresh profile, or stuck): one line, not every patch "missing"
+grep -Eq "TF\.EX [0-9.]+ has been loaded" "$log" || { echo "the page didn't load TF.EX within ${SECONDS_TO_RUN:-150} s: rerun (SECONDS_TO_RUN=300 for a slow machine)" >&2; tail -5 "$log" >&2; exit 2; }
 fail=0
 for e in "${expect[@]}"; do
 	grep -Eq "$e" "$log" || { echo "missing: $e"; fail=1; }
