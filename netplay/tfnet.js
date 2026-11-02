@@ -794,6 +794,23 @@ LibraryTFWs.tfclip_write = function (text) {
 	navigator.clipboard?.writeText(UTF8ToString(text)).catch((e) => console.warn("[clipboard] couldn't copy:", e));
 };
 
+// int tfurl_open(const char* url): opens a page in a new tab, on the page's thread (SDL_OpenURL calls window.open on the game's
+// worker, which has no window: TF.EX's SUPPORT button crashed the game, "window is not defined"). 1 when the browser opened it,
+// 0 when it refused (a popup blocker: a game pad's press isn't a user gesture to the browser, a key's is).
+LibraryTFWs.tfurl_open__proxy = "sync";
+LibraryTFWs.tfurl_open__sig = "ip";
+LibraryTFWs.tfurl_open = function (url) {
+	try {
+		const tab = window.open(UTF8ToString(url), "_blank"); // ("noopener" would make it return null either way)
+		if (!tab) return 0;
+		tab.opener = null;
+		return 1;
+	} catch (e) {
+		console.warn("[url] couldn't open:", e);
+		return 0;
+	}
+};
+
 autoAddDeps(LibraryTFWs, "$TFWs");
 mergeInto(LibraryManager.library, LibraryTFWs);
 
