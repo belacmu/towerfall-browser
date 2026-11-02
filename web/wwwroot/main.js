@@ -76,7 +76,7 @@ function showOverlay() {
 	document.body.classList.remove("playing");
 }
 const playing = () => document.body.classList.contains("playing");
-document.addEventListener("touchstart", (e) => playing() && !e.target.closest?.("button") && e.preventDefault(), { passive: false });
+document.addEventListener("touchstart", (e) => playing() && !e.target.closest?.("button, a") && e.preventDefault(), { passive: false });
 for (const type of ["touchmove", "selectstart", "contextmenu", "gesturestart", "dblclick"]) {
 	document.addEventListener(type, (e) => playing() && e.preventDefault(), { passive: false });
 }
