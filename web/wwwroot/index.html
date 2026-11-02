@@ -138,6 +138,20 @@
 			}
 			#corner button:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 			#corner button:disabled { cursor: default; }
+			/* A page the game asked to open that the browser refused (no tap or click led to it, e.g. a game pad's press): a tap here
+			   opens it (see towerfallOfferLink in main.js). */
+			#openLink {
+				pointer-events: auto;
+				max-width: min(92vw, 440px);
+				padding: 8px 12px;
+				border-radius: 8px;
+				border: 2px solid rgba(255, 255, 255, 0.6);
+				background: rgba(0, 0, 0, 0.75);
+				color: #fff;
+				font-size: 12px;
+				overflow-wrap: anywhere;
+			}
+			#openLink[hidden] { display: none; }
 			/* The Stats panel (the Stats button; see stats.js): small, so the game stays playable under it. */
 			#statsPanel {
 				max-width: min(92vw, 440px);
@@ -417,6 +431,7 @@
 				<button id="aiToggle" title="Pick computer opponents (the AI mods)" hidden>AI: off</button>
 				<button id="statsToggle" title="Performance numbers (frame times, online ticks, ping…)" hidden>Stats</button>
 			</div>
+			<a id="openLink" target="_blank" rel="noopener" hidden></a>
 			<div id="aiPanel" hidden></div>
 			<div id="statsPanel" hidden>
 				<pre></pre>

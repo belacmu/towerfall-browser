@@ -796,13 +796,18 @@ LibraryTFWs.tfclip_write = function (text) {
 
 // int tfurl_open(const char* url): opens a page in a new tab, on the page's thread (SDL_OpenURL calls window.open on the game's
 // worker, which has no window: TF.EX's SUPPORT button crashed the game, "window is not defined"). 1 when the browser opened it,
-// 0 when it refused (a popup blocker: a game pad's press isn't a user gesture to the browser, a key's is).
+// 0 when it refused (a popup blocker: a game pad's press isn't a user gesture to the browser, a key's is); the page then shows a
+// link a tap opens.
 LibraryTFWs.tfurl_open__proxy = "sync";
 LibraryTFWs.tfurl_open__sig = "ip";
 LibraryTFWs.tfurl_open = function (url) {
 	try {
-		const tab = window.open(UTF8ToString(url), "_blank"); // ("noopener" would make it return null either way)
-		if (!tab) return 0;
+		const address = UTF8ToString(url);
+		const tab = window.open(address, "_blank"); // ("noopener" would make it return null either way)
+		if (!tab) {
+			self.towerfallOfferLink?.(address); // a link a tap opens (main.js)
+			return 0;
+		}
 		tab.opener = null;
 		return 1;
 	} catch (e) {

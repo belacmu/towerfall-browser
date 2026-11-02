@@ -967,6 +967,22 @@ async function main() {
 		const text = e.clipboardData?.getData("text");
 		if (text) exports.BrowserHost.SetClipboardText(text);
 	});
+	// A page the game couldn't open (netplay/tfnet.js's tfurl_open: the browser opens new tabs only from a tap, click or key
+	// press, and a game pad's press, or one that reached the page late through the game's worker, isn't one): a link in the corner
+	// that a tap opens, for 20 s.
+	const openLink = document.getElementById("openLink");
+	let openLinkTimer;
+	self.towerfallOfferLink = (url) => {
+		openLink.href = url;
+		openLink.textContent = `Open ${url.replace(/^https?:\/\//, "")}`;
+		openLink.hidden = false;
+		clearTimeout(openLinkTimer);
+		openLinkTimer = setTimeout(() => (openLink.hidden = true), 20_000);
+	};
+	openLink.addEventListener("click", () => {
+		openLink.hidden = true;
+		document.getElementById("canvas").focus();
+	});
 	const startMode = new URLSearchParams(location.search).get("mode") ?? (showIntro ? null : "menu");
 	if (startMode) await exports.BrowserHost.SetStartMode(startMode);
 	// The Stats panel and performance reports (stats.js).
