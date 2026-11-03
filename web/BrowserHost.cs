@@ -306,6 +306,7 @@ public static partial class BrowserHost
 				lastKeys = now;
 			}
 			TouchGamepad.Update();
+			PadBridge.Update();
 			GameMusic.Update();
 			LoaderAi.Update();
 			TickCatchUp.BeforeFrame();
@@ -439,6 +440,21 @@ public static partial class BrowserHost
 	internal static Task SetTouchGamepad(int buttons, int x, int y)
 	{
 		TouchGamepad.Set(buttons, x, y);
+		return Task.CompletedTask;
+	}
+
+	// A physical controller's state (wwwroot/pads.js), or its removal; see PadBridge.
+	[JSExport]
+	internal static Task SetPad(int slot, int buttons, int lx, int ly, int rx, int ry, int lt, int rt)
+	{
+		PadBridge.Set(slot, buttons, lx, ly, rx, ry, lt, rt);
+		return Task.CompletedTask;
+	}
+
+	[JSExport]
+	internal static Task ReleasePad(int slot)
+	{
+		PadBridge.Release(slot);
 		return Task.CompletedTask;
 	}
 

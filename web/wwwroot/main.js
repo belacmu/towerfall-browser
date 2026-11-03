@@ -4,6 +4,7 @@
 
 import { addDarkWorld, forgetGame, fromDataTransfer, fromDirectoryHandle, fromFileList, fromServer, fromZip, importedGame, importGame, importMusic, locateDarkWorld, locateGame, missingFiles, missingMusic, MUSIC, syncFortRise } from "./gamefiles.js";
 import * as Mods from "./mods.js";
+import { startPads } from "./pads.js";
 import { createTouchControls, saveTouchWanted, touchWanted } from "./touch.js";
 import { reportFailure, startStats } from "./stats.js";
 
@@ -948,6 +949,8 @@ async function main() {
 	hideOverlay();
 	$("canvas").focus();
 	host = exports.BrowserHost;
+	// Bluetooth/USB controllers: one virtual gamepad per physical pad (up to 8).
+	startPads((slot, ...state) => host.SetPad(slot, ...state), (slot) => host.ReleasePad(slot));
 	if (pendingMusic) offerMusic(host);
 	await applyTouch();
 	if (useFortRise()) watchAiTypes().catch(console.error);

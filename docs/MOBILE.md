@@ -208,5 +208,7 @@ in the Simulator with `xcrun simctl openurl booted "http://localhost:8081/?mute&
 - **Stick design**: the stick looks like an analog stick, but it's an 8-way switch with hysteresis
   (step 2); only the knob snapping between directions hints at that. A redesign could show how it
   works: e.g. a ring with 8 marked directions that light up as they're sent, or a d-pad look.
-- **Bluetooth controllers** may already work through SDL's Gamepad API backend; if not, the same
-  virtual-gamepad bridge can forward them from the page.
+- **Bluetooth controllers** work through the page: the game's worker has no Gamepad API, so
+  `web/wwwroot/pads.js` polls up to 8 pads and sends each one's state (SDL gamepad layout) to
+  `web/PadBridge.cs`, which plugs in one virtual gamepad per pad. Tested only with faked pads
+  (8 connect and disconnect); a real Joy-Con may need its own remap (non-"standard" mapping).
