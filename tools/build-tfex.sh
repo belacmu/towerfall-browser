@@ -4,6 +4,7 @@
 # the steps of TF.EX's .github/workflows/release.yml, without the Windows/Linux ggrs_ffi (the browser links its own,
 # netplay/). Used by tools/fetch-tfex.sh when TFEX_SOURCE is set; see docs/TFEX-UPDATE.md.
 #   tools/build-tfex.sh <owner/repo> <commit> <out.zip>
+# TFEX_LOCAL=<a local clone of that repository>: the commit is fetched from there instead of GitHub (a fork's commit not pushed yet).
 # Needs: git, zip, and the .NET 10 SDK (env.sh's, from tools/install-sdk.sh). NuGet packages come from nuget.org
 # (FortRise.Configuration, MessagePack, ...). The FortRise compile references (stripped TowerFall.Patch.dll, FNA,
 # Harmony, MonoMod.Utils) are in TF.EX's own libs/, so no FortRise or game files are needed.
@@ -19,7 +20,7 @@ source ./env.sh
 tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 git init -q "$tmp/src"
-git -C "$tmp/src" remote add origin "https://github.com/$REPO"
+git -C "$tmp/src" remote add origin "${TFEX_LOCAL:-https://github.com/$REPO}"
 git -C "$tmp/src" fetch -q --depth 1 origin "$REF"
 git -C "$tmp/src" checkout -q FETCH_HEAD
 echo "TF.EX from $REPO at $(git -C "$tmp/src" rev-parse HEAD), meta.json version $(sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' "$tmp/src/src/network/TF.EX.Core/meta.json" | head -1)"
