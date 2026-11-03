@@ -96,8 +96,20 @@ public static partial class XplayVersus
 		harmony.Patch(gate.GetMethod("IsVersusMatchResultsShown", any), postfix: Hm(nameof(LobbyResultsPostfix)));
 		MethodInfo matchEnded = Find("TF.EX.Domain.Services.MatchmakingService")?.GetMethod("NotifyMatchEnded", any);
 		if (matchEnded != null) harmony.Patch(matchEnded, prefix: Hm(nameof(LobbyMatchEndedPrefix)));
+		MethodInfo ownLobby = Find("TF.EX.Domain.Services.MatchmakingService")?.GetMethod("UpdateOwnLobby", any);
+		if (ownLobby != null) harmony.Patch(ownLobby, postfix: Hm(nameof(LobbyJoinedPostfix)));
 		MethodInfo reset = manager.GetMethod("Reset", any);
 		harmony.Patch(reset, prefix: Hm(nameof(LobbyResetPrefix)));
+	}
+
+	// The harness's sign that this page is in a lobby (its own join, or the host's create): lobby-auto.sh joins every page at once and
+	// retries only the ones without it. Once per page load (TF.EX calls UpdateOwnLobby on every lobby update).
+	private static bool lobbyJoinedLogged;
+	private static void LobbyJoinedPostfix()
+	{
+		if (lobbyJoinedLogged) return;
+		lobbyJoinedLogged = true;
+		LobbyLog("in a lobby (TF.EX's own lobby set)");
 	}
 
 	private static void LobbyInitPostfix(object __instance)
