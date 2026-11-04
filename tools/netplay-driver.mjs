@@ -3,7 +3,8 @@
 // Each player is its own Chrome with its own profile (so its own OPFS). Control them over HTTP:
 //   curl 'localhost:9400/A/key?k=Enter'          press a key (DOM key name: Enter, ArrowDown, x, ...)
 //   curl 'localhost:9400/A/type?t=ABCD'          type text, one key at a time
-//   curl 'localhost:9400/A/shot' -o a.png        screenshot
+//   curl 'localhost:9400/A/shot' -o a.png        screenshot of the game, without the page's own buttons
+//                                                (?page: with them)
 //   curl 'localhost:9400/A/log?from=0'           in-page log lines from that index
 //   curl 'localhost:9400/A/console?from=0'       console output of all threads (works while hung)
 //   curl 'localhost:9400/A/eval' --data 'js'     evaluate in the page
@@ -288,7 +289,11 @@ http.createServer(async (req, res) => {
 			for (const ch of u.searchParams.get("t")) await press(p, ch);
 			res.end("ok\n");
 		} else if (action === "shot") {
+			const corner = (style) => p.send("Runtime.evaluate", { expression: `document.getElementById("corner")?.style.setProperty("visibility", "${style}")` });
+			const game = !u.searchParams.has("page");
+			if (game) await corner("hidden");
 			const r = await p.send("Page.captureScreenshot", { format: "png" });
+			if (game) await corner("");
 			res.writeHead(200, { "content-type": "image/png" }).end(Buffer.from(r.data ?? "", "base64"));
 		} else if (action === "log") {
 			const from = Number(u.searchParams.get("from") ?? 0);
