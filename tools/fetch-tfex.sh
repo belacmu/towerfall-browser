@@ -11,16 +11,15 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.29.0 (2026-11-01): v0.28.1 plus #310 (icicle bolt arrow cannotHit, the replay seed, the ghost's scale) and #315 (spectating ranked
-# matches). Same ggrs-ffi v3.0.1 as v0.28.1: the browser keeps tools/build-netplay.sh's ggrs-ffi (same entry points; matchbox replaced
-# by the page's WebRTC). Its lobby files changed only off the wire (Lobby.BrowserName is [IgnoreMember]; MatchmakingService's spectator
-# checks are client logic): TFEX_PROTOCOL moves to v0.29.0 with no server change.
-TFEX_VERSION=v0.29.0
+# v0.29.1 (2026-11-07): v0.29.0 plus #312 (TEAM REVIVE in netplay team modes) and #317 (a bomb exploding while an archer dies: TF.State
+# keeps a removed death arrow, Player key 60). Same ggrs-ffi v3.0.1 as v0.28.1 / v0.29.0: the browser keeps tools/build-netplay.sh's
+# ggrs-ffi. No lobby protocol file changed: TFEX_PROTOCOL moves to v0.29.1 with no server change.
+TFEX_VERSION=v0.29.1
 # A fork or branch with a change of ours (docs/TFEX-UPDATE.md "TF.EX from a fork"): none, the release itself.
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:71092459eb2e8a3b64ceb5c364acbd265f8eaee57a34a39fdcd66e0f05514d78
+DShad.TF.EX:744b5713156ec57db7a74c72405913b2a901665ba3be48f9a1a075a5cc2fff12
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"

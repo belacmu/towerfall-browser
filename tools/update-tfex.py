@@ -75,6 +75,7 @@ def main():
         return
     current = pinned(FETCH_TFEX, "TFEX_VERSION")
     ggrs_commit = pinned(BUILD_NETPLAY, "GGRS_FFI_COMMIT")
+    ggrs_accepted = re.search(r'^GGRS_FFI_ACCEPTED="([^"]*)"', open(BUILD_NETPLAY).read(), re.M).group(1).split()
     fortrise = pinned(FETCH_FORTRISE, "FORTRISE_VERSION")
 
     release = api("repos/Fcornaire/TF.EX/releases/latest")
@@ -93,11 +94,12 @@ def main():
     else:
         bundled = max(ggrs_releases, key=lambda r: r["published_at"])
         bundled_commit = api(f"repos/Fcornaire/ggrs-ffi/commits/{bundled['tag_name']}")["sha"]
-        print(f"It bundles ggrs-ffi {bundled['tag_name']} ({bundled_commit[:12]}); the browser builds {ggrs_commit[:12]}")
-        if bundled_commit != ggrs_commit:
+        print(f"It bundles ggrs-ffi {bundled['tag_name']} ({bundled_commit[:12]}); the browser builds {ggrs_commit[:12]}"
+              + (" (that release is in GGRS_FFI_ACCEPTED)" if bundled_commit in ggrs_accepted else ""))
+        if bundled_commit != ggrs_commit and bundled_commit not in ggrs_accepted:
             problems.append(
                 f"it bundles ggrs-ffi {bundled['tag_name']} ({bundled_commit}), but the browser builds {ggrs_commit}: "
-                "update GGRS_FFI_COMMIT in tools/build-netplay.sh (and netplay/ggrs-ffi.patch if needed), rebuild, and test online play"
+                "update GGRS_FFI_COMMIT in tools/build-netplay.sh (and netplay/ggrs-ffi.patch if needed), rebuild, and test online play; or, when its entry points are unchanged, add it to GGRS_FFI_ACCEPTED there"
             )
 
     asset_name = f"DShad.TF.EX-{tag}.zip"

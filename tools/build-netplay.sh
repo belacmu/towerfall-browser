@@ -12,6 +12,10 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 GGRS_FFI_COMMIT=2faa81cccce6e7ebec9ec6b7adb882418bacf0b4
 GGRS_COMMIT=c510c22e66a35786599a58c15d189bffb4a46dae
+# ggrs-ffi releases a TF.EX release may bundle while the browser keeps building GGRS_FFI_COMMIT above (checked by hand: the same
+# entry points, the transport changes only in code the browser replaces). tools/update-tfex.py adopts a TF.EX that bundles one of
+# these. v3.0.1 (2f8a45a, matchbox 0.15 / SCTP fix; v3.0.0's several local handles are in our patch): TF.EX v0.28.1, v0.29.0, v0.29.1.
+GGRS_FFI_ACCEPTED="2f8a45a3c85b706fb19b6f1814f76d65182d05e1"
 # A nightly on LLVM 19, like Emscripten 3.1.56: newer LLVMs tag objects with WebAssembly features
 # (bulk-memory-opt, call-indirect-overlong) that its wasm-opt doesn't know.
 RUST_TOOLCHAIN=nightly-2025-02-01

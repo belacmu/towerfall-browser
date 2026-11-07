@@ -22,6 +22,9 @@ Before merging it:
 `python3 tools/update-tfex.py --check` says why. Each reason has a fix.
 
 **"it bundles ggrs-ffi X, but the browser builds Y"**: the native library moved.
+When its entry points (`core/src/ffi.rs`) and GGRS's messages are unchanged and the rest only touches code the browser replaces
+(the transport, matchbox), add its commit to `GGRS_FFI_ACCEPTED` in `tools/build-netplay.sh` instead: the updater then adopts every
+TF.EX that bundles it (v3.0.1 since TF.EX v0.28.1). Otherwise:
 1. In `tools/build-netplay.sh`, set `GGRS_FFI_COMMIT` to that commit. Set `GGRS_COMMIT` to the newest commit on Fcornaire/ggrs
    `develop` from before the TF.EX release; ggrs-ffi follows that branch.
 2. Rebase the patches. In a scratch clone of each repo at the new commit, run `patch -p1 < netplay/ggrs-ffi.patch` (and
