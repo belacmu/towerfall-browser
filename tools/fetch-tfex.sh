@@ -11,15 +11,16 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.29.1 (2026-11-07): v0.29.0 plus #312 (TEAM REVIVE in netplay team modes) and #317 (a bomb exploding while an archer dies: TF.State
-# keeps a removed death arrow, Player key 60). Same ggrs-ffi v3.0.1 as v0.28.1 / v0.29.0: the browser keeps tools/build-netplay.sh's
-# ggrs-ffi. No lobby protocol file changed: TFEX_PROTOCOL moves to v0.29.1 with no server change.
-TFEX_VERSION=v0.29.1
+# v0.30.0 (2026-11-13): v0.29.1 plus #319 (TF.State: HeavyPhysicsObject, ice, Player.AimDirection), #320 (a spectator can host a
+# private lobby: Lobby.IsSpectatorHosted, a lobby protocol change) and #321 (revivers ticked in a fixed order). Same ggrs-ffi v3.0.1.
+# Pinned here for switch-online's lobby harness; cloudflare/tfex-server doesn't do spectator-hosted lobbies yet (TFEX_PROTOCOL stays
+# v0.29.1 until it does, issue #102).
+TFEX_VERSION=v0.30.0
 # A fork or branch with a change of ours (docs/TFEX-UPDATE.md "TF.EX from a fork"): none, the release itself.
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:744b5713156ec57db7a74c72405913b2a901665ba3be48f9a1a075a5cc2fff12
+DShad.TF.EX:7e1116186570b1095d66ca3964581e12faabc678fc3984d036d28658222b2822
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
