@@ -359,6 +359,7 @@ public static partial class XplayVersus
 	private static object NetPolledInput()
 	{
 		if (!netMode || !netStarted) return null;
+		if (netSeat < 0 || netSeat >= scripts.Length) return null;   // a spectator (XplayLobby: not in the session's players): no seat, no script
 		netPolledCalls++;
 		int c = (int)netplayCurrentFrame.Invoke(null, null);
 		int t = c + netEffDelay + 1 - netInputOrigin;
