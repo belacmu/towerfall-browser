@@ -11,16 +11,16 @@
 # pin alone. See docs/TFEX-UPDATE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# v0.30.0 (2026-11-13): v0.29.1 plus #319 (TF.State: HeavyPhysicsObject, ice, Player.AimDirection), #320 (a spectator can host a
-# private lobby: Lobby.IsSpectatorHosted, a lobby protocol change) and #321 (revivers ticked in a fixed order). Same ggrs-ffi v3.0.1.
-# Pinned here for switch-online's lobby harness; cloudflare/tfex-server doesn't do spectator-hosted lobbies yet (TFEX_PROTOCOL stays
-# v0.29.1 until it does, issue #102).
-TFEX_VERSION=v0.30.0
+# v0.31.0 (2026-11-22): v0.30.0 plus #322 (the instant replay saves and restores each player's input) and #323 (Ranked's match card
+# and NO CONTEST offer; the pause menu also opens during a round's end). Same ggrs-ffi v3.0.1. Its protocol changes are Ranked's only
+# (RankedConfirm / RankedAccept, NO CONTEST, ping reports): cloudflare/tfex-server has no Ranked (RANKED IS NOT AVAILABLE) and ignores
+# unknown messages. Pinned for switch-online's lobby harness; TFEX_PROTOCOL stays v0.29.1 until spectator-hosted lobbies (issue #102).
+TFEX_VERSION=v0.31.0
 # A fork or branch with a change of ours (docs/TFEX-UPDATE.md "TF.EX from a fork"): none, the release itself.
 TFEX_SOURCE=${TFEX_SOURCE-}
 # The TF.EX zip bundles all four of its mods (TF.EX, TF.State, TF.Replay, TF.InputDisplayer).
 ZIPS="
-DShad.TF.EX:7e1116186570b1095d66ca3964581e12faabc678fc3984d036d28658222b2822
+DShad.TF.EX:0c7253c8163355816842f2fb6f0a734c62c6e6f1cae6ef003faf2091fca2e3e1
 "
 OUT=vendor/tfex
 want="$TFEX_VERSION $TFEX_SOURCE $(shasum -a 256 tools/fetch-tfex.sh | cut -c1-16)"
