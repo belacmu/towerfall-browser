@@ -31,15 +31,22 @@ public static class StateDump
 		return null;
 	}
 
+	private static int lastFrame = -1, skipped;
+	private static string lastB64;
+
 	private static void SavePrefix(byte[] state)
 	{
 		if (state == null) return;
 		try
 		{
-			// by frame, as the Switch's hw.txt statedump (a frame re-saved by a rollback logs again: the last is what GGRS kept)
+			// by frame, as the Switch's hw.txt statedump (a frame re-saved by a rollback logs again: the last is what GGRS kept), but not
+			// a re-save with that frame's last dumped bytes: a stalled session re-saves the same frame on every update (as the Switch)
 			int frame = (int)currentFrame.GetValue(null);
 			if (frame % every != 0) return;
 			string b64 = Convert.ToBase64String(state);
+			if (frame == lastFrame && b64 == lastB64) { skipped++; return; }
+			if (skipped > 0) Console.WriteLine($"[state] dump frame {lastFrame}: {skipped} more saves with the same bytes, not logged");
+			lastFrame = frame; lastB64 = b64; skipped = 0;
 			int parts = Math.Max(1, (b64.Length + LineChars - 1) / LineChars);
 			var sb = new System.Text.StringBuilder(b64.Length + parts * 48);
 			for (int k = 0; k < parts; k++)

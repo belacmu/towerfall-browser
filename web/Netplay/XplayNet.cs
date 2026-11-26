@@ -113,6 +113,12 @@ public static partial class XplayVersus
 		if (scriptArg.Length > 0 && scriptArg != "-" && !scriptArg.Contains(':') && File.Exists(scriptArg)) scriptArg = File.ReadAllText(scriptArg).Trim();
 		scripts[0] = new List<Step>();
 		scripts[1] = new List<Step>();
+		if (netSeat >= scripts.Length)   // a wide lobby's seat past 4 (WiderSet's seats): grow to it, the seats between stand idle
+		{
+			int n = scripts.Length;
+			Array.Resize(ref scripts, netSeat + 1);
+			for (int i = n; i < scripts.Length; i++) scripts[i] = new List<Step>();
+		}
 		scripts[netSeat] = Parse(scriptArg);
 		// The room URL: peer ids go in the query (the lobby does the same with ?peer=); relay rooms also need the other peer's id.
 		string sep = roomUrl.Contains('?') ? "&" : "?";
@@ -353,10 +359,12 @@ public static partial class XplayVersus
 	private static object NetPolledInput()
 	{
 		if (!netMode || !netStarted) return null;
+		if (netSeat < 0 || netSeat >= scripts.Length) return null;   // a spectator (XplayLobby: not in the session's players): no seat, no script
 		netPolledCalls++;
 		int c = (int)netplayCurrentFrame.Invoke(null, null);
 		int t = c + netEffDelay + 1 - netInputOrigin;
 		object input = Activator.CreateInstance(netInputType);
+		if (netSeat >= scripts.Length) return input;   // a lobby handle past the scripts (a wide lobby's 5th seat on): stands idle
 		List<Step> steps = scripts[netSeat];
 		Step? cur = StepAt(steps, t), prev = StepAt(steps, t - 1);
 		if (cur is not Step s) return input;

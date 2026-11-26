@@ -306,6 +306,7 @@ public static partial class BrowserHost
 				lastKeys = now;
 			}
 			TouchGamepad.Update();
+			TestGamepads.Update();
 			GameMusic.Update();
 			LoaderAi.Update();
 			TickCatchUp.BeforeFrame();
@@ -715,6 +716,12 @@ public static partial class BrowserHost
 			{
 				// Two-player scripted TF.EX sync-test match with a per-tick log (web/Netplay/XplayVersus.cs).
 				Console.WriteLine($"[command] xplay2: {XplayVersus.Start(towerFall, game, words)}");
+				return;
+			}
+			if (words[0] == "pad")
+			{
+				// Extra virtual gamepads the Switch harness presses (web/Netplay/TestGamepads.cs): local guests in a TF.EX lobby
+				Console.WriteLine($"[command] pad: {TestGamepads.Command(game, words)}");
 				return;
 			}
 			if (words[0] == "xnet")
